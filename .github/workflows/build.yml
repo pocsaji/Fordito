@@ -492,8 +492,17 @@ jobs:
       - name: Build debug APK
         run: gradle assembleDebug
 
+      - name: Find APK
+        run: |
+          echo "APK files:"
+          find app/build/outputs -name "*.apk" -type f -print
+          mkdir -p artifact
+          cp $(find app/build/outputs -name "*.apk" -type f | head -n 1) artifact/ForditoKonzol-MicTest-v02.apk
+          ls -lah artifact
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ForditoKonzol-MicTest-v02-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: ForditoKonzol-MicTest-v02-apk
+          path: artifact/*.apk
+          if-no-files-found: error
