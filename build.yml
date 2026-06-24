@@ -1,0 +1,405 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create Android project
+        run: |
+          mkdir -p app/src/main/java/com/attila/forditokonzol
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = 'ForditoKonzol'
+          include ':app'
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+          }
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.attila.forditokonzol'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'com.attila.forditokonzol'
+                  minSdk 26
+                  targetSdk 35
+                  versionCode 1
+                  versionName '0.1'
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+              <uses-permission android:name="android.permission.INTERNET"/>
+
+              <queries>
+                  <intent>
+                      <action android:name="android.speech.RecognitionService"/>
+                  </intent>
+              </queries>
+
+              <application
+                  android:theme="@style/AppTheme"
+                  android:label="Fordító Konzol"
+                  android:allowBackup="false"
+                  android:supportsRtl="true">
+                  <activity
+                      android:name=".MainActivity"
+                      android:screenOrientation="portrait"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          mkdir -p app/src/main/res/values
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:navigationBarColor">#101318</item>
+                  <item name="android:statusBarColor">#101318</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/java/com/attila/forditokonzol/MainActivity.java <<'EOF'
+          package com.attila.forditokonzol;
+
+          import android.Manifest;
+          import android.app.*;
+          import android.os.*;
+          import android.content.*;
+          import android.content.pm.PackageManager;
+          import android.graphics.Color;
+          import android.speech.*;
+          import android.view.*;
+          import android.view.inputmethod.EditorInfo;
+          import android.widget.*;
+          import java.util.*;
+
+          public class MainActivity extends Activity {
+              private TextView title, state;
+              private EditText topText, bottomText;
+              private Button micBtn, autoBtn, translateBtn, leftLangBtn, rightLangBtn;
+              private SpeechRecognizer recognizer;
+              private Intent speechIntent;
+
+              private String leftLang = "hu-HU";
+              private String rightLang = "fr-FR";
+              private boolean topActive = true;
+              private boolean micOn = false;
+              private boolean autoOn = false;
+              private int silenceSeconds = 3;
+
+              private final String[][] langs = {
+                      {"Magyar", "HU", "hu-HU"},
+                      {"Francia", "FR", "fr-FR"},
+                      {"Angol", "EN", "en-US"},
+                      {"Német", "DE", "de-DE"},
+                      {"Olasz", "IT", "it-IT"},
+                      {"Spanyol", "ES", "es-ES"},
+                      {"Román", "RO", "ro-RO"},
+                      {"Horvát", "HR", "hr-HR"},
+                      {"Szlovák", "SK", "sk-SK"},
+                      {"Szlovén", "SL", "sl-SI"}
+              };
+
+              @Override
+              protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  buildUi();
+                  askMicPermission();
+                  setupSpeech();
+              }
+
+              private void buildUi() {
+                  int bg = Color.rgb(16,19,24);
+                  int panel = Color.rgb(27,32,41);
+                  int border = Color.rgb(60,70,86);
+                  int text = Color.rgb(242,244,248);
+
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setPadding(18,18,18,18);
+                  root.setBackgroundColor(bg);
+                  setContentView(root);
+
+                  LinearLayout bar = new LinearLayout(this);
+                  bar.setOrientation(LinearLayout.HORIZONTAL);
+                  title = new TextView(this);
+                  title.setText("Fordító konzol v0.1");
+                  title.setTextColor(Color.LTGRAY);
+                  title.setTextSize(14);
+                  state = new TextView(this);
+                  state.setText("készenlét");
+                  state.setTextColor(Color.LTGRAY);
+                  state.setGravity(Gravity.RIGHT);
+                  bar.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+                  bar.addView(state, new LinearLayout.LayoutParams(0, -2, 1));
+                  root.addView(bar);
+
+                  topText = makeEdit("FELSŐ ABLAK");
+                  bottomText = makeEdit("ALSÓ ABLAK");
+                  root.addView(topText, new LinearLayout.LayoutParams(-1, 0, 1));
+                  root.addView(bottomText, new LinearLayout.LayoutParams(-1, 0, 1));
+
+                  LinearLayout buttons = new LinearLayout(this);
+                  buttons.setOrientation(LinearLayout.HORIZONTAL);
+                  micBtn = makeButton("MIKROFON KI");
+                  autoBtn = makeButton("AUTO KI");
+                  translateBtn = makeButton("FORDÍTSD MOST");
+                  buttons.addView(micBtn, new LinearLayout.LayoutParams(0, 62, 1));
+                  buttons.addView(autoBtn, new LinearLayout.LayoutParams(0, 62, 1));
+                  buttons.addView(translateBtn, new LinearLayout.LayoutParams(0, 62, 1));
+                  root.addView(buttons);
+
+                  LinearLayout langsRow = new LinearLayout(this);
+                  langsRow.setOrientation(LinearLayout.HORIZONTAL);
+                  leftLangBtn = makeButton("HU");
+                  rightLangBtn = makeButton("FR");
+                  langsRow.addView(leftLangBtn, new LinearLayout.LayoutParams(0, 72, 1));
+                  langsRow.addView(rightLangBtn, new LinearLayout.LayoutParams(0, 72, 1));
+                  root.addView(langsRow);
+
+                  topText.setOnFocusChangeListener((v, has) -> { if (has) pauseForEdit(); });
+                  bottomText.setOnFocusChangeListener((v, has) -> { if (has) pauseForEdit(); });
+
+                  topText.setOnEditorActionListener((v, actionId, e) -> finishEdit(actionId));
+                  bottomText.setOnEditorActionListener((v, actionId, e) -> finishEdit(actionId));
+
+                  leftLangBtn.setOnClickListener(v -> chooseLanguage(true));
+                  rightLangBtn.setOnClickListener(v -> chooseLanguage(false));
+
+                  micBtn.setOnClickListener(v -> toggleMic());
+                  autoBtn.setOnClickListener(v -> toggleAuto());
+                  autoBtn.setOnLongClickListener(v -> { chooseSilence(); return true; });
+                  translateBtn.setOnClickListener(v -> Toast.makeText(this, "Később: OpenAI API fordítás", Toast.LENGTH_SHORT).show());
+                  translateBtn.setOnLongClickListener(v -> { showMainMenu(); return true; });
+
+                  updateButtons();
+              }
+
+              private EditText makeEdit(String hint) {
+                  EditText e = new EditText(this);
+                  e.setHint(hint);
+                  e.setTextColor(Color.WHITE);
+                  e.setHintTextColor(Color.GRAY);
+                  e.setTextSize(22);
+                  e.setGravity(Gravity.TOP);
+                  e.setSingleLine(false);
+                  e.setMinLines(6);
+                  e.setBackgroundColor(Color.rgb(27,32,41));
+                  e.setPadding(18,18,18,18);
+                  e.setImeOptions(EditorInfo.IME_ACTION_DONE);
+                  return e;
+              }
+
+              private Button makeButton(String s) {
+                  Button b = new Button(this);
+                  b.setText(s);
+                  b.setTextColor(Color.WHITE);
+                  b.setTextSize(14);
+                  b.setAllCaps(false);
+                  return b;
+              }
+
+              private void askMicPermission() {
+                  if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                      requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 100);
+                  }
+              }
+
+              private void setupSpeech() {
+                  if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+                      state.setText("nincs beszédfelismerő");
+                      return;
+                  }
+                  recognizer = SpeechRecognizer.createSpeechRecognizer(this);
+                  speechIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                  speechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                  speechIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+
+                  recognizer.setRecognitionListener(new RecognitionListener() {
+                      public void onReadyForSpeech(Bundle params) { state.setText("hallgat..."); }
+                      public void onBeginningOfSpeech() { state.setText("beszéd van"); }
+                      public void onRmsChanged(float rmsdB) {}
+                      public void onBufferReceived(byte[] buffer) {}
+                      public void onEndOfSpeech() { state.setText("feldolgozás"); }
+                      public void onError(int error) {
+                          state.setText("hiba: " + error);
+                          if (micOn) restartListening();
+                      }
+                      public void onResults(Bundle results) {
+                          ArrayList<String> r = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                          if (r != null && !r.isEmpty()) appendText(r.get(0));
+                          if (micOn) restartListening();
+                      }
+                      public void onPartialResults(Bundle partialResults) {
+                          ArrayList<String> r = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                          if (r != null && !r.isEmpty()) state.setText("hallott: " + shortText(r.get(0)));
+                      }
+                      public void onEvent(int eventType, Bundle params) {}
+                  });
+              }
+
+              private void toggleMic() {
+                  if (recognizer == null) return;
+                  if (micOn) {
+                      micOn = false;
+                      recognizer.stopListening();
+                      state.setText("készenlét");
+                  } else {
+                      askMicPermission();
+                      micOn = true;
+                      startListening();
+                  }
+                  updateButtons();
+              }
+
+              private void startListening() {
+                  String lang = topActive ? leftLang : rightLang;
+                  speechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang);
+                  recognizer.startListening(speechIntent);
+              }
+
+              private void restartListening() {
+                  new Handler().postDelayed(() -> {
+                      try { startListening(); } catch (Exception ignored) {}
+                  }, 500);
+              }
+
+              private void appendText(String txt) {
+                  EditText target = topActive ? topText : bottomText;
+                  String old = target.getText().toString().trim();
+                  target.setText(old.isEmpty() ? txt : old + "\n" + txt);
+                  target.setSelection(target.getText().length());
+              }
+
+              private void pauseForEdit() {
+                  if (micOn && recognizer != null) recognizer.stopListening();
+                  state.setText("szünet / javítás");
+              }
+
+              private boolean finishEdit(int actionId) {
+                  if (actionId == EditorInfo.IME_ACTION_DONE) {
+                      topText.clearFocus();
+                      bottomText.clearFocus();
+                      state.setText("készenlét");
+                      if (micOn) startListening();
+                      return true;
+                  }
+                  return false;
+              }
+
+              private void toggleAuto() {
+                  autoOn = !autoOn;
+                  updateButtons();
+              }
+
+              private void updateButtons() {
+                  micBtn.setText(micOn ? "MIKROFON BE" : "MIKROFON KI");
+                  micBtn.setBackgroundColor(micOn ? Color.rgb(30,130,70) : Color.rgb(150,40,40));
+                  autoBtn.setText(autoOn ? "AUTO BE (" + silenceSeconds + " mp)" : "AUTO KI");
+                  autoBtn.setBackgroundColor(autoOn ? Color.rgb(40,95,150) : Color.rgb(55,60,70));
+                  leftLangBtn.setText(codeOf(leftLang));
+                  rightLangBtn.setText(codeOf(rightLang));
+              }
+
+              private void chooseLanguage(boolean left) {
+                  String[] names = new String[langs.length];
+                  for (int i=0;i<langs.length;i++) names[i] = langs[i][0] + " (" + langs[i][1] + ")";
+                  new AlertDialog.Builder(this).setTitle(left ? "Felső ablak nyelve" : "Alsó ablak nyelve")
+                          .setItems(names, (d, which) -> {
+                              if (left) { leftLang = langs[which][2]; topActive = true; }
+                              else { rightLang = langs[which][2]; topActive = false; }
+                              updateButtons();
+                          }).show();
+              }
+
+              private void chooseSilence() {
+                  String[] vals = {"1 mp","2 mp","3 mp","4 mp","5 mp","6 mp","7 mp","8 mp","9 mp","10 mp"};
+                  new AlertDialog.Builder(this).setTitle("Auto fordítás várakozás")
+                          .setItems(vals, (d, which) -> { silenceSeconds = which + 1; updateButtons(); }).show();
+              }
+
+              private void showMainMenu() {
+                  String[] items = {"Felső ablak aktív", "Alsó ablak aktív", "Szövegek törlése"};
+                  new AlertDialog.Builder(this).setTitle("Menü")
+                          .setItems(items, (d, which) -> {
+                              if (which == 0) topActive = true;
+                              if (which == 1) topActive = false;
+                              if (which == 2) { topText.setText(""); bottomText.setText(""); }
+                          }).show();
+              }
+
+              private String codeOf(String lang) {
+                  for (String[] l : langs) if (l[2].equals(lang)) return l[1];
+                  return lang;
+              }
+
+              private String shortText(String s) {
+                  return s.length() > 24 ? s.substring(0,24) + "..." : s;
+              }
+
+              @Override
+              protected void onDestroy() {
+                  if (recognizer != null) recognizer.destroy();
+                  super.onDestroy();
+              }
+          }
+          EOF
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Build debug APK
+        run: gradle assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ForditoKonzol-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
