@@ -29,7 +29,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "com.attila.forditokonzol"; minSdk = 26; targetSdk = 35; versionCode = 16; versionName = "1.6" }
+              defaultConfig { applicationId = "com.attila.forditokonzol"; minSdk = 26; targetSdk = 35; versionCode = 18; versionName = "1.8" }
           }
           dependencies {
               implementation("com.squareup.okhttp3:okhttp:4.12.0")
@@ -74,8 +74,10 @@ jobs:
           import android.graphics.Color;
           import android.media.*;
           import android.os.*;
+          import android.text.*;
           import android.util.Base64;
           import android.view.Gravity;
+          import android.view.inputmethod.InputMethodManager;
           import android.widget.*;
           import org.json.*;
           import java.util.*;
@@ -100,6 +102,10 @@ jobs:
               long sessionStart = 0L;
               String pendingOutput = "";
               String pendingManualText = "";
+              boolean manualResponseMode = false;
+              boolean programmaticChange = false;
+              int topManualStart = -1;
+              int bottomManualStart = -1;
 
               String apiKey = "";
               String model = "gpt-realtime-2";
@@ -199,7 +205,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v1.6");
+                  TextView title = label("Fordító Konzol v1.8");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -229,6 +235,8 @@ jobs:
 
                   topBox.setOnClickListener(v -> { manualTopSource = true; updateButtons(); });
                   bottomBox.setOnClickListener(v -> { manualTopSource = false; updateButtons(); });
+                  topBox.addTextChangedListener(manualWatcher(true));
+                  bottomBox.addTextChangedListener(manualWatcher(false));
                   topLangBtn.setOnClickListener(v -> chooseLang(true));
                   bottomLangBtn.setOnClickListener(v -> chooseLang(false));
                   micBtn.setOnClickListener(v -> { if(streaming) stop(); else start(true); });
@@ -275,6 +283,24 @@ jobs:
                   e.setBackgroundColor(Color.rgb(27,32,41));
                   e.setPadding(14,14,14,14);
                   return e;
+              }
+
+              TextWatcher manualWatcher(final boolean top) {
+                  return new TextWatcher() {
+                      public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                      public void onTextChanged(CharSequence s, int start, int before, int count) {
+                          if(programmaticChange) return;
+                          if(top) {
+                              manualTopSource = true;
+                              if(topManualStart < 0) topManualStart = Math.max(0, Math.min(start, s.length()));
+                          } else {
+                              manualTopSource = false;
+                              if(bottomManualStart < 0) bottomManualStart = Math.max(0, Math.min(start, s.length()));
+                          }
+                          updateButtons();
+                      }
+                      public void afterTextChanged(Editable e) {}
+                  };
               }
 
               void reqMic() {
@@ -468,11 +494,18 @@ jobs:
 
               void manualTranslate() {
                   EditText source = manualTopSource ? topBox : bottomBox;
-                  String text = source.getText().toString().trim();
+                  String text = manualSourceText(source, manualTopSource).trim();
                   if(text.isEmpty()) {
-                      Toast.makeText(this, "Nincs fordítandó szöveg.", Toast.LENGTH_LONG).show();
+                      Toast.makeText(this, "Nincs új kézi bevitel. Írj a felső vagy alsó ablakba, utána FORDÍT.", Toast.LENGTH_LONG).show();
                       return;
                   }
+
+                  source.clearFocus();
+                  source.setSelection(source.getText().length());
+                  try {
+                      InputMethodManager imm = (InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
+                      imm.hideSoftInputFromWindow(source.getWindowToken(), 0);
+                  } catch(Exception ignored) {}
 
                   if(!hasKey()) { showApi(); return; }
 
@@ -482,6 +515,21 @@ jobs:
                   } else {
                       sendManualText(text);
                   }
+              }
+
+              String manualSourceText(EditText source, boolean top) {
+                  String all = source.getText().toString();
+                  if(all.length() == 0) return "";
+
+                  int start = top ? topManualStart : bottomManualStart;
+                  if(start < 0 || start > all.length()) return "";
+
+                  return all.substring(start);
+              }
+
+              void clearManualBlock(boolean top) {
+                  if(top) topManualStart = -1;
+                  else bottomManualStart = -1;
               }
 
               void sendManualText(String text) {
@@ -506,7 +554,8 @@ jobs:
                       c.put("type", "input_text");
                       String srcCode = manualTopSource ? code(topLang) : code(bottomLang);
                       String tgtCode = manualTopSource ? code(bottomLang) : code(topLang);
-                      c.put("text", "Manual text input. Source language is " + srcCode + ". Target language is " + tgtCode + ". Output exactly three lines: SOURCE_LANG: " + srcCode + " ORIGINAL: the corrected source text TRANSLATION: the translation. Text:\n" + text);
+                      manualResponseMode = true;
+                      c.put("text", "Manual text input. Source language is " + srcCode + ". Target language is " + tgtCode + ". Translate ONLY the following text. Output exactly one line in this format: TRANSLATION: <translation>. Do not repeat the source text. Text:\n" + text);
                       content.put(c);
                       item.put("content", content);
                       msg.put("item", item);
@@ -531,6 +580,15 @@ jobs:
 
                   if(original.length() == 0 && translation.length() == 0) {
                       translation = out;
+                  }
+
+                  if(manualResponseMode) {
+                      manualResponseMode = false;
+                      boolean sourceWasTop = manualTopSource;
+                      EditText dstBox = sourceWasTop ? bottomBox : topBox;
+                      if(translation.length() > 0) appendTo(dstBox, translation + "\n");
+                      clearManualBlock(sourceWasTop);
+                      return;
                   }
 
                   boolean sourceIsTop = sourceLang.contains(code(topLang));
@@ -562,10 +620,15 @@ jobs:
 
               void appendTo(EditText target, String s) {
                   if(s == null || s.length() == 0) return;
-                  String old = target.getText().toString();
-                  if(old.length() > 0 && !old.endsWith("\n")) target.append("\n");
-                  target.append(s);
-                  target.setSelection(target.getText().length());
+                  programmaticChange = true;
+                  try {
+                      String old = target.getText().toString();
+                      if(old.length() > 0 && !old.endsWith("\n")) target.append("\n");
+                      target.append(s);
+                      target.setSelection(target.getText().length());
+                  } finally {
+                      programmaticChange = false;
+                  }
               }
 
               void appendDelta(String s) {
@@ -605,9 +668,9 @@ jobs:
                       if(w==2) chooseProfile();
                       if(w==3) chooseMode();
                       if(w==4) chooseVad();
-                      if(w==5) topBox.setText("");
-                      if(w==6) bottomBox.setText("");
-                      if(w==7) { topBox.setText(""); bottomBox.setText(""); }
+                      if(w==5) { programmaticChange=true; topBox.setText(""); programmaticChange=false; topManualStart=-1; }
+                      if(w==6) { programmaticChange=true; bottomBox.setText(""); programmaticChange=false; bottomManualStart=-1; }
+                      if(w==7) { programmaticChange=true; topBox.setText(""); bottomBox.setText(""); programmaticChange=false; topManualStart=-1; bottomManualStart=-1; }
                       updateButtons();
                   }).show();
               }
@@ -738,12 +801,12 @@ jobs:
       - name: Find APK
         run: |
           mkdir -p artifact
-          cp $(find app/build/outputs -name "*.apk" -type f | head -n 1) artifact/ForditoKonzol-Realtime-v16.apk
+          cp $(find app/build/outputs -name "*.apk" -type f | head -n 1) artifact/ForditoKonzol-Realtime-v18.apk
           ls -lah artifact
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ForditoKonzol-Realtime-v16-apk
+          name: ForditoKonzol-Realtime-v18-apk
           path: artifact/*.apk
           if-no-files-found: error
