@@ -1,0 +1,38 @@
+name: 01 Generate Android Release Key
+
+on:
+  workflow_dispatch:
+
+jobs:
+  generate-key:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Generate release keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore fordito-release-key.jks \
+            -storepass fordito123456 \
+            -keypass fordito123456 \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -alias fordito \
+            -dname "CN=Fordito,O=Private,C=HU"
+
+      - name: Create base64 secret text
+        run: |
+          base64 -w 0 fordito-release-key.jks > ANDROID_KEYSTORE_BASE64.txt
+          echo "ANDROID_KEYSTORE_PASSWORD=fordito123456" > SECRET_VALUES.txt
+          echo "ANDROID_KEY_ALIAS=fordito" >> SECRET_VALUES.txt
+          echo "ANDROID_KEY_PASSWORD=fordito123456" >> SECRET_VALUES.txt
+          echo "ANDROID_KEYSTORE_BASE64 is in ANDROID_KEYSTORE_BASE64.txt" >> SECRET_VALUES.txt
+
+      - name: Upload generated key files
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-key-files
+          path: |
+            fordito-release-key.jks
+            ANDROID_KEYSTORE_BASE64.txt
+            SECRET_VALUES.txt
