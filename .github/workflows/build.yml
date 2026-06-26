@@ -29,7 +29,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "com.attila.forditokonzol"; minSdk = 26; targetSdk = 35; versionCode = 12; versionName = "1.2" }
+              defaultConfig { applicationId = "com.attila.forditokonzol"; minSdk = 26; targetSdk = 35; versionCode = 13; versionName = "1.3" }
           }
           dependencies {
               implementation("com.squareup.okhttp3:okhttp:4.12.0")
@@ -102,7 +102,7 @@ jobs:
               String model = "gpt-realtime-2";
               String profile = "truck_bulk";
               String mode = "natural";
-              String vadMode = "normal";
+              String vadMode = "medium";
               String topLang = "hu";
               String bottomLang = "fr";
 
@@ -170,9 +170,10 @@ jobs:
                   model = sp.getString("model", "gpt-realtime-2");
                   profile = sp.getString("profile", "truck_bulk");
                   mode = sp.getString("mode", "natural");
-                  vadMode = sp.getString("vadMode", "normal");
+                  vadMode = sp.getString("vadMode", "medium");
                   topLang = sp.getString("topLang", "hu");
                   bottomLang = sp.getString("bottomLang", "fr");
+                  if("normal".equals(vadMode)) vadMode = "medium";
               }
 
               void save() {
@@ -195,7 +196,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v1.2");
+                  TextView title = label("Fordító Konzol v1.3");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -470,9 +471,13 @@ jobs:
               }
 
               void sendManualText(String text) {
-                  if(responseInProgress) {
-                      new Handler().postDelayed(() -> sendManualText(text), 1200);
-                      return;
+                  if(responseInProgress && ws != null) {
+                      try {
+                          JSONObject cancel = new JSONObject();
+                          cancel.put("type", "response.cancel");
+                          ws.send(cancel.toString());
+                          responseInProgress = false;
+                      } catch(Exception ignored) {}
                   }
                   try {
                       JSONObject msg = new JSONObject();
@@ -673,12 +678,12 @@ jobs:
       - name: Find APK
         run: |
           mkdir -p artifact
-          cp $(find app/build/outputs -name "*.apk" -type f | head -n 1) artifact/ForditoKonzol-Realtime-v12.apk
+          cp $(find app/build/outputs -name "*.apk" -type f | head -n 1) artifact/ForditoKonzol-Realtime-v13.apk
           ls -lah artifact
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ForditoKonzol-Realtime-v12-apk
+          name: ForditoKonzol-Realtime-v13-apk
           path: artifact/*.apk
           if-no-files-found: error
