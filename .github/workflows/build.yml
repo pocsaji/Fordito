@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android APK v17 LANGUAGE PAIRS
 
 on:
   workflow_dispatch:
@@ -11,802 +11,155 @@ jobs:
     steps:
       - name: Create Android project
         run: |
-          mkdir -p app/src/main/java/com/attila/forditokonzol app/src/main/res/values
-
-          cat > settings.gradle.kts <<'EOF'
+          mkdir -p app/src/main/java/com/attila/forditokonzolga17 app/src/main/res/values
+          cat > settings.gradle.kts <<'EOT'
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
           dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
           rootProject.name = "ForditoKonzol"
           include(":app")
-          EOF
-
-          cat > build.gradle.kts <<'EOF'
+          EOT
+          cat > build.gradle.kts <<'EOT'
           plugins { id("com.android.application") version "8.6.1" apply false }
-          EOF
-
-          cat > app/build.gradle.kts <<'EOF'
+          EOT
+          cat > app/build.gradle.kts <<'EOT'
           plugins { id("com.android.application") }
-          android {
-              namespace = "com.attila.forditokonzol"
-              compileSdk = 35
-              defaultConfig { applicationId = "com.attila.forditokonzol"; minSdk = 26; targetSdk = 35; versionCode = 18; versionName = "1.8" }
-          }
-          dependencies {
-              implementation("com.squareup.okhttp3:okhttp:4.12.0")
-              implementation("org.json:json:20240303")
-          }
-          EOF
-
-          cat > app/src/main/res/values/styles.xml <<'EOF'
-          <resources>
-              <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
-                  <item name="android:fontFamily">sans</item>
-                  <item name="android:navigationBarColor">#101318</item>
-                  <item name="android:statusBarColor">#101318</item>
-                  <item name="android:windowBackground">#101318</item>
-                  <item name="android:windowNoTitle">true</item>
-              </style>
-          </resources>
-          EOF
-
-          cat > app/src/main/AndroidManifest.xml <<'EOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.RECORD_AUDIO" />
-              <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordító Konzol" android:supportsRtl="true" android:theme="@style/AppTheme">
-                  <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-              </application>
-          </manifest>
-          EOF
-
-          cat > app/src/main/java/com/attila/forditokonzol/MainActivity.java <<'EOF'
-          package com.attila.forditokonzol;
-
-          import android.Manifest;
-          import android.app.*;
-          import android.content.*;
-          import android.content.pm.PackageManager;
-          import android.graphics.Color;
-          import android.media.*;
-          import android.os.*;
-          import android.text.*;
-          import android.util.Base64;
-          import android.view.Gravity;
-          import android.view.inputmethod.InputMethodManager;
-          import android.widget.*;
-          import org.json.*;
-          import java.util.*;
-          import java.util.concurrent.*;
-          import okhttp3.*;
-
-          public class MainActivity extends Activity {
-              TextView state;
-              EditText topBox, bottomBox;
-              Button micBtn, translateBtn, menuBtn, topLangBtn, bottomLangBtn;
-              SharedPreferences sp;
-              OkHttpClient client;
-              WebSocket ws;
-              AudioRecord rec;
-              ExecutorService audioExec = Executors.newSingleThreadExecutor();
-
-              boolean connected = false;
-              boolean streaming = false;
-              boolean topActive = true;
-              boolean manualTopSource = true;
-              boolean responseInProgress = false;
-              long sessionStart = 0L;
-              String pendingOutput = "";
-              String pendingManualText = "";
-              boolean manualResponseMode = false;
-              boolean programmaticChange = false;
-              int topManualStart = -1;
-              int bottomManualStart = -1;
-
-              String apiKey = "";
-              String model = "gpt-realtime-2";
-              String profile = "truck_bulk";
-              String mode = "natural";
-              String vadMode = "medium";
-              String topLang = "hu";
-              String bottomLang = "fr";
-
-              final String[][] langs = {
-                  {"Automatikus","AUTO",""},
-                  {"Magyar","HU","hu"},
-                  {"Francia","FR","fr"},
-                  {"Angol","EN","en"},
-                  {"Német","DE","de"},
-                  {"Olasz","IT","it"},
-                  {"Spanyol","ES","es"},
-                  {"Román","RO","ro"},
-                  {"Horvát","HR","hr"},
-                  {"Szlovák","SK","sk"},
-                  {"Szlovén","SL","sl"}
-              };
-
-              final String[][] models = {
-                  {"Ajánlott: GPT-Realtime-2","gpt-realtime-2"},
-                  {"Fordításra: GPT-Realtime-Translate","gpt-realtime-translate"}
-              };
-
-              final String[][] profiles = {
-                  {"Általános beszélgetés","general"},
-                  {"Turizmus / utazás","tourism"},
-                  {"Étterem","restaurant"},
-                  {"Szállás","hotel"},
-                  {"Kamion – általános","truck_general"},
-                  {"Kamion – ponyvás","truck_tarp"},
-                  {"Kamion – ömlesztett áru","truck_bulk"},
-                  {"Kamion – tartány","truck_tank"},
-                  {"Logisztika / rakodás","logistics"},
-                  {"Vám / határ","customs"},
-                  {"Orvos","medical"},
-                  {"Gyógyszertár","pharmacy"},
-                  {"Bank","bank"},
-                  {"Hivatal","office"},
-                  {"Rendőrség","police"},
-                  {"Autószerviz / gépjavítás","service"}
-              };
-
-              final String[][] modes = {
-                  {"Pontos","precise"},
-                  {"Természetes","natural"},
-                  {"Tolmács","interpreter"}
-              };
-
-              final String[][] vadModes = {
-                  {"Gyors","low"},
-                  {"Normál","medium"},
-                  {"Türelmes","high"},
-                  {"Automatikus","auto"}
-              };
-
-              @Override public void onCreate(Bundle b) {
-                  super.onCreate(b);
-                  sp = getSharedPreferences("settings", MODE_PRIVATE);
-                  load();
-                  ui();
-                  reqMic();
-              }
-
-              void load() {
-                  apiKey = sp.getString("apiKey", "");
-                  model = sp.getString("model", "gpt-realtime-2");
-                  profile = sp.getString("profile", "truck_bulk");
-                  mode = sp.getString("mode", "natural");
-                  vadMode = sp.getString("vadMode", "medium");
-                  topLang = sp.getString("topLang", "hu");
-                  bottomLang = sp.getString("bottomLang", "fr");
-                  if("normal".equals(vadMode)) vadMode = "medium";
-              }
-
-              void save() {
-                  sp.edit()
-                    .putString("apiKey", apiKey)
-                    .putString("model", model)
-                    .putString("profile", profile)
-                    .putString("mode", mode)
-                    .putString("vadMode", vadMode)
-                    .putString("topLang", topLang)
-                    .putString("bottomLang", bottomLang)
-                    .apply();
-              }
-
-              void ui() {
-                  LinearLayout root = new LinearLayout(this);
-                  root.setOrientation(LinearLayout.VERTICAL);
-                  root.setPadding(8,62,8,170);
-                  root.setBackgroundColor(Color.rgb(16,19,24));
-                  setContentView(root);
-
-                  LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v1.8");
-                  state = label("készenlét");
-                  state.setGravity(Gravity.RIGHT);
-                  bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
-                  bar.addView(state, new LinearLayout.LayoutParams(0,42,1));
-                  root.addView(bar);
-
-                  LinearLayout langRow = row();
-                  topLangBtn = btn("FELSŐ");
-                  bottomLangBtn = btn("ALSÓ");
-                  langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,64,1));
-                  langRow.addView(bottomLangBtn, new LinearLayout.LayoutParams(0,64,1));
-                  root.addView(langRow);
-
-                  topBox = box("FELSŐ ABLAK — átirat / fordítás / kézi bevitel");
-                  bottomBox = box("ALSÓ ABLAK — átirat / fordítás / kézi bevitel");
-                  root.addView(topBox, new LinearLayout.LayoutParams(-1,0,1));
-                  root.addView(bottomBox, new LinearLayout.LayoutParams(-1,0,1));
-
-                  LinearLayout controls = row();
-                  micBtn = btn("MIKROFON");
-                  translateBtn = btn("FORDÍT");
-                  menuBtn = btn("MENÜ");
-                  controls.addView(micBtn, new LinearLayout.LayoutParams(0,58,1));
-                  controls.addView(translateBtn, new LinearLayout.LayoutParams(0,58,1));
-                  controls.addView(menuBtn, new LinearLayout.LayoutParams(0,58,1));
-                  root.addView(controls);
-
-                  topBox.setOnClickListener(v -> { manualTopSource = true; updateButtons(); });
-                  bottomBox.setOnClickListener(v -> { manualTopSource = false; updateButtons(); });
-                  topBox.addTextChangedListener(manualWatcher(true));
-                  bottomBox.addTextChangedListener(manualWatcher(false));
-                  topLangBtn.setOnClickListener(v -> chooseLang(true));
-                  bottomLangBtn.setOnClickListener(v -> chooseLang(false));
-                  micBtn.setOnClickListener(v -> { if(streaming) stop(); else start(true); });
-                  translateBtn.setOnClickListener(v -> manualTranslate());
-                  menuBtn.setOnClickListener(v -> menu());
-
-                  updateButtons();
-              }
-
-              LinearLayout row() {
-                  LinearLayout l = new LinearLayout(this);
-                  l.setOrientation(LinearLayout.HORIZONTAL);
-                  return l;
-              }
-
-              TextView label(String s) {
-                  TextView t = new TextView(this);
-                  t.setText(s);
-                  t.setTextColor(Color.LTGRAY);
-                  t.setTextSize(12);
-                  return t;
-              }
-
-              Button btn(String s) {
-                  Button b = new Button(this);
-                  b.setText(s);
-                  b.setTextColor(Color.WHITE);
-                  b.setAllCaps(false);
-                  b.setTextSize(14);
-                  b.setSingleLine(true);
-                  b.setPadding(4,2,4,2);
-                  return b;
-              }
-
-              EditText box(String hint) {
-                  EditText e = new EditText(this);
-                  e.setHint(hint);
-                  e.setHintTextColor(Color.GRAY);
-                  e.setTextColor(Color.WHITE);
-                  e.setTextSize(14);
-                  e.setGravity(Gravity.TOP|Gravity.START);
-                  e.setSingleLine(false);
-                  e.setMinLines(5);
-                  e.setBackgroundColor(Color.rgb(27,32,41));
-                  e.setPadding(14,14,14,14);
-                  return e;
-              }
-
-              TextWatcher manualWatcher(final boolean top) {
-                  return new TextWatcher() {
-                      public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-                      public void onTextChanged(CharSequence s, int start, int before, int count) {
-                          if(programmaticChange) return;
-                          if(top) {
-                              manualTopSource = true;
-                              if(topManualStart < 0) topManualStart = Math.max(0, Math.min(start, s.length()));
-                          } else {
-                              manualTopSource = false;
-                              if(bottomManualStart < 0) bottomManualStart = Math.max(0, Math.min(start, s.length()));
-                          }
-                          updateButtons();
-                      }
-                      public void afterTextChanged(Editable e) {}
-                  };
-              }
-
-              void reqMic() {
-                  if(Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
-                      requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1001);
-              }
-
-              boolean hasKey() {
-                  return apiKey != null && apiKey.trim().startsWith("sk-");
-              }
-
-              void start(boolean withAudio) {
-                  if(!hasKey()) { showApi(); return; }
-                  if(withAudio && Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reqMic(); return; }
-                  if(withAudio && sessionStart == 0L) sessionStart = System.currentTimeMillis();
-                  if(withAudio && System.currentTimeMillis() - sessionStart > 20L*60L*1000L) { confirm(); return; }
-
-                  state.setText("kapcsolódás");
-                  client = new OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build();
-                  Request req = new Request.Builder()
-                    .url("wss://api.openai.com/v1/realtime?model=" + model)
-                    .addHeader("Authorization", "Bearer " + apiKey.trim())
-                    .build();
-
-                  ws = client.newWebSocket(req, new WebSocketListener() {
-                      @Override public void onOpen(WebSocket w, Response r) {
-                          connected = true;
-                          runOnUiThread(() -> {
-                              sessionUpdate();
-                              if(withAudio) audioLoop();
-                              else state.setText("fordítási kapcsolat");
-                              updateButtons();
-                              if(!withAudio && pendingManualText.length() > 0) {
-                                  String p = pendingManualText;
-                                  pendingManualText = "";
-                                  new Handler().postDelayed(() -> sendManualText(p), 500);
-                              }
-                          });
-                      }
-
-                      @Override public void onMessage(WebSocket w, String s) {
-                          event(s);
-                      }
-
-                      @Override public void onFailure(WebSocket w, Throwable t, Response r) {
-                          runOnUiThread(() -> {
-                              append("\n[kapcsolat hiba] " + t.getMessage());
-                              stop();
-                          });
-                      }
-
-                      @Override public void onClosed(WebSocket w, int c, String reason) {
-                          connected = false;
-                          runOnUiThread(() -> {
-                              state.setText("lezárva");
-                              updateButtons();
-                          });
-                      }
-                  });
-              }
-
-              void sessionUpdate() {
-                  try {
-                      JSONObject session = new JSONObject();
-                      session.put("type", "realtime");
-                      session.put("model", model);
-                      session.put("instructions", instructions());
-                      session.put("output_modalities", new JSONArray().put("text"));
-
-                      JSONObject vad = new JSONObject();
-                      vad.put("type", "semantic_vad");
-                      vad.put("eagerness", vadMode);
-                      vad.put("create_response", true);
-
-                      JSONObject input = new JSONObject();
-                      input.put("turn_detection", vad);
-
-                      JSONObject audio = new JSONObject();
-                      audio.put("input", input);
-
-                      session.put("audio", audio);
-
-                      JSONObject evt = new JSONObject();
-                      evt.put("type", "session.update");
-                      evt.put("session", session);
-                      ws.send(evt.toString());
-                  } catch(Exception e) {
-                      append("\n[session hiba] " + e.getMessage());
+          android { namespace="com.attila.forditokonzolga17"; compileSdk=35
+              defaultConfig { applicationId="com.attila.forditokonzolga17"; minSdk=26; targetSdk=35; versionCode=17; versionName="1.7" }
+              signingConfigs {
+                  create("release") {
+                      storeFile = file(System.getenv("ANDROID_KEYSTORE_FILE") ?: "fordito-release-key.jks")
+                      storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                      keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                      keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
                   }
               }
-
-              String instructions() {
-                  String top = code(topLang);
-                  String bottom = code(bottomLang);
-                  return "You are a live interpreter. Output text only. No explanations. " +
-                    "Work ONLY with these two selected languages: " + top + " and " + bottom + ". " +
-                    "Detect whether the current input is " + top + " or " + bottom + ". " +
-                    "If the input is " + top + ", translate to " + bottom + ". If the input is " + bottom + ", translate to " + top + ". " +
-                    "Ignore other languages and background speech unless it clearly belongs to the active speaker. " +
-                    "For every completed thought, output exactly three lines in this format: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <clean source transcript> then TRANSLATION: <natural translation into the other selected language>. " +
-                    "Conversation profile: " + profilePrompt() + " " +
-                    "Translation mode: " + modePrompt() + " " +
-                    "Do not invent missing information. Do not add details that were not said. " +
-                    "If the audio is unclear, omit the unclear part or mark it briefly as unclear. " +
-                    "Use semantic turn detection. Do not translate every short pause. " +
-                    "Wait for a complete sentence or complete thought before outputting translation. " +
-                    "The translation must be grammatically natural in the target language. " +
-                    "Keep the output readable on a phone screen.";
-              }
-
-              String modePrompt() {
-                  if(mode.equals("precise")) return "Precise mode: stay close to the meaning, do not expand, but always use correct natural grammar.";
-                  if(mode.equals("interpreter")) return "Interpreter mode: use context strongly, make the translation sound like a human interpreter, but do not invent facts.";
-                  return "Natural mode: translate meaning naturally and fluently, with light correction only.";
-              }
-
-              void audioLoop() {
-                  int sr = 24000;
-                  int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-                  int bs = Math.max(min, 4096);
-
-                  rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
-                  streaming = true;
-                  rec.startRecording();
-                  updateButtons();
-
-                  audioExec.submit(() -> {
-                      byte[] buf = new byte[bs];
-                      while(streaming && connected && ws != null && rec != null) {
-                          int read = rec.read(buf, 0, buf.length);
-                          if(read > 0) {
-                              try {
-                                  byte[] chunk = Arrays.copyOf(buf, read);
-                                  JSONObject evt = new JSONObject();
-                                  evt.put("type", "input_audio_buffer.append");
-                                  evt.put("audio", Base64.encodeToString(chunk, Base64.NO_WRAP));
-                                  ws.send(evt.toString());
-                              } catch(Exception ignored) {}
-                          }
-                      }
-                  });
-              }
-
-              void stop() {
-                  streaming = false;
-                  connected = false;
-                  try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception ignored) {}
-                  rec = null;
-                  try { if(ws != null) ws.close(1000, "stop"); } catch(Exception ignored) {}
-                  ws = null;
-                  runOnUiThread(() -> {
-                      state.setText("készenlét");
-                      updateButtons();
-                  });
-              }
-
-              void event(String s) {
-                  try {
-                      JSONObject o = new JSONObject(s);
-                      String type = o.optString("type", "");
-
-                      if(type.equals("response.created")) {
-                          responseInProgress = true;
-                      }
-
-                      if(type.equals("response.done")) {
-                          responseInProgress = false;
-                      }
-
-                      if(type.equals("response.text.delta") || type.equals("response.output_text.delta")) {
-                          String d = o.optString("delta", "");
-                          if(!d.isEmpty()) pendingOutput += d;
-                      }
-
-                      if(type.equals("response.output_text.done") || type.equals("response.text.done") || type.equals("response.done")) {
-                          String out = pendingOutput.trim();
-                          pendingOutput = "";
-                          if(!out.isEmpty()) runOnUiThread(() -> routeAiOutput(out));
-                      }
-
-                      if(type.equals("error")) {
-                          JSONObject er = o.optJSONObject("error");
-                          String msg = er == null ? o.toString() : er.optString("message", er.toString());
-                          if(msg.contains("response in progress")) responseInProgress = true;
-                          runOnUiThread(() -> append("\n[hiba] " + msg));
-                      }
-                  } catch(Exception e) {
-                      runOnUiThread(() -> append("\n[event hiba] " + e.getMessage()));
+              buildTypes {
+                  getByName("release") {
+                      signingConfig = signingConfigs.getByName("release")
+                      isMinifyEnabled = false
+                      isShrinkResources = false
                   }
-              }
-
-              void manualTranslate() {
-                  EditText source = manualTopSource ? topBox : bottomBox;
-                  String text = manualSourceText(source, manualTopSource).trim();
-                  if(text.isEmpty()) {
-                      Toast.makeText(this, "Nincs új kézi bevitel. Írj a felső vagy alsó ablakba, utána FORDÍT.", Toast.LENGTH_LONG).show();
-                      return;
-                  }
-
-                  source.clearFocus();
-                  source.setSelection(source.getText().length());
-                  try {
-                      InputMethodManager imm = (InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
-                      imm.hideSoftInputFromWindow(source.getWindowToken(), 0);
-                  } catch(Exception ignored) {}
-
-                  if(!hasKey()) { showApi(); return; }
-
-                  if(ws == null || !connected) {
-                      pendingManualText = text;
-                      start(false);
-                  } else {
-                      sendManualText(text);
-                  }
-              }
-
-              String manualSourceText(EditText source, boolean top) {
-                  String all = source.getText().toString();
-                  if(all.length() == 0) return "";
-
-                  int start = top ? topManualStart : bottomManualStart;
-                  if(start < 0 || start > all.length()) return "";
-
-                  return all.substring(start);
-              }
-
-              void clearManualBlock(boolean top) {
-                  if(top) topManualStart = -1;
-                  else bottomManualStart = -1;
-              }
-
-              void sendManualText(String text) {
-                  topActive = manualTopSource;
-                  updateButtons();
-                  if(responseInProgress && ws != null) {
-                      try {
-                          JSONObject cancel = new JSONObject();
-                          cancel.put("type", "response.cancel");
-                          ws.send(cancel.toString());
-                          responseInProgress = false;
-                      } catch(Exception ignored) {}
-                  }
-                  try {
-                      JSONObject msg = new JSONObject();
-                      msg.put("type", "conversation.item.create");
-                      JSONObject item = new JSONObject();
-                      item.put("type", "message");
-                      item.put("role", "user");
-                      JSONArray content = new JSONArray();
-                      JSONObject c = new JSONObject();
-                      c.put("type", "input_text");
-                      String srcCode = manualTopSource ? code(topLang) : code(bottomLang);
-                      String tgtCode = manualTopSource ? code(bottomLang) : code(topLang);
-                      manualResponseMode = true;
-                      c.put("text", "Manual text input. Source language is " + srcCode + ". Target language is " + tgtCode + ". Translate ONLY the following text. Output exactly one line in this format: TRANSLATION: <translation>. Do not repeat the source text. Text:\n" + text);
-                      content.put(c);
-                      item.put("content", content);
-                      msg.put("item", item);
-                      ws.send(msg.toString());
-
-                      JSONObject resp = new JSONObject();
-                      resp.put("type", "response.create");
-                      JSONObject response = new JSONObject();
-                      response.put("instructions", instructions());
-                      resp.put("response", response);
-                      responseInProgress = true;
-                      ws.send(resp.toString());
-                  } catch(Exception e) {
-                      append("\n[kézi fordítás hiba] " + e.getMessage());
-                  }
-              }
-
-              void routeAiOutput(String out) {
-                  String sourceLang = extractAfter(out, "SOURCE_LANG:").toUpperCase(Locale.ROOT);
-                  String original = extractAfter(out, "ORIGINAL:");
-                  String translation = extractAfter(out, "TRANSLATION:");
-
-                  if(original.length() == 0 && translation.length() == 0) {
-                      translation = out;
-                  }
-
-                  if(manualResponseMode) {
-                      manualResponseMode = false;
-                      boolean sourceWasTop = manualTopSource;
-                      EditText dstBox = sourceWasTop ? bottomBox : topBox;
-                      if(translation.length() > 0) appendTo(dstBox, translation + "\n");
-                      clearManualBlock(sourceWasTop);
-                      return;
-                  }
-
-                  boolean sourceIsTop = sourceLang.contains(code(topLang));
-                  boolean sourceIsBottom = sourceLang.contains(code(bottomLang));
-
-                  if(!sourceIsTop && !sourceIsBottom) {
-                      sourceIsTop = manualTopSource;
-                  }
-
-                  EditText srcBox = sourceIsTop ? topBox : bottomBox;
-                  EditText dstBox = sourceIsTop ? bottomBox : topBox;
-
-                  if(original.length() > 0) appendTo(srcBox, original + "\n");
-                  if(translation.length() > 0) appendTo(dstBox, translation + "\n");
-              }
-
-              String extractAfter(String out, String key) {
-                  int i = out.indexOf(key);
-                  if(i < 0) return "";
-                  int start = i + key.length();
-                  int end = out.length();
-                  String[] keys = {"SOURCE_LANG:", "ORIGINAL:", "TRANSLATION:"};
-                  for(String k: keys) {
-                      int n = out.indexOf(k, start);
-                      if(n >= 0) end = Math.min(end, n);
-                  }
-                  return out.substring(start, end).trim();
-              }
-
-              void appendTo(EditText target, String s) {
-                  if(s == null || s.length() == 0) return;
-                  programmaticChange = true;
-                  try {
-                      String old = target.getText().toString();
-                      if(old.length() > 0 && !old.endsWith("\n")) target.append("\n");
-                      target.append(s);
-                      target.setSelection(target.getText().length());
-                  } finally {
-                      programmaticChange = false;
-                  }
-              }
-
-              void appendDelta(String s) {
-                  EditText target = topActive ? bottomBox : topBox;
-                  appendTo(target, s);
-              }
-
-              void append(String s) {
-                  EditText target = topActive ? bottomBox : topBox;
-                  appendTo(target, s);
-              }
-
-              void confirm() {
-                  new AlertDialog.Builder(this)
-                    .setTitle("Folyik még a beszélgetés?")
-                    .setMessage("20 perce aktív a rendszer. Folytassuk?")
-                    .setPositiveButton("Igen", (d,w) -> { sessionStart = System.currentTimeMillis(); start(true); })
-                    .setNegativeButton("Leállítás", (d,w) -> { sessionStart = 0L; stop(); })
-                    .show();
-              }
-
-              void menu() {
-                  String[] items = {
-                      "OpenAI API kulcs",
-                      "AI modell: " + modelLabel(),
-                      "Beszélgetési profil: " + profileLabel(),
-                      "Fordítási mód: " + modeLabel(),
-                      "Semantic VAD: " + vadLabel(),
-                      "Felső ablak törlése",
-                      "Alsó ablak törlése",
-                      "Mindkét ablak törlése"
-                  };
-
-                  new AlertDialog.Builder(this).setTitle("Menü").setItems(items, (d,w) -> {
-                      if(w==0) showApi();
-                      if(w==1) chooseModel();
-                      if(w==2) chooseProfile();
-                      if(w==3) chooseMode();
-                      if(w==4) chooseVad();
-                      if(w==5) { programmaticChange=true; topBox.setText(""); programmaticChange=false; topManualStart=-1; }
-                      if(w==6) { programmaticChange=true; bottomBox.setText(""); programmaticChange=false; bottomManualStart=-1; }
-                      if(w==7) { programmaticChange=true; topBox.setText(""); bottomBox.setText(""); programmaticChange=false; topManualStart=-1; bottomManualStart=-1; }
-                      updateButtons();
-                  }).show();
-              }
-
-              void showApi() {
-                  EditText input = new EditText(this);
-                  input.setSingleLine(true);
-                  input.setText(apiKey == null ? "" : apiKey);
-                  input.setHint("sk-...");
-                  new AlertDialog.Builder(this)
-                    .setTitle("OpenAI API kulcs")
-                    .setView(input)
-                    .setPositiveButton("Mentés", (d,w) -> { apiKey = input.getText().toString().trim(); save(); updateButtons(); })
-                    .setNegativeButton("Mégse", null)
-                    .show();
-              }
-
-              void chooseModel() { chooseFrom("AI modell", models, model, v -> { model = v; save(); restartIfNeeded(); }); }
-              void chooseProfile() { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save(); sessionUpdateIfConnected(); }); }
-              void chooseMode() { chooseFrom("Fordítási mód", modes, mode, v -> { mode = v; save(); sessionUpdateIfConnected(); }); }
-              void chooseVad() { chooseFrom("Semantic VAD", vadModes, vadMode, v -> { vadMode = v; save(); sessionUpdateIfConnected(); }); }
-
-              interface Setter { void set(String v); }
-
-              void chooseFrom(String title, String[][] data, String current, Setter setter) {
-                  String[] labels = new String[data.length];
-                  for(int i=0;i<data.length;i++) labels[i] = data[i][0] + (data[i][1].equals(current) ? " ✓" : "");
-                  new AlertDialog.Builder(this).setTitle(title).setItems(labels, (d,w) -> {
-                      setter.set(data[w][1]);
-                      updateButtons();
-                  }).show();
-              }
-
-              void chooseLang(boolean top) {
-                  String current = top ? topLang : bottomLang;
-                  String[] labels = new String[langs.length];
-                  for(int i=0;i<langs.length;i++) labels[i] = langs[i][0] + " (" + langs[i][1] + ")" + (langs[i][2].equals(current) ? " ✓" : "");
-                  new AlertDialog.Builder(this).setTitle(top ? "Felső nyelv" : "Alsó nyelv").setItems(labels, (d,w) -> {
-                      if(top) { topLang = langs[w][2]; topActive = true; manualTopSource = true; }
-                      else { bottomLang = langs[w][2]; topActive = false; manualTopSource = false; }
-                      save();
-                      sessionUpdateIfConnected();
-                      updateButtons();
-                  }).show();
-              }
-
-              void restartIfNeeded() {
-                  if(streaming) {
-                      stop();
-                      new Handler().postDelayed(() -> start(true), 700);
-                  }
-              }
-
-              void sessionUpdateIfConnected() {
-                  if(ws != null && connected) sessionUpdate();
-              }
-
-              String profilePrompt() {
-                  if(profile.equals("truck_bulk")) return "Two truck drivers are talking about bulk transport, silo loading, unloading, weighing, site logistics and freight.";
-                  if(profile.equals("truck_tarp")) return "Truck tarpaulin transport, loading, straps, pallets, CMR and site logistics.";
-                  if(profile.equals("truck_general")) return "Truck driving, freight, route, dispatcher, loading and site communication.";
-                  if(profile.equals("medical")) return "Doctor-patient conversation, symptoms, examination, medicine and treatment.";
-                  if(profile.equals("restaurant")) return "Restaurant ordering, food, drinks, payment and service.";
-                  if(profile.equals("tourism")) return "Tourism, travel, directions, tickets and programs.";
-                  if(profile.equals("hotel")) return "Accommodation, apartment, booking, arrival, departure and payment.";
-                  if(profile.equals("bank")) return "Banking, account, card, transfer and identification.";
-                  if(profile.equals("office")) return "Official administration, documents, certificates and customer service.";
-                  if(profile.equals("customs")) return "Customs, border, documents, freight and inspection.";
-                  if(profile.equals("service")) return "Vehicle service or machine repair, faults, parts and repair.";
-                  if(profile.equals("pharmacy")) return "Pharmacy, medicine, dosage and symptoms.";
-                  return "General conversation.";
-              }
-
-              String modelLabel() { return labelOf(models, model); }
-              String profileLabel() { return labelOf(profiles, profile); }
-              String modeLabel() { return labelOf(modes, mode); }
-              String vadLabel() { return labelOf(vadModes, vadMode); }
-
-              String labelOf(String[][] arr, String key) {
-                  for(String[] x: arr) if(x[1].equals(key)) return x[0];
-                  return key;
-              }
-
-              String code(String code) {
-                  if(code == null || code.isEmpty()) return "AUTO";
-                  for(String[] l: langs) if(l[2].equals(code)) return l[1];
-                  return code.toUpperCase(Locale.ROOT);
-              }
-
-              void updateButtons() {
-                  micBtn.setText(streaming ? "STOP" : "MIKROFON");
-                  micBtn.setBackgroundColor(streaming ? Color.rgb(30,130,70) : Color.rgb(90,50,50));
-                  translateBtn.setBackgroundColor(Color.rgb(55,60,70));
-                  menuBtn.setBackgroundColor(hasKey() ? Color.rgb(55,60,70) : Color.rgb(140,80,30));
-                  topLangBtn.setText("FELSŐ: " + code(topLang));
-                  bottomLangBtn.setText("ALSÓ: " + code(bottomLang));
-                  topLangBtn.setBackgroundColor(topActive ? Color.rgb(60,95,150) : Color.rgb(55,60,70));
-                  bottomLangBtn.setBackgroundColor(!topActive ? Color.rgb(60,95,150) : Color.rgb(55,60,70));
-              }
-
-              @Override public void onPause() {
-                  super.onPause();
-                  if(streaming) stop();
-              }
-
-              @Override public void onDestroy() {
-                  if(streaming) stop();
-                  audioExec.shutdownNow();
-                  super.onDestroy();
               }
           }
-          EOF
-
+          dependencies { implementation("com.squareup.okhttp3:okhttp:4.12.0"); implementation("org.json:json:20240303") }
+          EOT
+          cat > app/src/main/res/values/styles.xml <<'EOT'
+          <resources><style name="AppTheme" parent="android:style/Theme.Material.NoActionBar"><item name="android:fontFamily">sans</item><item name="android:navigationBarColor">#101318</item><item name="android:statusBarColor">#101318</item><item name="android:windowBackground">#101318</item><item name="android:windowNoTitle">true</item></style></resources>
+          EOT
+          cat > app/src/main/AndroidManifest.xml <<'EOT'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"><uses-permission android:name="android.permission.RECORD_AUDIO"/><uses-permission android:name="android.permission.INTERNET"/><application android:allowBackup="false" android:label="Fordító Konzol" android:supportsRtl="true" android:theme="@style/AppTheme"><activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>
+          EOT
+          cat > app/src/main/java/com/attila/forditokonzolga17/MainActivity.java <<'EOT'
+          package com.attila.forditokonzolga17;
+          import android.Manifest;import android.app.*;import android.content.*;import android.content.pm.PackageManager;import android.graphics.Color;import android.media.*;import android.os.*;import android.text.method.ScrollingMovementMethod;import android.util.Base64;import android.view.Gravity;import android.widget.*;import org.json.*;import java.util.*;import java.util.concurrent.*;import okhttp3.*;
+          public class MainActivity extends Activity{
+            TextView state; EditText top,bottom; Button mic,dir,menu,clear; SharedPreferences sp; OkHttpClient client; WebSocket ws; AudioRecord rec; ExecutorService audio=Executors.newSingleThreadExecutor(); boolean streaming=false,connected=false,sourceTop=true; long sessionStart=0; String key="",model="gpt-realtime-2",profile="truck_bulk",topLang="hu",bottomLang="fr"; int silence=900,pairIndex=0;
+            StringBuilder topFinal=new StringBuilder(),bottomFinal=new StringBuilder(); String srcPartial="",trPartial=""; long lastRouteChange=0;
+            String[][] pairs={{"Magyar ⇄ Francia","FR","fr"},{"Magyar ⇄ Angol","EN","en"},{"Magyar ⇄ Német","DE","de"},{"Magyar ⇄ Olasz","IT","it"},{"Magyar ⇄ Spanyol","ES","es"},{"Magyar ⇄ Horvát","HR","hr"},{"Magyar ⇄ Szerb","SR","sr"},{"Magyar ⇄ Román","RO","ro"},{"Magyar ⇄ Szlovák","SK","sk"},{"Magyar ⇄ Szlovén","SL","sl"}};
+            String[][] langs={{"Magyar","HU","hu"},{"Francia","FR","fr"},{"Angol","EN","en"},{"Német","DE","de"},{"Olasz","IT","it"},{"Spanyol","ES","es"},{"Horvát","HR","hr"},{"Szerb","SR","sr"},{"Román","RO","ro"},{"Szlovák","SK","sk"},{"Szlovén","SL","sl"}};
+            String[][] profiles={{"Általános","general"},{"Turizmus","tourism"},{"Étterem","restaurant"},{"Szállás","hotel"},{"Kamion általános","truck_general"},{"Kamion ponyvás","truck_tarp"},{"Kamion ömlesztett","truck_bulk"},{"Kamion tartány","truck_tank"},{"Logisztika/rakodás","logistics"},{"Vám/határ","customs"},{"Orvos","medical"},{"Gyógyszertár","pharmacy"},{"Bank","bank"},{"Hivatal","office"},{"Rendőrség","police"},{"Szerviz","service"}};
+            public void onCreate(Bundle b){super.onCreate(b);sp=getSharedPreferences("settings",0);load();ui();reqMic();}
+            void load(){key=sp.getString("key","");profile=sp.getString("profile","truck_bulk");topLang="hu";bottomLang=sp.getString("bottomLang","fr");pairIndex=findPair(bottomLang);sourceTop=sp.getBoolean("sourceTop",true);silence=sp.getInt("silence",900);} void save(){sp.edit().putString("key",key).putString("profile",profile).putString("topLang","hu").putString("bottomLang",bottomLang).putInt("pairIndex",pairIndex).putBoolean("sourceTop",sourceTop).putInt("silence",silence).apply();}
+            void ui(){LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(8,72,8,112);root.setBackgroundColor(Color.rgb(16,19,24));setContentView(root);
+              LinearLayout head=row();TextView title=tv("Fordító Konzol v1.7 LANG PAIRS");state=tv("készenlét");state.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);head.addView(title,new LinearLayout.LayoutParams(0,32,1));head.addView(state,new LinearLayout.LayoutParams(0,32,1));root.addView(head);
+              LinearLayout buttons=row();mic=btn("MIKROFON");dir=btn("HU → "+code(bottomLang));clear=btn("TÖRLÉS");menu=btn("MENÜ");buttons.addView(mic,new LinearLayout.LayoutParams(0,88,1));buttons.addView(dir,new LinearLayout.LayoutParams(0,88,1));buttons.addView(clear,new LinearLayout.LayoutParams(0,88,1));buttons.addView(menu,new LinearLayout.LayoutParams(0,88,1));root.addView(buttons);
+              top=box("MAGYAR ABLAK");bottom=box(code(bottomLang)+" ABLAK");root.addView(top,new LinearLayout.LayoutParams(-1,0,1));TextView sep=new TextView(this);sep.setText("━━━━━━━━━━━━━━━━━━━━");sep.setTextColor(Color.rgb(170,170,170));sep.setGravity(Gravity.CENTER);sep.setTextSize(10);sep.setBackgroundColor(Color.rgb(35,40,50));root.addView(sep,new LinearLayout.LayoutParams(-1,36));root.addView(bottom,new LinearLayout.LayoutParams(-1,0,1));
+              mic.setOnClickListener(v->{if(streaming)stop();else start();});dir.setOnClickListener(v->{sourceTop=!sourceTop;save();clearPartials();sessionUpdateSafe();upd();render();});dir.setOnLongClickListener(v->{choosePair();return true;});clear.setOnClickListener(v->{topFinal.setLength(0);bottomFinal.setLength(0);clearPartials();render();});menu.setOnClickListener(v->showMenu());top.setOnLongClickListener(v->{choosePair();return true;});bottom.setOnLongClickListener(v->{choosePair();return true;});mic.setOnLongClickListener(v->{chooseSilence();return true;});upd();render();}
+            TextView tv(String s){TextView t=new TextView(this);t.setText(s);t.setTextColor(Color.LTGRAY);t.setTextSize(12);t.setSingleLine(true);return t;} LinearLayout row(){LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.HORIZONTAL);return l;} Button btn(String s){Button b=new Button(this);b.setText(s);b.setTextColor(Color.WHITE);b.setAllCaps(false);b.setTextSize(17);b.setGravity(Gravity.CENTER);b.setMinHeight(82);b.setPadding(4,8,4,8);return b;} EditText box(String h){EditText e=new EditText(this);e.setHint(h);e.setHintTextColor(Color.GRAY);e.setTextColor(Color.WHITE);e.setTextSize(13);e.setGravity(Gravity.TOP|Gravity.START);e.setSingleLine(false);e.setMinLines(5);e.setVerticalScrollBarEnabled(true);e.setMovementMethod(new ScrollingMovementMethod());e.setBackgroundColor(Color.rgb(27,32,41));e.setPadding(10,8,10,52);return e;}
+            void reqMic(){if(Build.VERSION.SDK_INT>=23&&checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},1001);} boolean hasKey(){return key!=null&&key.trim().startsWith("sk-");}
+            void start(){if(!hasKey()){apiDialog();return;} if(Build.VERSION.SDK_INT>=23&&checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){reqMic();return;} if(sessionStart==0)sessionStart=System.currentTimeMillis(); if(System.currentTimeMillis()-sessionStart>20L*60L*1000L){confirm();return;} clearPartials();lastRouteChange=0;state.setText("kapcsolódás");client=new OkHttpClient.Builder().readTimeout(0,TimeUnit.MILLISECONDS).build();Request req=new Request.Builder().url("wss://api.openai.com/v1/realtime?model="+model).addHeader("Authorization","Bearer "+key.trim()).addHeader("OpenAI-Safety-Identifier","forditokonzol-android").build();ws=client.newWebSocket(req,new WebSocketListener(){public void onOpen(WebSocket w,Response r){connected=true;runOnUiThread(()->{sessionUpdate();audioLoop();upd();});}public void onMessage(WebSocket w,String s){event(s);}public void onFailure(WebSocket w,Throwable t,Response r){runOnUiThread(()->{state.setText("kapcsolat hiba");stop();});}public void onClosed(WebSocket w,int c,String rs){connected=false;runOnUiThread(()->{state.setText("lezárva");upd();});}});}
+            void sessionUpdateSafe(){if(ws!=null&&connected)sessionUpdate();}
+            void sessionUpdate(){try{JSONObject session=new JSONObject();session.put("type","realtime");session.put("model",model);session.put("instructions",instructions());JSONArray outs=new JSONArray();outs.put("text");session.put("output_modalities",outs);JSONObject audioCfg=new JSONObject();JSONObject input=new JSONObject();JSONObject format=new JSONObject();format.put("type","audio/pcm");format.put("rate",24000);input.put("format",format);JSONObject tr=new JSONObject();tr.put("model","gpt-realtime-whisper");String sl=sourceLang();if(!sl.isEmpty())tr.put("language",sl);input.put("transcription",tr);JSONObject vad=new JSONObject();vad.put("type","server_vad");vad.put("threshold",0.5);vad.put("prefix_padding_ms",300);vad.put("silence_duration_ms",silence);vad.put("create_response",true);vad.put("interrupt_response",false);input.put("turn_detection",vad);audioCfg.put("input",input);session.put("audio",audioCfg);JSONObject e=new JSONObject();e.put("type","session.update");e.put("session",session);ws.send(e.toString());}catch(Exception ex){state.setText("session hiba");}}
+            String instructions(){return "Feladatod kizárólag élő kétirányú tolmácsolás a HU és "+code(bottomLang)+" nyelv között. Más nyelvet ne használj és ne találgass. A beszéd felismerésénél is kizárólag ezt a két nyelvet tekintsd érvényesnek: magyar és "+langName(bottomLang)+". Ha magyarul beszélnek, fordítsd "+langName(bottomLang)+" nyelvre. Ha "+langName(bottomLang)+" nyelven beszélnek, fordítsd magyarra. Török, japán, kínai, üzbég vagy bármely más nyelvnek tűnő zajt ne értelmezz idegen nyelvként; próbáld a kiválasztott két nyelv egyikeként kezelni, vagy hagyd figyelmen kívül. Csak a fordított szöveget add vissza, magyarázat, bevezető, kommentár és idézőjel nélkül. Őrizd meg a jelentést, számokat, neveket, címeket, rakodási adatokat. Profil: "+profilePrompt()+" Ha zajt vagy félbeszakadt mondatot hallasz, csak az értelmes részt fordítsd.";}
+            String sourceCode(){return sourceTop?code(topLang):code(bottomLang);} String targetCode(){return sourceTop?code(bottomLang):code(topLang);} String sourceLang(){return sourceTop?topLang:bottomLang;} String sourceName(){return sourceTop?"FELSŐ":"ALSÓ";} String targetName(){return sourceTop?"ALSÓ":"FELSŐ";}
+            void audioLoop(){int sr=24000;int min=AudioRecord.getMinBufferSize(sr,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT);int bs=Math.max(min,4096);rec=new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION,sr,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,bs);streaming=true;rec.startRecording();state.setText("realtime aktív");audio.submit(()->{byte[] buf=new byte[bs];while(streaming&&rec!=null&&connected&&ws!=null){int n=rec.read(buf,0,buf.length);if(n>0){try{JSONObject e=new JSONObject();e.put("type","input_audio_buffer.append");e.put("audio",Base64.encodeToString(Arrays.copyOf(buf,n),Base64.NO_WRAP));ws.send(e.toString());}catch(Exception ignored){}}}});}
+            void stop(){streaming=false;connected=false;clearPartials();try{if(rec!=null){rec.stop();rec.release();}}catch(Exception ignored){}rec=null;try{if(ws!=null){ws.close(1000,"stop");}}catch(Exception ignored){}ws=null;state.setText("készenlét");upd();render();}
+            void event(String s){try{JSONObject o=new JSONObject(s);String type=o.optString("type","");if(type.equals("conversation.item.input_audio_transcription.delta")){String d=o.optString("delta","");if(!d.isEmpty())runOnUiThread(()->{srcPartial+=d;render();});}else if(type.equals("conversation.item.input_audio_transcription.completed")){String d=o.optString("transcript","");if(!d.isEmpty())runOnUiThread(()->{srcPartial="";autoRoute(d);appendFinal(sourceTop,d);render();});}else if(type.equals("response.output_text.delta")||type.equals("response.text.delta")){String d=o.optString("delta","");if(!d.isEmpty())runOnUiThread(()->{trPartial+=d;render();});}else if(type.equals("response.done")){runOnUiThread(()->{if(srcPartial.trim().length()>0){autoRoute(srcPartial);appendFinal(sourceTop,srcPartial);srcPartial="";}if(trPartial.trim().length()>0){appendFinal(!sourceTop,trPartial);trPartial="";}render();});}else if(type.contains("error")){runOnUiThread(()->state.setText("API hiba"));}}catch(Exception ex){runOnUiThread(()->state.setText("event hiba"));}}
+            void autoRoute(String text){String d=detectLang(text);if(d.isEmpty())return;long now=System.currentTimeMillis();if(now-lastRouteChange<700)return;if(d.equals(topLang)&&!sourceTop){sourceTop=true;lastRouteChange=now;save();clearPartials();sessionUpdateSafe();upd();}else if(d.equals(bottomLang)&&sourceTop){sourceTop=false;lastRouteChange=now;save();clearPartials();sessionUpdateSafe();upd();}}
+            String detectLang(String t){String x=(" "+t.toLowerCase(Locale.ROOT)+" ").replace('\n',' ');int a=scoreLang(x,topLang),b=scoreLang(x,bottomLang);if(a>=b+2)return topLang;if(b>=a+2)return bottomLang;return "";}
+            int scoreLang(String x,String lang){int s=0;if(lang.equals("hu")){if(x.matches(".*[áíóöőúüű].*"))s+=4;String[] w={" hogy "," vagy "," nem "," igen "," kérek "," köszönöm "," szeretnék "," beszélek "," magyar "," akkor "," egy "," van "," nincs "," működik "," próbáljuk "," ablak "," nyelv "," kellene "," most "," csak "};for(String z:w)if(x.contains(z))s++;}else if(lang.equals("fr")){if(x.matches(".*[àâçèêëîïôùûüÿœ].*"))s+=4;String[] w={" bonjour "," merci "," monsieur "," madame "," je "," vous "," voudrais "," plaît "," café "," avec "," dans "," oui "," non "," alors "," maintenant "," comment "," français "};for(String z:w)if(x.contains(z))s++;}else if(lang.equals("en")){String[] w={" hello "," thank "," please "," yes "," no "," i "," you "," would "," want "," need "," good "," morning "," english "};for(String z:w)if(x.contains(z))s++;}else if(lang.equals("de")){if(x.matches(".*[äöüß].*"))s+=4;String[] w={" hallo "," danke "," bitte "," ja "," nein "," ich "," sie "," möchte "," brauche "," guten "," deutsch "};for(String z:w)if(x.contains(z))s++;}else if(lang.equals("it")){String[] w={" buongiorno "," grazie "," prego "," sì "," no "," io "," lei "," vorrei "," bisogno "," italiano "," ciao "};for(String z:w)if(x.contains(z))s++;}else if(lang.equals("es")){if(x.matches(".*[áéíóúñ].*"))s+=3;String[] w={" hola "," gracias "," por favor "," sí "," no "," yo "," usted "," quiero "," necesito "," español "};for(String z:w)if(x.contains(z))s++;}else if(lang.equals("ro")){if(x.matches(".*[ăâîșţț].*"))s+=4;String[] w={" bună "," multumesc "," mulțumesc "," va rog "," vă rog "," da "," nu "," vreau "," trebuie "," română "};for(String z:w)if(x.contains(z))s++;}else if(lang.equals("hr")){String[] w={" dobar "," hvala "," molim "," da "," ne "," želim "," trebam "," hrvatski "," govorim "};for(String z:w)if(x.contains(z))s++;}else if(lang.equals("sr")){String[] w={" dobar "," hvala "," molim "," da "," ne "," želim "," trebam "," srpski "," govorim "};for(String z:w)if(x.contains(z))s++;}else if(lang.equals("sk")){if(x.matches(".*[áäčďéíĺľňóôŕšťúýž].*"))s+=3;String[] w={" dobrý "," ďakujem "," prosím "," áno "," nie "," chcem "," potrebujem "," slovenský "};for(String z:w)if(x.contains(z))s++;}else if(lang.equals("sl")){if(x.matches(".*[čšž].*"))s+=3;String[] w={" dober "," hvala "," prosim "," da "," ne "," želim "," potrebujem "," slovenski "};for(String z:w)if(x.contains(z))s++;}return s;}
+            void appendFinal(boolean toTop,String s){String clean=s.trim().replaceAll("\\s+"," ");if(clean.isEmpty())return;StringBuilder b=toTop?topFinal:bottomFinal;String last=lastBlock(b);String nc=norm(clean),nl=norm(last);if(nc.equals(nl))return;if(clean.length()>10&&last.length()>10&&(nc.contains(nl)||nl.contains(nc)))return;if(b.length()>0)b.append("\n");b.append(clean);} String norm(String s){return s.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}0-9]+","").trim();} String lastBlock(StringBuilder b){if(b.length()==0)return "";String all=b.toString().trim();int i=all.lastIndexOf("\n");return (i>=0?all.substring(i+1):all).trim();} void clearPartials(){srcPartial="";trPartial="";} String compose(boolean isTop){StringBuilder b=isTop?topFinal:bottomFinal;StringBuilder out=new StringBuilder(b.toString());if(isTop==sourceTop&&srcPartial.length()>0){if(out.length()>0)out.append("\n");out.append(srcPartial);}if(isTop!=sourceTop&&trPartial.length()>0){if(out.length()>0)out.append("\n");out.append(trPartial);}return out.toString();}
+            void render(){top.setHint(label(true));bottom.setHint(label(false));top.setText(compose(true));bottom.setText(compose(false));top.post(()->top.setSelection(top.length()));bottom.post(()->bottom.setSelection(bottom.length()));} String label(boolean isTop){return (isTop?"FELSŐ ":"ALSÓ ")+code(isTop?topLang:bottomLang)+(isTop==sourceTop?"  • beszéd":"  • fordítás");}
+            void confirm(){new AlertDialog.Builder(this).setTitle("Folyik még?").setMessage("20 perce aktív.").setPositiveButton("Igen",(d,w)->{sessionStart=System.currentTimeMillis();start();}).setNegativeButton("Leállítás",(d,w)->{sessionStart=0;stop();}).show();}
+            void showMenu(){String[] it={"OpenAI API kulcs","Nyelvpár: Magyar ⇄ "+langName(bottomLang),"Beszélgetési profil: "+profileLabel(),"Csendhatár: "+silence+" ms","Mindkettő törlése"};new AlertDialog.Builder(this).setTitle("Menü").setItems(it,(d,w)->{if(w==0)apiDialog();if(w==1)choosePair();if(w==2)chooseProfile();if(w==3)chooseSilence();if(w==4){topFinal.setLength(0);bottomFinal.setLength(0);clearPartials();render();}upd();}).show();}
+            void apiDialog(){EditText in=new EditText(this);in.setSingleLine(true);in.setText(key);in.setHint("sk-...");new AlertDialog.Builder(this).setTitle("OpenAI API kulcs").setView(in).setPositiveButton("Mentés",(d,w)->{key=in.getText().toString().trim();save();upd();}).setNegativeButton("Mégse",null).show();}
+            void chooseProfile(){String[] l=new String[profiles.length];for(int i=0;i<profiles.length;i++)l[i]=profiles[i][0]+(profiles[i][1].equals(profile)?" ✓":"");new AlertDialog.Builder(this).setTitle("Beszélgetési profil").setItems(l,(d,w)->{profile=profiles[w][1];save();sessionUpdateSafe();upd();}).show();}
+            void chooseSilence(){String[] l={"500","700","900","1200","1500","2000"};int[] v={500,700,900,1200,1500,2000};new AlertDialog.Builder(this).setTitle("Csendhatár ms").setItems(l,(d,w)->{silence=v[w];save();sessionUpdateSafe();upd();}).show();}
+            void choosePair(){String[] l=new String[pairs.length];for(int i=0;i<pairs.length;i++)l[i]=pairs[i][0]+(pairs[i][2].equals(bottomLang)?" ✓":"");new AlertDialog.Builder(this).setTitle("Nyelvpár választása").setItems(l,(d,w)->{pairIndex=w;topLang="hu";bottomLang=pairs[w][2];clearPartials();save();sessionUpdateSafe();upd();render();}).show();}
+            int findPair(String lang){for(int i=0;i<pairs.length;i++)if(pairs[i][2].equals(lang))return i;return 0;}
+            String profilePrompt(){if(profile.equals("truck_bulk"))return "két kamionsofőr beszélget ömlesztett áruszállításról, silóról, rakodásról, mérlegről, telephelyről és logisztikáról.";if(profile.equals("truck_tarp"))return "kamionos ponyvás fuvarozás, rakodás, ponyva, heveder, raklap, CMR, telephely.";if(profile.equals("truck_general"))return "kamionos munka, fuvarozás, rakodás, útvonal, diszpécser, telephely.";if(profile.equals("medical"))return "orvos-beteg beszélgetés.";if(profile.equals("restaurant"))return "étterem, rendelés, ételek, italok, fizetés.";if(profile.equals("tourism"))return "turizmus, utazás, útbaigazítás.";if(profile.equals("hotel"))return "szállás, foglalás, érkezés, távozás.";if(profile.equals("bank"))return "banki ügyintézés.";if(profile.equals("office"))return "hivatali ügyintézés.";if(profile.equals("customs"))return "vám, határ, okmányok, fuvar.";if(profile.equals("service"))return "autószerviz vagy gépjavítás.";if(profile.equals("pharmacy"))return "gyógyszertár.";return "általános beszélgetés.";}
+            String profileLabel(){for(String[] p:profiles)if(p[1].equals(profile))return p[0];return profile;} String langName(String c){for(String[] l:langs)if(l[2].equals(c))return l[0];return c;} String code(String c){if(c==null||c.isEmpty())return "AUTO";for(String[] l:langs)if(l[2].equals(c))return l[1];return c.toUpperCase(Locale.ROOT);}void upd(){mic.setText(streaming?"STOP":"MIKROFON");mic.setBackgroundColor(streaming?Color.rgb(30,130,70):Color.rgb(90,50,50));menu.setBackgroundColor(hasKey()?Color.rgb(55,60,70):Color.rgb(140,80,30));dir.setText(sourceCode()+" → "+targetCode());dir.setBackgroundColor(Color.rgb(60,95,150));clear.setBackgroundColor(Color.rgb(55,60,70));state.setText(streaming?"aktív: "+sourceCode()+"→"+targetCode():"készenlét");}
+            public void onPause(){super.onPause();if(streaming)stop();} public void onDestroy(){if(streaming)stop();audio.shutdownNow();super.onDestroy();}
+          }
+          }
+          EOT
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.7
+      - name: Hard validation - GA standard realtime, no old/beta/translate-only path
+        run: |
+          ! grep -R "OpenAI-Beta" -n app || (echo "HIBÁS: OpenAI-Beta maradt a kódban" && exit 1)
+          ! grep -R "v0.7" -n app || (echo "HIBÁS: v0.7 maradt a kódban" && exit 1)
+          ! grep -R "gpt-realtime-translate" -n app || (echo "HIBÁS: magyar célnyelvre nem jó translate-only modell maradt" && exit 1)
+          ! grep -R "realtime/translations" -n app || (echo "HIBÁS: magyar célnyelvre nem jó translation endpoint maradt" && exit 1)
+          grep -R "Fordító Konzol v1.7 LANG PAIRS" -n app/src/main/java || (echo "HIBÁS: nem a v1.6 cím van a kódban" && exit 1)
+          grep -R "wss://api.openai.com/v1/realtime?model=" -n app/src/main/java || (echo "HIBÁS: nem GA /v1/realtime URL van" && exit 1)
+          grep -R "gpt-realtime-2" -n app/src/main/java || (echo "HIBÁS: nem gpt-realtime-2 modell van" && exit 1)
+          grep -R "output_modalities" -n app/src/main/java || (echo "HIBÁS: GA output_modalities hiányzik" && exit 1)
+          grep -R "input_audio_buffer.append" -n app/src/main/java || (echo "HIBÁS: GA audio append hiányzik" && exit 1)
+          grep -R "response.output_text.delta" -n app/src/main/java || (echo "HIBÁS: válasz delta feldolgozás hiányzik" && exit 1)
+          grep -R "MAGYAR ABLAK" -n app/src/main/java || (echo "HIBÁS: fix felső ablak hiányzik" && exit 1)
+          grep -R "FRANCIA ABLAK" -n app/src/main/java || (echo "HIBÁS: fix alsó ablak hiányzik" && exit 1)
+          grep -R "sourceTop" -n app/src/main/java || (echo "HIBÁS: iránylogika hiányzik" && exit 1)
+          grep -R "choosePair" -n app/src/main/java || (echo "HIBÁS: nyelvpár-választó hiányzik" && exit 1)
+          grep -R "Nyelvpár választása" -n app/src/main/java || (echo "HIBÁS: hosszú nyomásos nyelvpár menü hiányzik" && exit 1)
+          grep -R "tr.put(\"language\"" -n app/src/main/java || (echo "HIBÁS: bemeneti nyelv paraméter hiányzik" && exit 1)
+          grep -R "ScrollingMovementMethod" -n app/src/main/java || (echo "HIBÁS: görgetéskezelés hiányzik" && exit 1)
+          grep -R "lastBlock" -n app/src/main/java || (echo "HIBÁS: ismétlésvédő hiányzik" && exit 1)
+          grep -R "━━━━━━━━━━━━━━━━━━━━" -n app/src/main/java || (echo "HIBÁS: ablakelválasztó hiányzik" && exit 1)
+      - name: Validate signing secrets
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64" || (echo "Missing ANDROID_KEYSTORE_BASE64" && exit 1)
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || (echo "Missing ANDROID_KEYSTORE_PASSWORD" && exit 1)
+          test -n "$ANDROID_KEY_ALIAS" || (echo "Missing ANDROID_KEY_ALIAS" && exit 1)
+          test -n "$ANDROID_KEY_PASSWORD" || (echo "Missing ANDROID_KEY_PASSWORD" && exit 1)
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
-      - name: Build debug APK
-        run: gradle assembleDebug
+      - name: Decode release keystore
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > fordito-release-key.jks
+          ls -lah fordito-release-key.jks
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
 
-      - name: Find APK
+      - name: Build signed release APK and AAB
+        run: gradle assembleRelease bundleRelease
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ github.workspace }}/fordito-release-key.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Collect release artifacts
         run: |
           mkdir -p artifact
-          cp $(find app/build/outputs -name "*.apk" -type f | head -n 1) artifact/ForditoKonzol-Realtime-v18.apk
+          cp app/build/outputs/apk/release/*.apk artifact/ForditoKonzol-GA-v17-LANG-PAIRS-release-signed.apk
+          cp app/build/outputs/bundle/release/*.aab artifact/ForditoKonzol-GA-v17-LANG-PAIRS-release-signed.aab
           ls -lah artifact
 
-      - name: Upload APK
+      - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: ForditoKonzol-Realtime-v18-apk
-          path: artifact/*.apk
+          name: ForditoKonzol-GA-v17-LANG-PAIRS-signed-release
+          path: artifact/*
           if-no-files-found: error
