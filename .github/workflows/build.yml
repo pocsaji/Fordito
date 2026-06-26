@@ -23,16 +23,27 @@ jobs:
           EOT
           cat > app/build.gradle.kts <<'EOT'
           plugins { id("com.android.application") }
-          android { namespace="com.attila.forditokonzolga17"; compileSdk=35
-              defaultConfig { applicationId="com.attila.forditokonzolga17"; minSdk=26; targetSdk=35; versionCode=17; versionName="1.7" }
+          android {
+              namespace = "com.attila.forditokonzolga17"
+              compileSdk = 35
+
+              defaultConfig {
+                  applicationId = "com.attila.forditokonzolga17"
+                  minSdk = 26
+                  targetSdk = 35
+                  versionCode = 17
+                  versionName = "1.7"
+              }
+
               signingConfigs {
                   create("release") {
-                      storeFile = file(System.getenv("ANDROID_KEYSTORE_FILE") ?: "fordito-release-key.jks")
+                      storeFile = rootProject.file("release-key.jks")
                       storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
                       keyAlias = System.getenv("ANDROID_KEY_ALIAS")
                       keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
                   }
               }
+
               buildTypes {
                   getByName("release") {
                       signingConfig = signingConfigs.getByName("release")
@@ -41,7 +52,10 @@ jobs:
                   }
               }
           }
-          dependencies { implementation("com.squareup.okhttp3:okhttp:4.12.0"); implementation("org.json:json:20240303") }
+          dependencies {
+              implementation("com.squareup.okhttp3:okhttp:4.12.0")
+              implementation("org.json:json:20240303")
+          }
           EOT
           cat > app/src/main/res/values/styles.xml <<'EOT'
           <resources><style name="AppTheme" parent="android:style/Theme.Material.NoActionBar"><item name="android:fontFamily">sans</item><item name="android:navigationBarColor">#101318</item><item name="android:statusBarColor">#101318</item><item name="android:windowBackground">#101318</item><item name="android:windowNoTitle">true</item></style></resources>
@@ -91,7 +105,6 @@ jobs:
             String profileLabel(){for(String[] p:profiles)if(p[1].equals(profile))return p[0];return profile;} String langName(String c){for(String[] l:langs)if(l[2].equals(c))return l[0];return c;} String code(String c){if(c==null||c.isEmpty())return "AUTO";for(String[] l:langs)if(l[2].equals(c))return l[1];return c.toUpperCase(Locale.ROOT);}void upd(){mic.setText(streaming?"STOP":"MIKROFON");mic.setBackgroundColor(streaming?Color.rgb(30,130,70):Color.rgb(90,50,50));menu.setBackgroundColor(hasKey()?Color.rgb(55,60,70):Color.rgb(140,80,30));dir.setText(sourceCode()+" → "+targetCode());dir.setBackgroundColor(Color.rgb(60,95,150));clear.setBackgroundColor(Color.rgb(55,60,70));state.setText(streaming?"aktív: "+sourceCode()+"→"+targetCode():"készenlét");}
             public void onPause(){super.onPause();if(streaming)stop();} public void onDestroy(){if(streaming)stop();audio.shutdownNow();super.onDestroy();}
           }
-          }
           EOT
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -102,64 +115,58 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.7
+      - name: Decode Android release key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64" || (echo "HIBÁS: hiányzik az ANDROID_KEYSTORE_BASE64 secret" && exit 1)
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release-key.jks
+          test -s release-key.jks || (echo "HIBÁS: nem jött létre a release-key.jks" && exit 1)
+
       - name: Hard validation - GA standard realtime, no old/beta/translate-only path
         run: |
           ! grep -R "OpenAI-Beta" -n app || (echo "HIBÁS: OpenAI-Beta maradt a kódban" && exit 1)
           ! grep -R "v0.7" -n app || (echo "HIBÁS: v0.7 maradt a kódban" && exit 1)
           ! grep -R "gpt-realtime-translate" -n app || (echo "HIBÁS: magyar célnyelvre nem jó translate-only modell maradt" && exit 1)
           ! grep -R "realtime/translations" -n app || (echo "HIBÁS: magyar célnyelvre nem jó translation endpoint maradt" && exit 1)
-          grep -R "Fordító Konzol v1.7 LANG PAIRS" -n app/src/main/java || (echo "HIBÁS: nem a v1.6 cím van a kódban" && exit 1)
+          grep -R "Fordító Konzol v1.7 LANG PAIRS" -n app/src/main/java || (echo "HIBÁS: nem a v1.7 cím van a kódban" && exit 1)
           grep -R "wss://api.openai.com/v1/realtime?model=" -n app/src/main/java || (echo "HIBÁS: nem GA /v1/realtime URL van" && exit 1)
           grep -R "gpt-realtime-2" -n app/src/main/java || (echo "HIBÁS: nem gpt-realtime-2 modell van" && exit 1)
           grep -R "output_modalities" -n app/src/main/java || (echo "HIBÁS: GA output_modalities hiányzik" && exit 1)
           grep -R "input_audio_buffer.append" -n app/src/main/java || (echo "HIBÁS: GA audio append hiányzik" && exit 1)
           grep -R "response.output_text.delta" -n app/src/main/java || (echo "HIBÁS: válasz delta feldolgozás hiányzik" && exit 1)
-          grep -R "MAGYAR ABLAK" -n app/src/main/java || (echo "HIBÁS: fix felső ablak hiányzik" && exit 1)
-          grep -R "FRANCIA ABLAK" -n app/src/main/java || (echo "HIBÁS: fix alsó ablak hiányzik" && exit 1)
+          grep -R "MAGYAR ABLAK" -n app/src/main/java || (echo "HIBÁS: felső magyar ablak hiányzik" && exit 1)
+          grep -R "code(bottomLang).*ABLAK" -n app/src/main/java || (echo "HIBÁS: dinamikus alsó nyelvi ablak hiányzik" && exit 1)
           grep -R "sourceTop" -n app/src/main/java || (echo "HIBÁS: iránylogika hiányzik" && exit 1)
           grep -R "choosePair" -n app/src/main/java || (echo "HIBÁS: nyelvpár-választó hiányzik" && exit 1)
-          grep -R "Nyelvpár választása" -n app/src/main/java || (echo "HIBÁS: hosszú nyomásos nyelvpár menü hiányzik" && exit 1)
+          grep -R "Nyelvpár választása" -n app/src/main/java || (echo "HIBÁS: nyelvpár menü hiányzik" && exit 1)
           grep -R "tr.put(\"language\"" -n app/src/main/java || (echo "HIBÁS: bemeneti nyelv paraméter hiányzik" && exit 1)
           grep -R "ScrollingMovementMethod" -n app/src/main/java || (echo "HIBÁS: görgetéskezelés hiányzik" && exit 1)
           grep -R "lastBlock" -n app/src/main/java || (echo "HIBÁS: ismétlésvédő hiányzik" && exit 1)
           grep -R "━━━━━━━━━━━━━━━━━━━━" -n app/src/main/java || (echo "HIBÁS: ablakelválasztó hiányzik" && exit 1)
-      - name: Validate signing secrets
-        run: |
-          test -n "$ANDROID_KEYSTORE_BASE64" || (echo "Missing ANDROID_KEYSTORE_BASE64" && exit 1)
-          test -n "$ANDROID_KEYSTORE_PASSWORD" || (echo "Missing ANDROID_KEYSTORE_PASSWORD" && exit 1)
-          test -n "$ANDROID_KEY_ALIAS" || (echo "Missing ANDROID_KEY_ALIAS" && exit 1)
-          test -n "$ANDROID_KEY_PASSWORD" || (echo "Missing ANDROID_KEY_PASSWORD" && exit 1)
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-
-      - name: Decode release keystore
-        run: |
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > fordito-release-key.jks
-          ls -lah fordito-release-key.jks
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
 
       - name: Build signed release APK and AAB
-        run: gradle assembleRelease bundleRelease
         env:
-          ANDROID_KEYSTORE_FILE: ${{ github.workspace }}/fordito-release-key.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || (echo "HIBÁS: hiányzik az ANDROID_KEYSTORE_PASSWORD secret" && exit 1)
+          test -n "$ANDROID_KEY_ALIAS" || (echo "HIBÁS: hiányzik az ANDROID_KEY_ALIAS secret" && exit 1)
+          test -n "$ANDROID_KEY_PASSWORD" || (echo "HIBÁS: hiányzik az ANDROID_KEY_PASSWORD secret" && exit 1)
+          gradle clean assembleRelease bundleRelease
 
-      - name: Collect release artifacts
+      - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/*.apk artifact/ForditoKonzol-GA-v17-LANG-PAIRS-release-signed.apk
-          cp app/build/outputs/bundle/release/*.aab artifact/ForditoKonzol-GA-v17-LANG-PAIRS-release-signed.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/ForditoKonzol-GA-v17-LANG-PAIRS-release-signed.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/ForditoKonzol-GA-v17-LANG-PAIRS-release-signed.aab
+          sha256sum artifact/* > artifact/SHA256SUMS.txt
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: ForditoKonzol-GA-v17-LANG-PAIRS-signed-release
+          name: ForditoKonzol-GA-v17-LANG-PAIRS-release
           path: artifact/*
           if-no-files-found: error
