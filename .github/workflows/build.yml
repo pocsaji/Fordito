@@ -29,7 +29,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "com.attila.forditokonzol"; minSdk = 26; targetSdk = 35; versionCode = 9; versionName = "0.9" }
+              defaultConfig { applicationId = "com.attila.forditokonzol"; minSdk = 26; targetSdk = 35; versionCode = 11; versionName = "1.1" }
           }
           dependencies {
               implementation("com.squareup.okhttp3:okhttp:4.12.0")
@@ -189,23 +189,23 @@ jobs:
               void ui() {
                   LinearLayout root = new LinearLayout(this);
                   root.setOrientation(LinearLayout.VERTICAL);
-                  root.setPadding(12,34,12,110);
+                  root.setPadding(8,62,8,170);
                   root.setBackgroundColor(Color.rgb(16,19,24));
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v0.9");
+                  TextView title = label("Fordító Konzol v1.1");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
-                  bar.addView(title, new LinearLayout.LayoutParams(0,40,1));
-                  bar.addView(state, new LinearLayout.LayoutParams(0,40,1));
+                  bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
+                  bar.addView(state, new LinearLayout.LayoutParams(0,42,1));
                   root.addView(bar);
 
                   LinearLayout langRow = row();
                   topLangBtn = btn("FELSŐ");
                   bottomLangBtn = btn("ALSÓ");
-                  langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,56,1));
-                  langRow.addView(bottomLangBtn, new LinearLayout.LayoutParams(0,56,1));
+                  langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,64,1));
+                  langRow.addView(bottomLangBtn, new LinearLayout.LayoutParams(0,64,1));
                   root.addView(langRow);
 
                   topBox = box("FELSŐ ABLAK — átirat / fordítás / kézi bevitel");
@@ -217,9 +217,9 @@ jobs:
                   micBtn = btn("MIKROFON");
                   translateBtn = btn("FORDÍT");
                   menuBtn = btn("MENÜ");
-                  controls.addView(micBtn, new LinearLayout.LayoutParams(0,68,1));
-                  controls.addView(translateBtn, new LinearLayout.LayoutParams(0,68,1));
-                  controls.addView(menuBtn, new LinearLayout.LayoutParams(0,68,1));
+                  controls.addView(micBtn, new LinearLayout.LayoutParams(0,58,1));
+                  controls.addView(translateBtn, new LinearLayout.LayoutParams(0,58,1));
+                  controls.addView(menuBtn, new LinearLayout.LayoutParams(0,58,1));
                   root.addView(controls);
 
                   topBox.setOnClickListener(v -> { topActive = true; updateButtons(); });
@@ -243,7 +243,7 @@ jobs:
                   TextView t = new TextView(this);
                   t.setText(s);
                   t.setTextColor(Color.LTGRAY);
-                  t.setTextSize(13);
+                  t.setTextSize(12);
                   return t;
               }
 
@@ -252,7 +252,7 @@ jobs:
                   b.setText(s);
                   b.setTextColor(Color.WHITE);
                   b.setAllCaps(false);
-                  b.setTextSize(15);
+                  b.setTextSize(14);
                   b.setSingleLine(true);
                   b.setPadding(4,2,4,2);
                   return b;
@@ -263,7 +263,7 @@ jobs:
                   e.setHint(hint);
                   e.setHintTextColor(Color.GRAY);
                   e.setTextColor(Color.WHITE);
-                  e.setTextSize(16);
+                  e.setTextSize(14);
                   e.setGravity(Gravity.TOP|Gravity.START);
                   e.setSingleLine(false);
                   e.setMinLines(5);
@@ -329,9 +329,10 @@ jobs:
               void sessionUpdate() {
                   try {
                       JSONObject session = new JSONObject();
+                      session.put("type", "realtime");
+                      session.put("model", model);
                       session.put("instructions", instructions());
-                      session.put("modalities", new JSONArray().put("text"));
-                      session.put("input_audio_format", "pcm16");
+                      session.put("output_modalities", new JSONArray().put("text"));
 
                       JSONObject vad = new JSONObject();
                       vad.put("type", "semantic_vad");
@@ -424,7 +425,9 @@ jobs:
                       }
 
                       if(type.equals("error")) {
-                          runOnUiThread(() -> append("\n[hiba] " + o.optJSONObject("error")));
+                          JSONObject er = o.optJSONObject("error");
+                          String msg = er == null ? o.toString() : er.optString("message", er.toString());
+                          runOnUiThread(() -> append("\n[hiba] " + msg));
                       }
                   } catch(Exception e) {
                       runOnUiThread(() -> append("\n[event hiba] " + e.getMessage()));
@@ -468,7 +471,6 @@ jobs:
                       JSONObject resp = new JSONObject();
                       resp.put("type", "response.create");
                       JSONObject response = new JSONObject();
-                      response.put("modalities", new JSONArray().put("text"));
                       response.put("instructions", instructions());
                       resp.put("response", response);
                       ws.send(resp.toString());
@@ -649,12 +651,12 @@ jobs:
       - name: Find APK
         run: |
           mkdir -p artifact
-          cp $(find app/build/outputs -name "*.apk" -type f | head -n 1) artifact/ForditoKonzol-Realtime-v09.apk
+          cp $(find app/build/outputs -name "*.apk" -type f | head -n 1) artifact/ForditoKonzol-Realtime-v11.apk
           ls -lah artifact
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ForditoKonzol-Realtime-v09-apk
+          name: ForditoKonzol-Realtime-v11-apk
           path: artifact/*.apk
           if-no-files-found: error
