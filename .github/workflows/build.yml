@@ -29,7 +29,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "com.attila.forditokonzol"; minSdk = 26; targetSdk = 35; versionCode = 13; versionName = "1.3" }
+              defaultConfig { applicationId = "com.attila.forditokonzol"; minSdk = 26; targetSdk = 35; versionCode = 14; versionName = "1.4" }
           }
           dependencies {
               implementation("com.squareup.okhttp3:okhttp:4.12.0")
@@ -95,8 +95,10 @@ jobs:
               boolean connected = false;
               boolean streaming = false;
               boolean topActive = true;
+              boolean manualTopSource = true;
               boolean responseInProgress = false;
               long sessionStart = 0L;
+              String pendingOutput = "";
 
               String apiKey = "";
               String model = "gpt-realtime-2";
@@ -196,7 +198,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v1.3");
+                  TextView title = label("Fordító Konzol v1.4");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -224,8 +226,8 @@ jobs:
                   controls.addView(menuBtn, new LinearLayout.LayoutParams(0,58,1));
                   root.addView(controls);
 
-                  topBox.setOnClickListener(v -> { topActive = true; updateButtons(); });
-                  bottomBox.setOnClickListener(v -> { topActive = false; updateButtons(); });
+                  topBox.setOnClickListener(v -> { manualTopSource = true; updateButtons(); });
+                  bottomBox.setOnClickListener(v -> { manualTopSource = false; updateButtons(); });
                   topLangBtn.setOnClickListener(v -> chooseLang(true));
                   bottomLangBtn.setOnClickListener(v -> chooseLang(false));
                   micBtn.setOnClickListener(v -> { if(streaming) stop(); else start(); });
@@ -362,7 +364,10 @@ jobs:
                   String src = topActive ? code(topLang) : code(bottomLang);
                   String tgt = topActive ? code(bottomLang) : code(topLang);
                   return "You are a live interpreter. Output text only. No explanations. " +
-                    "Source language: " + src + ". Target language: " + tgt + ". If AUTO, detect it. " +
+                    "Work ONLY with these two selected languages: " + code(topLang) + " and " + code(bottomLang) + ". " +
+                    "Ignore other languages and background speech unless it clearly belongs to the active speaker. " +
+                    "Source language: " + src + ". Target language: " + tgt + ". If AUTO, detect only between the two selected languages. " +
+                    "For every completed thought, output exactly two lines in this format: ORIGINAL: <clean source transcript> then TRANSLATION: <natural target translation>. " +
                     "Conversation profile: " + profilePrompt() + " " +
                     "Translation mode: " + modePrompt() + " " +
                     "Do not invent missing information. Do not add details that were not said. " +
@@ -434,11 +439,13 @@ jobs:
 
                       if(type.equals("response.text.delta") || type.equals("response.output_text.delta")) {
                           String d = o.optString("delta", "");
-                          if(!d.isEmpty()) runOnUiThread(() -> appendDelta(d));
+                          if(!d.isEmpty()) pendingOutput += d;
                       }
 
-                      if(type.equals("response.output_text.done") || type.equals("response.text.done")) {
-                          runOnUiThread(() -> append("\n"));
+                      if(type.equals("response.output_text.done") || type.equals("response.text.done") || type.equals("response.done")) {
+                          String out = pendingOutput.trim();
+                          pendingOutput = "";
+                          if(!out.isEmpty()) runOnUiThread(() -> routeAiOutput(out));
                       }
 
                       if(type.equals("error")) {
@@ -453,7 +460,7 @@ jobs:
               }
 
               void manualTranslate() {
-                  EditText source = topActive ? topBox : bottomBox;
+                  EditText source = manualTopSource ? topBox : bottomBox;
                   String text = source.getText().toString().trim();
                   if(text.isEmpty()) {
                       Toast.makeText(this, "Nincs fordítandó szöveg.", Toast.LENGTH_LONG).show();
@@ -471,6 +478,8 @@ jobs:
               }
 
               void sendManualText(String text) {
+                  topActive = manualTopSource;
+                  updateButtons();
                   if(responseInProgress && ws != null) {
                       try {
                           JSONObject cancel = new JSONObject();
@@ -488,7 +497,7 @@ jobs:
                       JSONArray content = new JSONArray();
                       JSONObject c = new JSONObject();
                       c.put("type", "input_text");
-                      c.put("text", "Translate this manually entered text according to the current instructions and profile:\n" + text);
+                      c.put("text", "Manual text input. Output exactly two lines: ORIGINAL: the corrected source text, TRANSLATION: the translation. Text:\n" + text);
                       content.put(c);
                       item.put("content", content);
                       msg.put("item", item);
@@ -506,16 +515,49 @@ jobs:
                   }
               }
 
-              void appendDelta(String s) {
-                  EditText target = topActive ? bottomBox : topBox;
+              void routeAiOutput(String out) {
+                  String original = extractAfter(out, "ORIGINAL:");
+                  String translation = extractAfter(out, "TRANSLATION:");
+
+                  if(original.length() == 0 && translation.length() == 0) {
+                      translation = out;
+                  }
+
+                  EditText srcBox = topActive ? topBox : bottomBox;
+                  EditText dstBox = topActive ? bottomBox : topBox;
+
+                  if(original.length() > 0) appendTo(srcBox, original + "\n");
+                  if(translation.length() > 0) appendTo(dstBox, translation + "\n");
+              }
+
+              String extractAfter(String out, String key) {
+                  int i = out.indexOf(key);
+                  if(i < 0) return "";
+                  int start = i + key.length();
+                  int nextOriginal = out.indexOf("ORIGINAL:", start);
+                  int nextTranslation = out.indexOf("TRANSLATION:", start);
+                  int end = out.length();
+                  if(nextOriginal >= 0) end = Math.min(end, nextOriginal);
+                  if(nextTranslation >= 0) end = Math.min(end, nextTranslation);
+                  return out.substring(start, end).trim();
+              }
+
+              void appendTo(EditText target, String s) {
+                  if(s == null || s.length() == 0) return;
+                  String old = target.getText().toString();
+                  if(old.length() > 0 && !old.endsWith("\n")) target.append("\n");
                   target.append(s);
                   target.setSelection(target.getText().length());
               }
 
+              void appendDelta(String s) {
+                  EditText target = topActive ? bottomBox : topBox;
+                  appendTo(target, s);
+              }
+
               void append(String s) {
                   EditText target = topActive ? bottomBox : topBox;
-                  target.append(s);
-                  target.setSelection(target.getText().length());
+                  appendTo(target, s);
               }
 
               void confirm() {
@@ -586,8 +628,8 @@ jobs:
                   String[] labels = new String[langs.length];
                   for(int i=0;i<langs.length;i++) labels[i] = langs[i][0] + " (" + langs[i][1] + ")" + (langs[i][2].equals(current) ? " ✓" : "");
                   new AlertDialog.Builder(this).setTitle(top ? "Felső nyelv" : "Alsó nyelv").setItems(labels, (d,w) -> {
-                      if(top) { topLang = langs[w][2]; topActive = true; }
-                      else { bottomLang = langs[w][2]; topActive = false; }
+                      if(top) { topLang = langs[w][2]; topActive = true; manualTopSource = true; }
+                      else { bottomLang = langs[w][2]; topActive = false; manualTopSource = false; }
                       save();
                       sessionUpdateIfConnected();
                       updateButtons();
@@ -678,12 +720,12 @@ jobs:
       - name: Find APK
         run: |
           mkdir -p artifact
-          cp $(find app/build/outputs -name "*.apk" -type f | head -n 1) artifact/ForditoKonzol-Realtime-v13.apk
+          cp $(find app/build/outputs -name "*.apk" -type f | head -n 1) artifact/ForditoKonzol-Realtime-v14.apk
           ls -lah artifact
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ForditoKonzol-Realtime-v13-apk
+          name: ForditoKonzol-Realtime-v14-apk
           path: artifact/*.apk
           if-no-files-found: error
