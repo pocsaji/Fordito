@@ -29,7 +29,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "com.attila.forditokonzol"; minSdk = 26; targetSdk = 35; versionCode = 11; versionName = "1.1" }
+              defaultConfig { applicationId = "com.attila.forditokonzol"; minSdk = 26; targetSdk = 35; versionCode = 12; versionName = "1.2" }
           }
           dependencies {
               implementation("com.squareup.okhttp3:okhttp:4.12.0")
@@ -95,6 +95,7 @@ jobs:
               boolean connected = false;
               boolean streaming = false;
               boolean topActive = true;
+              boolean responseInProgress = false;
               long sessionStart = 0L;
 
               String apiKey = "";
@@ -194,7 +195,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v1.1");
+                  TextView title = label("Fordító Konzol v1.2");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -338,7 +339,14 @@ jobs:
                       vad.put("type", "semantic_vad");
                       vad.put("eagerness", vadMode);
                       vad.put("create_response", true);
-                      session.put("turn_detection", vad);
+
+                      JSONObject input = new JSONObject();
+                      input.put("turn_detection", vad);
+
+                      JSONObject audio = new JSONObject();
+                      audio.put("input", input);
+
+                      session.put("audio", audio);
 
                       JSONObject evt = new JSONObject();
                       evt.put("type", "session.update");
@@ -415,6 +423,14 @@ jobs:
                       JSONObject o = new JSONObject(s);
                       String type = o.optString("type", "");
 
+                      if(type.equals("response.created")) {
+                          responseInProgress = true;
+                      }
+
+                      if(type.equals("response.done")) {
+                          responseInProgress = false;
+                      }
+
                       if(type.equals("response.text.delta") || type.equals("response.output_text.delta")) {
                           String d = o.optString("delta", "");
                           if(!d.isEmpty()) runOnUiThread(() -> appendDelta(d));
@@ -427,6 +443,7 @@ jobs:
                       if(type.equals("error")) {
                           JSONObject er = o.optJSONObject("error");
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
+                          if(msg.contains("response in progress")) responseInProgress = true;
                           runOnUiThread(() -> append("\n[hiba] " + msg));
                       }
                   } catch(Exception e) {
@@ -453,6 +470,10 @@ jobs:
               }
 
               void sendManualText(String text) {
+                  if(responseInProgress) {
+                      new Handler().postDelayed(() -> sendManualText(text), 1200);
+                      return;
+                  }
                   try {
                       JSONObject msg = new JSONObject();
                       msg.put("type", "conversation.item.create");
@@ -473,6 +494,7 @@ jobs:
                       JSONObject response = new JSONObject();
                       response.put("instructions", instructions());
                       resp.put("response", response);
+                      responseInProgress = true;
                       ws.send(resp.toString());
                   } catch(Exception e) {
                       append("\n[kézi fordítás hiba] " + e.getMessage());
@@ -651,12 +673,12 @@ jobs:
       - name: Find APK
         run: |
           mkdir -p artifact
-          cp $(find app/build/outputs -name "*.apk" -type f | head -n 1) artifact/ForditoKonzol-Realtime-v11.apk
+          cp $(find app/build/outputs -name "*.apk" -type f | head -n 1) artifact/ForditoKonzol-Realtime-v12.apk
           ls -lah artifact
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ForditoKonzol-Realtime-v11-apk
+          name: ForditoKonzol-Realtime-v12-apk
           path: artifact/*.apk
           if-no-files-found: error
