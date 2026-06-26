@@ -29,7 +29,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "com.attila.forditokonzol"; minSdk = 26; targetSdk = 35; versionCode = 14; versionName = "1.4" }
+              defaultConfig { applicationId = "com.attila.forditokonzol"; minSdk = 26; targetSdk = 35; versionCode = 15; versionName = "1.5" }
           }
           dependencies {
               implementation("com.squareup.okhttp3:okhttp:4.12.0")
@@ -99,6 +99,7 @@ jobs:
               boolean responseInProgress = false;
               long sessionStart = 0L;
               String pendingOutput = "";
+              String pendingManualText = "";
 
               String apiKey = "";
               String model = "gpt-realtime-2";
@@ -198,7 +199,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v1.4");
+                  TextView title = label("Fordító Konzol v1.5");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -230,7 +231,7 @@ jobs:
                   bottomBox.setOnClickListener(v -> { manualTopSource = false; updateButtons(); });
                   topLangBtn.setOnClickListener(v -> chooseLang(true));
                   bottomLangBtn.setOnClickListener(v -> chooseLang(false));
-                  micBtn.setOnClickListener(v -> { if(streaming) stop(); else start(); });
+                  micBtn.setOnClickListener(v -> { if(streaming) stop(); else start(true); });
                   translateBtn.setOnClickListener(v -> manualTranslate());
                   menuBtn.setOnClickListener(v -> menu());
 
@@ -285,10 +286,10 @@ jobs:
                   return apiKey != null && apiKey.trim().startsWith("sk-");
               }
 
-              void start() {
+              void start(boolean withAudio) {
                   if(!hasKey()) { showApi(); return; }
-                  if(Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reqMic(); return; }
-                  if(sessionStart == 0L) sessionStart = System.currentTimeMillis();
+                  if(withAudio && Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reqMic(); return; }
+                  if(withAudio && sessionStart == 0L) sessionStart = System.currentTimeMillis();
                   if(System.currentTimeMillis() - sessionStart > 20L*60L*1000L) { confirm(); return; }
 
                   state.setText("kapcsolódás");
@@ -303,9 +304,14 @@ jobs:
                           connected = true;
                           runOnUiThread(() -> {
                               sessionUpdate();
-                              audioLoop();
-                              state.setText("realtime aktív");
+                              if(withAudio) audioLoop();
+                              else state.setText("fordítási kapcsolat");
                               updateButtons();
+                              if(!withAudio && pendingManualText.length() > 0) {
+                                  String p = pendingManualText;
+                                  pendingManualText = "";
+                                  new Handler().postDelayed(() -> sendManualText(p), 500);
+                              }
                           });
                       }
 
@@ -361,13 +367,14 @@ jobs:
               }
 
               String instructions() {
-                  String src = topActive ? code(topLang) : code(bottomLang);
-                  String tgt = topActive ? code(bottomLang) : code(topLang);
+                  String top = code(topLang);
+                  String bottom = code(bottomLang);
                   return "You are a live interpreter. Output text only. No explanations. " +
-                    "Work ONLY with these two selected languages: " + code(topLang) + " and " + code(bottomLang) + ". " +
+                    "Work ONLY with these two selected languages: " + top + " and " + bottom + ". " +
+                    "Detect whether the current input is " + top + " or " + bottom + ". " +
+                    "If the input is " + top + ", translate to " + bottom + ". If the input is " + bottom + ", translate to " + top + ". " +
                     "Ignore other languages and background speech unless it clearly belongs to the active speaker. " +
-                    "Source language: " + src + ". Target language: " + tgt + ". If AUTO, detect only between the two selected languages. " +
-                    "For every completed thought, output exactly two lines in this format: ORIGINAL: <clean source transcript> then TRANSLATION: <natural target translation>. " +
+                    "For every completed thought, output exactly three lines in this format: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <clean source transcript> then TRANSLATION: <natural translation into the other selected language>. " +
                     "Conversation profile: " + profilePrompt() + " " +
                     "Translation mode: " + modePrompt() + " " +
                     "Do not invent missing information. Do not add details that were not said. " +
@@ -470,8 +477,8 @@ jobs:
                   if(!hasKey()) { showApi(); return; }
 
                   if(ws == null || !connected) {
-                      start();
-                      new Handler().postDelayed(() -> sendManualText(text), 1200);
+                      pendingManualText = text;
+                      start(false);
                   } else {
                       sendManualText(text);
                   }
@@ -497,7 +504,9 @@ jobs:
                       JSONArray content = new JSONArray();
                       JSONObject c = new JSONObject();
                       c.put("type", "input_text");
-                      c.put("text", "Manual text input. Output exactly two lines: ORIGINAL: the corrected source text, TRANSLATION: the translation. Text:\n" + text);
+                      String srcCode = manualTopSource ? code(topLang) : code(bottomLang);
+                      String tgtCode = manualTopSource ? code(bottomLang) : code(topLang);
+                      c.put("text", "Manual text input. Source language is " + srcCode + ". Target language is " + tgtCode + ". Output exactly three lines: SOURCE_LANG: " + srcCode + " ORIGINAL: the corrected source text TRANSLATION: the translation. Text:\n" + text);
                       content.put(c);
                       item.put("content", content);
                       msg.put("item", item);
@@ -516,6 +525,7 @@ jobs:
               }
 
               void routeAiOutput(String out) {
+                  String sourceLang = extractAfter(out, "SOURCE_LANG:").toUpperCase(Locale.ROOT);
                   String original = extractAfter(out, "ORIGINAL:");
                   String translation = extractAfter(out, "TRANSLATION:");
 
@@ -523,8 +533,15 @@ jobs:
                       translation = out;
                   }
 
-                  EditText srcBox = topActive ? topBox : bottomBox;
-                  EditText dstBox = topActive ? bottomBox : topBox;
+                  boolean sourceIsTop = sourceLang.contains(code(topLang));
+                  boolean sourceIsBottom = sourceLang.contains(code(bottomLang));
+
+                  if(!sourceIsTop && !sourceIsBottom) {
+                      sourceIsTop = manualTopSource;
+                  }
+
+                  EditText srcBox = sourceIsTop ? topBox : bottomBox;
+                  EditText dstBox = sourceIsTop ? bottomBox : topBox;
 
                   if(original.length() > 0) appendTo(srcBox, original + "\n");
                   if(translation.length() > 0) appendTo(dstBox, translation + "\n");
@@ -534,11 +551,12 @@ jobs:
                   int i = out.indexOf(key);
                   if(i < 0) return "";
                   int start = i + key.length();
-                  int nextOriginal = out.indexOf("ORIGINAL:", start);
-                  int nextTranslation = out.indexOf("TRANSLATION:", start);
                   int end = out.length();
-                  if(nextOriginal >= 0) end = Math.min(end, nextOriginal);
-                  if(nextTranslation >= 0) end = Math.min(end, nextTranslation);
+                  String[] keys = {"SOURCE_LANG:", "ORIGINAL:", "TRANSLATION:"};
+                  for(String k: keys) {
+                      int n = out.indexOf(k, start);
+                      if(n >= 0) end = Math.min(end, n);
+                  }
                   return out.substring(start, end).trim();
               }
 
@@ -564,7 +582,7 @@ jobs:
                   new AlertDialog.Builder(this)
                     .setTitle("Folyik még a beszélgetés?")
                     .setMessage("20 perce aktív a rendszer. Folytassuk?")
-                    .setPositiveButton("Igen", (d,w) -> { sessionStart = System.currentTimeMillis(); start(); })
+                    .setPositiveButton("Igen", (d,w) -> { sessionStart = System.currentTimeMillis(); start(true); })
                     .setNegativeButton("Leállítás", (d,w) -> { sessionStart = 0L; stop(); })
                     .show();
               }
@@ -720,12 +738,12 @@ jobs:
       - name: Find APK
         run: |
           mkdir -p artifact
-          cp $(find app/build/outputs -name "*.apk" -type f | head -n 1) artifact/ForditoKonzol-Realtime-v14.apk
+          cp $(find app/build/outputs -name "*.apk" -type f | head -n 1) artifact/ForditoKonzol-Realtime-v15.apk
           ls -lah artifact
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ForditoKonzol-Realtime-v14-apk
+          name: ForditoKonzol-Realtime-v15-apk
           path: artifact/*.apk
           if-no-files-found: error
