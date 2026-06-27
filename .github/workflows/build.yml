@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 31; versionName = "3.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 32; versionName = "3.2" }
 
               signingConfigs {
                   create("release") {
@@ -142,6 +142,7 @@ jobs:
                   String bottomText = "";
                   boolean dirty = false;
                   boolean dirtyTopSource = true;
+                  int retryCount = 0;
               }
 
               final ArrayList<TextBlock> textBlocks = new ArrayList<>();
@@ -248,7 +249,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v3.1");
+                  TextView title = label("Fordító Konzol v3.2");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -370,6 +371,7 @@ jobs:
                           if(top) b.topText = newText; else b.bottomText = newText;
                           b.dirty = true;
                           b.dirtyTopSource = top;
+                          b.retryCount = 0;
                           // Ha a forrásblokk változott, a párja régi fordítás lehet. Ne töröljük,
                           // amíg az új fordítás meg nem érkezik, hogy ne villogjon az ablak.
                       }
@@ -535,10 +537,7 @@ jobs:
                       }
 
                       @Override public void onFailure(WebSocket w, Throwable t, Response r) {
-                          runOnUiThread(() -> {
-                              append("\n[kapcsolat hiba] " + t.getMessage());
-                              stop();
-                          });
+                          runOnUiThread(() -> handleConnectionFailure(t));
                       }
 
                       @Override public void onClosed(WebSocket w, int c, String reason) {
@@ -645,6 +644,41 @@ jobs:
                           }
                       }
                   });
+              }
+
+              void handleConnectionFailure(Throwable t) {
+                  String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
+
+                  // Dirty blokk fordításnál a hiba nem kerülhet az ablakba.
+                  // A blokk dirty marad, így később is újrafordítható.
+                  if(dirtyResponseMode || pendingDirtyBlockId >= 0) {
+                      int id = pendingDirtyBlockId;
+                      if(id >= 0 && id < textBlocks.size()) {
+                          TextBlock b = textBlocks.get(id);
+                          b.dirty = true;
+                          if(b.retryCount < 2) {
+                              b.retryCount++;
+                              Toast.makeText(this, "Kapcsolat hiba, újrapróbálom a blokkot...", Toast.LENGTH_SHORT).show();
+                              dirtyResponseMode = false;
+                              manualResponseMode = false;
+                              pendingManualText = "";
+                              stop();
+                              topBox.postDelayed(() -> manualTranslate(), 1500);
+                              return;
+                          } else {
+                              Toast.makeText(this, "Kapcsolat hiba, blokk később újrafordítható.", Toast.LENGTH_LONG).show();
+                              dirtyResponseMode = false;
+                              manualResponseMode = false;
+                              pendingManualText = "";
+                              stop();
+                              return;
+                          }
+                      }
+                  }
+
+                  // Normál beszéd/élő fordításnál se írjunk hibaüzenetet a fordítási ablakba.
+                  Toast.makeText(this, "Kapcsolat hiba: " + msg, Toast.LENGTH_LONG).show();
+                  stop();
               }
 
               void stop() {
@@ -839,6 +873,7 @@ jobs:
                       if(b.dirtyTopSource) b.bottomText = tr;
                       else b.topText = tr;
                       b.dirty = false;
+                      b.retryCount = 0;
                       renderBlocksKeepView();
                       if(!dirtyBlocks().isEmpty()) {
                           Toast.makeText(this, "Hosszú beillesztés: folytatom a következő blokkal...", Toast.LENGTH_SHORT).show();
@@ -847,7 +882,7 @@ jobs:
                           Toast.makeText(this, "Módosított blokkok újrafordítva.", Toast.LENGTH_SHORT).show();
                       }
                   } catch(Exception e) {
-                      append("\n[dirty fordítás hiba] " + e.getMessage());
+                      Toast.makeText(this, "Dirty fordítás hiba, blokk később újrafordítható.", Toast.LENGTH_LONG).show();
                   }
               }
 
