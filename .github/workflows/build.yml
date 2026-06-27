@@ -265,6 +265,8 @@ jobs:
                   bottomBox.addTextChangedListener(manualWatcher(false));
                   topLangBtn.setOnClickListener(v -> chooseLang(true));
                   bottomLangBtn.setOnClickListener(v -> chooseLang(false));
+                  topLangBtn.setOnLongClickListener(v -> { copyBox(true); return true; });
+                  bottomLangBtn.setOnLongClickListener(v -> { copyBox(false); return true; });
                   micBtn.setOnClickListener(v -> { if(streaming) stop(); else start(true); });
                   translateBtn.setOnClickListener(v -> manualTranslate());
                   menuBtn.setOnClickListener(v -> menu());
@@ -306,6 +308,9 @@ jobs:
                   e.setGravity(Gravity.TOP|Gravity.START);
                   e.setSingleLine(false);
                   e.setMinLines(5);
+                  e.setVerticalScrollBarEnabled(true);
+                  e.setScrollBarStyle(EditText.SCROLLBARS_INSIDE_INSET);
+                  e.setScroller(new Scroller(this));
                   e.setBackgroundColor(Color.rgb(27,32,41));
                   e.setPadding(14,14,14,14);
                   return e;
@@ -683,6 +688,8 @@ jobs:
                       "Beszélgetési profil: " + profileLabel(),
                       "Fordítási mód: " + modeLabel(),
                       "Semantic VAD: " + vadLabel(),
+                      "Felső ablak másolása",
+                      "Alsó ablak másolása",
                       "Felső ablak törlése",
                       "Alsó ablak törlése",
                       "Mindkét ablak törlése"
@@ -694,11 +701,27 @@ jobs:
                       if(w==2) chooseProfile();
                       if(w==3) chooseMode();
                       if(w==4) chooseVad();
-                      if(w==5) { programmaticChange=true; topBox.setText(""); programmaticChange=false; topManualStart=-1; }
-                      if(w==6) { programmaticChange=true; bottomBox.setText(""); programmaticChange=false; bottomManualStart=-1; }
-                      if(w==7) { programmaticChange=true; topBox.setText(""); bottomBox.setText(""); programmaticChange=false; topManualStart=-1; bottomManualStart=-1; }
+                      if(w==5) copyBox(true);
+                      if(w==6) copyBox(false);
+                      if(w==7) { programmaticChange=true; topBox.setText(""); programmaticChange=false; topManualStart=-1; }
+                      if(w==8) { programmaticChange=true; bottomBox.setText(""); programmaticChange=false; bottomManualStart=-1; }
+                      if(w==9) { programmaticChange=true; topBox.setText(""); bottomBox.setText(""); programmaticChange=false; topManualStart=-1; bottomManualStart=-1; }
                       updateButtons();
                   }).show();
+              }
+
+              void copyBox(boolean top) {
+                  EditText source = top ? topBox : bottomBox;
+                  String text = source.getText().toString();
+                  if(text.trim().isEmpty()) {
+                      Toast.makeText(this, top ? "A felső ablak üres." : "Az alsó ablak üres.", Toast.LENGTH_SHORT).show();
+                      return;
+                  }
+                  ClipboardManager cm = (ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+                  if(cm != null) {
+                      cm.setPrimaryClip(ClipData.newPlainText(top ? "Felső ablak" : "Alsó ablak", text));
+                      Toast.makeText(this, top ? "Felső ablak másolva." : "Alsó ablak másolva.", Toast.LENGTH_SHORT).show();
+                  }
               }
 
               void showApi() {
