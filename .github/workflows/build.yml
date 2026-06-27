@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 20; versionName = "2.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 21; versionName = "2.1" }
 
               signingConfigs {
                   create("release") {
@@ -231,7 +231,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v2.0");
+                  TextView title = label("Fordító Konzol v2.1");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -312,7 +312,6 @@ jobs:
                   e.setVerticalScrollBarEnabled(true);
                   e.setHorizontalScrollBarEnabled(false);
                   e.setScrollbarFadingEnabled(false);
-                  e.setOverScrollMode(EditText.OVER_SCROLL_ALWAYS);
                   e.setBackgroundColor(Color.rgb(27,32,41));
                   e.setPadding(14,14,14,14);
                   return e;
@@ -884,14 +883,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/ForditoKonzol-Realtime-v20-release-signed.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/ForditoKonzol-Realtime-v20-release-signed.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/ForditoKonzol-Realtime-v21-release-signed.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/ForditoKonzol-Realtime-v21-release-signed.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: ForditoKonzol-Realtime-v20-release-signed
+          name: ForditoKonzol-Realtime-v21-release-signed
           path: |
             artifact/*.apk
             artifact/*.aab
