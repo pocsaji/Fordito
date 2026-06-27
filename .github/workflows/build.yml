@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 43; versionName = "4.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 47; versionName = "4.7" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V46" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V47" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -127,6 +127,10 @@ jobs:
               boolean responseInProgress = false;
               long sessionStart = 0L;
               String pendingOutput = "";
+              String liveTranscriptBuffer = "";
+              boolean liveTranslateMode = false;
+              int pendingLiveBlockId = -1;
+              final ArrayDeque<Integer> liveTranslateQueue = new ArrayDeque<>();
               String pendingManualText = "";
               boolean manualResponseMode = false;
               boolean programmaticChange = false;
@@ -249,7 +253,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V46");
+                  TextView title = label("Fordito_V47");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -598,10 +602,24 @@ jobs:
                       JSONObject vad = new JSONObject();
                       vad.put("type", "semantic_vad");
                       vad.put("eagerness", vadMode);
-                      vad.put("create_response", true);
+                      // V47: a beszédhatárt továbbra is a Realtime dönti el,
+                      // de NEM kérünk automatikus nagy válaszblokkot az audio végén.
+                      // A fordítás a beérkező transcript-delta szövegblokkokból indul.
+                      vad.put("create_response", false);
 
                       JSONObject input = new JSONObject();
+                      JSONObject format = new JSONObject();
+                      format.put("type", "audio/pcm");
+                      format.put("rate", 24000);
+                      input.put("format", format);
                       input.put("turn_detection", vad);
+
+                      JSONObject tr = new JSONObject();
+                      tr.put("model", "gpt-realtime-whisper");
+                      String langHint = topActive ? code(topLang) : code(bottomLang);
+                      if(langHint.length() == 2) tr.put("language", langHint);
+                      tr.put("delay", "low");
+                      input.put("transcription", tr);
 
                       JSONObject audio = new JSONObject();
                       audio.put("input", input);
@@ -651,6 +669,16 @@ jobs:
                     "Never include labels such as SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT or TRANSLATION. " +
                     "No markdown, no quotes, no explanation. " +
                     "Keep meaning, context and tone. " + modePrompt();
+              }
+
+              String liveBlockInstructions(boolean sourceIsTop) {
+                  String src = sourceIsTop ? code(topLang) : code(bottomLang);
+                  String tgt = sourceIsTop ? code(bottomLang) : code(topLang);
+                  return "You are a live interpreter for one already-transcribed speech block. " +
+                    "Translate from " + src + " to " + tgt + ". " +
+                    "Return ONLY the translation. No labels, no markdown, no explanation. " +
+                    "Keep the wording natural and concise. Do not merge this block with earlier or later speech. " +
+                    "Do not invent missing information. " + modePrompt();
               }
 
 
@@ -727,6 +755,10 @@ jobs:
                   connected = false;
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception ignored) {}
                   rec = null;
+                  liveTranscriptBuffer = "";
+                  liveTranslateMode = false;
+                  pendingLiveBlockId = -1;
+                  liveTranslateQueue.clear();
                   try { if(ws != null) ws.close(1000, "stop"); } catch(Exception ignored) {}
                   ws = null;
                   runOnUiThread(() -> {
@@ -746,6 +778,16 @@ jobs:
 
                       if(type.equals("response.done")) {
                           responseInProgress = false;
+                      }
+
+                      if(type.equals("conversation.item.input_audio_transcription.delta")) {
+                          String d = o.optString("delta", "");
+                          if(!d.isEmpty()) runOnUiThread(() -> handleTranscriptDelta(d));
+                      }
+
+                      if(type.equals("conversation.item.input_audio_transcription.completed")) {
+                          String tr = o.optString("transcript", "");
+                          if(!tr.isEmpty()) runOnUiThread(() -> handleTranscriptCompleted(tr));
                       }
 
                       if(type.equals("response.text.delta") || type.equals("response.output_text.delta")) {
@@ -873,6 +915,139 @@ jobs:
                   }
               }
 
+
+              void handleTranscriptDelta(String delta) {
+                  if(delta == null || delta.length() == 0) return;
+                  liveTranscriptBuffer += delta;
+                  flushReadyTranscriptBlocks(false);
+              }
+
+              void handleTranscriptCompleted(String transcript) {
+                  // Ha delta nem érkezett, legalább a kész transcriptet dolgozzuk fel.
+                  if(liveTranscriptBuffer.trim().length() == 0 && transcript != null && transcript.trim().length() > 0) {
+                      liveTranscriptBuffer = transcript;
+                  }
+                  flushReadyTranscriptBlocks(true);
+              }
+
+              void flushReadyTranscriptBlocks(boolean flushAll) {
+                  while(true) {
+                      String b = popReadySpeechBlock(flushAll);
+                      if(b == null || b.trim().length() == 0) break;
+                      int id = addSourceOnlyBlock(topActive, b.trim());
+                      liveTranslateQueue.add(id);
+                  }
+                  processNextLiveTranslation();
+              }
+
+              String popReadySpeechBlock(boolean flushAll) {
+                  String s = liveTranscriptBuffer == null ? "" : liveTranscriptBuffer;
+                  if(s.trim().length() == 0) { liveTranscriptBuffer = ""; return null; }
+
+                  int cut = -1;
+                  for(int i=0;i<s.length();i++) {
+                      char ch = s.charAt(i);
+                      if(ch == '.' || ch == '!' || ch == '?' || ch == '…' || ch == '\n') {
+                          cut = i + 1;
+                          break;
+                      }
+                  }
+
+                  // Nem időalapú vágás: ha nincs írásjel, de túl hosszúra nő egy felsorolás,
+                  // természetes nyelvi törésponton választjuk le, nem csend alapján.
+                  if(cut < 0 && s.length() >= 180) {
+                      String lower = s.toLowerCase(Locale.ROOT);
+                      int limit = Math.min(s.length(), 220);
+                      for(String sep: new String[]{", ", "; ", " és ", " majd ", " aztán "}) {
+                          int pos = lower.lastIndexOf(sep, limit);
+                          if(pos >= 80) { cut = pos + sep.length(); break; }
+                      }
+                      if(cut < 0) {
+                          int spc = s.lastIndexOf(' ', limit);
+                          if(spc >= 100) cut = spc + 1;
+                      }
+                  }
+
+                  if(cut < 0 && flushAll) cut = s.length();
+                  if(cut < 0) return null;
+
+                  String out = s.substring(0, cut).trim();
+                  liveTranscriptBuffer = s.substring(cut).trim();
+                  return out;
+              }
+
+              int addSourceOnlyBlock(boolean sourceIsTop, String original) {
+                  TextBlock b = new TextBlock();
+                  b.dirty = false;
+                  b.dirtyTopSource = sourceIsTop;
+                  if(sourceIsTop) b.topText = original;
+                  else b.bottomText = original;
+                  textBlocks.add(b);
+                  renderBlocksKeepView();
+                  return textBlocks.size() - 1;
+              }
+
+              void processNextLiveTranslation() {
+                  if(liveTranslateMode || responseInProgress) return;
+                  if(ws == null || !connected) return;
+                  Integer idObj = liveTranslateQueue.poll();
+                  if(idObj == null) return;
+                  int id = idObj.intValue();
+                  if(id < 0 || id >= textBlocks.size()) { processNextLiveTranslation(); return; }
+                  TextBlock b = textBlocks.get(id);
+                  boolean sourceIsTop = b.dirtyTopSource;
+                  String src = sourceIsTop ? b.topText : b.bottomText;
+                  if(src == null || src.trim().length() == 0) { processNextLiveTranslation(); return; }
+
+                  try {
+                      pendingLiveBlockId = id;
+                      liveTranslateMode = true;
+
+                      JSONObject msg = new JSONObject();
+                      msg.put("type", "conversation.item.create");
+                      JSONObject item = new JSONObject();
+                      item.put("type", "message");
+                      item.put("role", "user");
+                      JSONArray content = new JSONArray();
+                      JSONObject c = new JSONObject();
+                      c.put("type", "input_text");
+                      String sourceCode = sourceIsTop ? code(topLang) : code(bottomLang);
+                      String targetCode = sourceIsTop ? code(bottomLang) : code(topLang);
+                      c.put("text", "LIVE_BLOCK_TRANSLATION\nSOURCE_LANG: " + sourceCode + "\nTARGET_LANG: " + targetCode + "\nTEXT:\n" + src.trim());
+                      content.put(c);
+                      item.put("content", content);
+                      msg.put("item", item);
+                      ws.send(msg.toString());
+
+                      JSONObject resp = new JSONObject();
+                      resp.put("type", "response.create");
+                      JSONObject response = new JSONObject();
+                      response.put("instructions", liveBlockInstructions(sourceIsTop));
+                      resp.put("response", response);
+                      responseInProgress = true;
+                      ws.send(resp.toString());
+                  } catch(Exception e) {
+                      liveTranslateMode = false;
+                      pendingLiveBlockId = -1;
+                  }
+              }
+
+              void applyLiveTranslation(String out) {
+                  int id = pendingLiveBlockId;
+                  boolean sourceIsTop = true;
+                  if(id >= 0 && id < textBlocks.size()) {
+                      TextBlock b = textBlocks.get(id);
+                      sourceIsTop = b.dirtyTopSource;
+                      String clean = cleanOneBlockTranslation(out);
+                      if(sourceIsTop) b.bottomText = clean;
+                      else b.topText = clean;
+                      renderBlocksKeepView();
+                  }
+                  pendingLiveBlockId = -1;
+                  liveTranslateMode = false;
+                  processNextLiveTranslation();
+              }
+
               void routeAiOutput(String out) {
                   // Dirty/blokk újrafordítás válasza SOHA nem lehet új blokk.
                   // Akkor is a meglévő blokkba írjuk vissza, ha a manualResponseMode valamiért közben elveszne.
@@ -880,6 +1055,11 @@ jobs:
                       dirtyResponseMode = false;
                       manualResponseMode = false;
                       applyDirtyTranslation(out);
+                      return;
+                  }
+
+                  if(liveTranslateMode || pendingLiveBlockId >= 0) {
+                      applyLiveTranslation(out);
                       return;
                   }
 
@@ -1261,14 +1441,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V46.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V46.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V47.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V47.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V46
+          name: Fordito_V47
           path: |
             artifact/*.apk
             artifact/*.aab
