@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V50" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V51" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -254,7 +254,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V50");
+                  TextView title = label("Fordito_V51");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -926,7 +926,7 @@ jobs:
               }
 
               void handleTranscriptCompleted(String transcript) {
-                  // V50 duplázás-javítás:
+                  // V51 duplázás-javítás:
                   // A completed esemény sokszor ugyanazt a teljes mondatot küldi újra,
                   // amit a delta eseményekből már kiírtunk és fordítottunk.
                   // Ha volt delta ebben a körben, NEM töltjük vissza a teljes transcriptet,
@@ -961,17 +961,39 @@ jobs:
                       }
                   }
 
-                  // Nem időalapú vágás: ha nincs írásjel, de túl hosszúra nő egy felsorolás,
-                  // természetes nyelvi törésponton választjuk le, nem csend alapján.
-                  if(cut < 0 && s.length() >= 180) {
+                  // V51: nem időalapú vágás. Ha a beszélő nagyon hosszan beszél,
+                  // a szövegpufferben keresünk természetes magyar mondat/gondolat töréspontot.
+                  // Az audio pipeline változatlan: nincs saját VAD, nincs hangerőszűrés, nincs kézi commit.
+                  if(cut < 0 && s.length() >= 115) {
                       String lower = s.toLowerCase(Locale.ROOT);
-                      int limit = Math.min(s.length(), 220);
-                      for(String sep: new String[]{", ", "; ", " és ", " majd ", " aztán "}) {
+                      int limit = Math.min(s.length(), 165);
+
+                      // Erős természetes töréspontok: itt általában új gondolat kezdődik.
+                      for(String sep: new String[]{
+                              ", akkor ", ", és akkor ", ", de ", ", viszont ", ", hanem ",
+                              ", mert ", ", tehát ", ", illetve ", ", majd ", ", aztán ",
+                              "; ", ": ", " - "
+                      }) {
                           int pos = lower.lastIndexOf(sep, limit);
-                          if(pos >= 80) { cut = pos + sep.length(); break; }
+                          if(pos >= 65) { cut = pos + 2; break; }
                       }
+
+                      // Gyengébb töréspontok: ha nincs erős pont, hosszú mondatnál itt is vágható.
                       if(cut < 0) {
-                          int spc = s.lastIndexOf(' ', limit);
+                          for(String sep: new String[]{
+                                  ", hogy ", ", ha ", ", és ha ", ", amikor ", ", ahol ",
+                                  ", ami ", ", ezt ", ", mint ", ", mint például ", ", nagyjából ",
+                                  ", bár ", ", ugye ", ", szintén ", ", valamint ", ", vagy "
+                          }) {
+                              int pos = lower.lastIndexOf(sep, limit);
+                              if(pos >= 80) { cut = pos + 2; break; }
+                          }
+                      }
+
+                      // Végső védelem: ha 170+ karakteren sincs értelmes írásjel vagy kötőszó,
+                      // szóhatáron vágunk, hogy ne álljon össze 1000 karakteres blokk.
+                      if(cut < 0 && s.length() >= 170) {
+                          int spc = s.lastIndexOf(' ', Math.min(s.length(), 170));
                           if(spc >= 100) cut = spc + 1;
                       }
                   }
@@ -1462,14 +1484,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V50.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V50.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V51.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V51.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V50
+          name: Fordito_V51
           path: |
             artifact/*.apk
             artifact/*.aab
