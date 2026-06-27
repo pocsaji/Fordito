@@ -246,7 +246,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v2.9");
+                  TextView title = label("Fordító Konzol v3.0");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -422,6 +422,21 @@ jobs:
               }
 
               void renderBlocks() {
+                  renderBlocks(false);
+              }
+
+              void renderBlocksKeepView() {
+                  renderBlocks(true);
+              }
+
+              void renderBlocks(boolean keepView) {
+                  int topScroll = topBox.getScrollY();
+                  int bottomScroll = bottomBox.getScrollY();
+                  int topSel = Math.max(0, topBox.getSelectionStart());
+                  int bottomSel = Math.max(0, bottomBox.getSelectionStart());
+                  boolean topHadFocus = topBox.hasFocus();
+                  boolean bottomHadFocus = bottomBox.hasFocus();
+
                   StringBuilder top = new StringBuilder();
                   StringBuilder bottom = new StringBuilder();
                   for(TextBlock b: textBlocks) {
@@ -434,8 +449,17 @@ jobs:
                   try {
                       topBox.setText(top.toString());
                       bottomBox.setText(bottom.toString());
-                      topBox.setSelection(topBox.getText().length());
-                      bottomBox.setSelection(bottomBox.getText().length());
+                      if(keepView) {
+                          topBox.setSelection(Math.min(topSel, topBox.getText().length()));
+                          bottomBox.setSelection(Math.min(bottomSel, bottomBox.getText().length()));
+                          if(topHadFocus) topBox.requestFocus();
+                          if(bottomHadFocus) bottomBox.requestFocus();
+                          topBox.post(() -> topBox.scrollTo(0, topScroll));
+                          bottomBox.post(() -> bottomBox.scrollTo(0, bottomScroll));
+                      } else {
+                          topBox.setSelection(topBox.getText().length());
+                          bottomBox.setSelection(bottomBox.getText().length());
+                      }
                   } finally {
                       programmaticChange = false;
                   }
@@ -789,7 +813,7 @@ jobs:
                       if(b.dirtyTopSource) b.bottomText = tr;
                       else b.topText = tr;
                       b.dirty = false;
-                      renderBlocks();
+                      renderBlocksKeepView();
                       if(!dirtyBlocks().isEmpty()) {
                           Toast.makeText(this, "Hosszú beillesztés: folytatom a következő blokkal...", Toast.LENGTH_SHORT).show();
                           topBox.postDelayed(() -> manualTranslate(), 150);
