@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 40; versionName = "4.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 41; versionName = "4.1" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V40" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V41" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -127,9 +127,6 @@ jobs:
               boolean responseInProgress = false;
               long sessionStart = 0L;
               String pendingOutput = "";
-              long lastLiveCommitMs = 0L;
-              int audioBytesSinceCommit = 0;
-              boolean liveResponseMode = false;
               String pendingManualText = "";
               boolean manualResponseMode = false;
               boolean programmaticChange = false;
@@ -139,9 +136,6 @@ jobs:
               static final int MAX_BLOCK_SENTENCES = 3;
               static final int MAX_BLOCK_CHARS = 800;
               static final int MAX_DIRTY_BLOCKS_PER_REQUEST = 1;
-              static final long LIVE_COMMIT_MS = 1200;
-              static final int LIVE_MIN_AUDIO_BYTES = 26000;
-              static final int LIVE_FORCE_AUDIO_BYTES = 90000;
 
               static class TextBlock {
                   String topText = "";
@@ -156,6 +150,16 @@ jobs:
               final ArrayList<int[]> bottomRanges = new ArrayList<>();
               boolean dirtyResponseMode = false;
               int pendingDirtyBlockId = -1;
+
+              static final long LIVE_MIN_COMMIT_MS = 3000L;
+              static final long LIVE_MAX_COMMIT_MS = 5000L;
+              static final long LIVE_SILENCE_FLUSH_MS = 900L;
+              static final int LIVE_MIN_AUDIO_BYTES = 120000;
+              static final int LIVE_VOICE_LEVEL = 180;
+              final Object liveLock = new Object();
+              long liveWindowStartMs = 0L;
+              long liveLastVoiceMs = 0L;
+              int liveAudioBytes = 0;
 
               String apiKey = "";
               String model = "gpt-realtime-2";
@@ -255,7 +259,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40");
+                  TextView title = label("Fordito_V41");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -354,9 +358,9 @@ jobs:
                       }
                       public void afterTextChanged(Editable e) {
                           if(programmaticChange) return;
-                          // Írás közben csak a blokklistát jelöljük dirty-re.
-                          // A másik ablakot nem rajzoljuk újra, így nem csonkolódik a régi fordítás.
                           syncEditedBoxToBlocks(top, e.toString());
+                          // Írás közben csak dirty jelölés: a másik ablakhoz nem nyúlunk.
+                          // A fordítási oldal csak FORDÍT / AI kész eseménynél frissül.
                           updateButtons();
                       }
                   };
@@ -378,13 +382,11 @@ jobs:
                       if(!oldText.equals(newText)) {
                           if(top) {
                               b.topText = newText;
-                              // Blokkszintű dirty: ha a forrásblokk bármely része változik,
-                              // a teljes blokk fordítása érvénytelen. Nem részletet toldunk/cserélünk,
-                              // hanem a párablak teljes fordításblokkját újraírjuk.
-                              // A régi fordítást megtartjuk addig, amíg az új fordítás meg nem érkezik.
+                              // A régi fordítást írás közben megtartjuk, hogy a másik ablak ne csonkolódjon.
+                              // A teljes blokk fordítása csak FORDÍT után cserélődik.
                           } else {
                               b.bottomText = newText;
-                              // A régi fordítást megtartjuk addig, amíg az új fordítás meg nem érkezik.
+                              // A régi fordítást írás közben megtartjuk, hogy a másik ablak ne csonkolódjon.
                           }
                           b.dirty = true;
                           b.dirtyTopSource = top;
@@ -549,7 +551,6 @@ jobs:
                   if(!hasKey()) { showApi(); return; }
                   if(withAudio && Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reqMic(); return; }
                   if(withAudio && sessionStart == 0L) sessionStart = System.currentTimeMillis();
-                  if(withAudio) { audioBytesSinceCommit = 0; lastLiveCommitMs = 0L; liveResponseMode = false; }
                   if(withAudio && System.currentTimeMillis() - sessionStart > 20L*60L*1000L) { confirm(); return; }
 
                   state.setText("kapcsolódás");
@@ -602,13 +603,10 @@ jobs:
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
 
-                      JSONObject vad = new JSONObject();
-                      vad.put("type", "semantic_vad");
-                      vad.put("eagerness", vadMode);
-                      vad.put("create_response", false);
-
+                      // V41: nem a szerver VAD dönti el a túl rövid fordításokat.
+                      // A kliens 3-5 mp-es hangablakokban commitol, így nincs buffer-too-small hiba.
                       JSONObject input = new JSONObject();
-                      input.put("turn_detection", vad);
+                      input.put("turn_detection", JSONObject.NULL);
 
                       JSONObject audio = new JSONObject();
                       audio.put("input", input);
@@ -629,19 +627,16 @@ jobs:
                   String bottom = code(bottomLang);
                   return "You are a live interpreter. Output text only. No explanations. " +
                     "Work ONLY with these two selected languages: " + top + " and " + bottom + ". " +
+                    "The input is raw live speech audio. It may be fragmented, noisy, badly punctuated or contain obvious recognition mistakes. " +
+                    "You decide the natural thought boundaries and clean only clear recognition errors without inventing facts. " +
                     "Detect whether the current input is " + top + " or " + bottom + ". " +
                     "If the input is " + top + ", translate to " + bottom + ". If the input is " + bottom + ", translate to " + top + ". " +
-                    "Ignore other languages and background speech unless it clearly belongs to the active speaker. " +
+                    "If the current audio window is not meaningful enough yet, output nothing. " +
                     "For every completed thought, output exactly three lines in this format: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <clean source transcript> then TRANSLATION: <natural translation into the other selected language>. " +
-                    "If a short live audio chunk is not yet meaningful enough to translate, output exactly WAIT. " +
                     "Conversation profile: " + profilePrompt() + " " +
                     "Translation mode: " + modePrompt() + " " +
-                    "The profile is only a light terminology preference. Do not force the profile if the sentence is general conversation. " +
                     "Do not invent missing information. Do not add details that were not said. " +
-                    "If the audio is unclear, omit the unclear part or mark it briefly as unclear. " +
-                    "You decide the natural sentence and thought boundaries. The app only sends raw live chunks. " +
-                    "The translation must be grammatically natural in the target language. " +
-                    "Keep the output readable on a phone screen.";
+                    "The translation must be grammatically natural in the target language. Keep the output readable on a phone screen.";
               }
 
               String manualBlockInstructions() {
@@ -658,19 +653,6 @@ jobs:
               }
 
 
-              String liveChunkInstructions() {
-                  String top = code(topLang);
-                  String bottom = code(bottomLang);
-                  return "This is a short live chunk from speech recognition/audio. " +
-                    "The chunk may be incomplete, raw, unpunctuated or contain recognition errors. " +
-                    "You, not the app, decide whether a meaningful sentence, clause or thought is ready. " +
-                    "If nothing meaningful is ready yet, return exactly WAIT. " +
-                    "If meaningful content is ready, clean obvious recognition errors and output exactly: " +
-                    "SOURCE_LANG: <" + top + " or " + bottom + ">\nORIGINAL: <clean source>\nTRANSLATION: <natural translation>. " +
-                    "Use the selected profile only as light terminology guidance, never as a forced interpretation. " +
-                    "No markdown, no extra explanation. " + modePrompt();
-              }
-
               String modePrompt() {
                   if(mode.equals("precise")) return "Precise mode: stay close to the meaning, do not expand, but always use correct natural grammar.";
                   if(mode.equals("interpreter")) return "Interpreter mode: use context strongly, make the translation sound like a human interpreter, but do not invent facts.";
@@ -684,6 +666,11 @@ jobs:
 
                   rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
                   streaming = true;
+                  synchronized(liveLock) {
+                      liveWindowStartMs = 0L;
+                      liveLastVoiceMs = 0L;
+                      liveAudioBytes = 0;
+                  }
                   rec.startRecording();
                   updateButtons();
 
@@ -693,27 +680,63 @@ jobs:
                           int read = rec.read(buf, 0, buf.length);
                           if(read > 0) {
                               try {
+                                  int level = audioLevel(buf, read);
+                                  if(level < LIVE_VOICE_LEVEL) {
+                                      maybeCommitLiveAudio(false);
+                                      continue;
+                                  }
+
                                   byte[] chunk = Arrays.copyOf(buf, read);
                                   JSONObject evt = new JSONObject();
                                   evt.put("type", "input_audio_buffer.append");
                                   evt.put("audio", Base64.encodeToString(chunk, Base64.NO_WRAP));
                                   ws.send(evt.toString());
-                                  audioBytesSinceCommit += read;
+
+                                  long now = System.currentTimeMillis();
+                                  synchronized(liveLock) {
+                                      if(liveWindowStartMs == 0L) liveWindowStartMs = now;
+                                      liveLastVoiceMs = now;
+                                      liveAudioBytes += read;
+                                  }
                                   maybeCommitLiveAudio(false);
                               } catch(Exception ignored) {}
                           }
                       }
+                      maybeCommitLiveAudio(true);
                   });
               }
 
+              int audioLevel(byte[] data, int len) {
+                  long sum = 0;
+                  int samples = 0;
+                  for(int i=0;i+1<len;i+=2) {
+                      int lo = data[i] & 0xff;
+                      int hi = data[i+1];
+                      short v = (short)((hi << 8) | lo);
+                      sum += Math.abs((int)v);
+                      samples++;
+                  }
+                  if(samples == 0) return 0;
+                  return (int)(sum / samples);
+              }
+
               void maybeCommitLiveAudio(boolean force) {
-                  if(ws == null || !connected || dirtyResponseMode || manualResponseMode) return;
-                  long now = System.currentTimeMillis();
-                  boolean enoughTime = now - lastLiveCommitMs >= LIVE_COMMIT_MS;
-                  boolean enoughAudio = audioBytesSinceCommit >= LIVE_MIN_AUDIO_BYTES;
-                  boolean tooMuchAudio = audioBytesSinceCommit >= LIVE_FORCE_AUDIO_BYTES;
-                  if(!force && !(tooMuchAudio || (enoughTime && enoughAudio))) return;
-                  if(responseInProgress) return;
+                  if(ws == null || !connected) return;
+                  if(responseInProgress && !force) return;
+
+                  boolean doCommit = false;
+                  synchronized(liveLock) {
+                      if(liveWindowStartMs == 0L || liveAudioBytes < LIVE_MIN_AUDIO_BYTES) return;
+                      long now = System.currentTimeMillis();
+                      long age = now - liveWindowStartMs;
+                      long silence = now - liveLastVoiceMs;
+                      doCommit = force || age >= LIVE_MAX_COMMIT_MS || (age >= LIVE_MIN_COMMIT_MS && silence >= LIVE_SILENCE_FLUSH_MS);
+                      if(!doCommit) return;
+                      liveWindowStartMs = 0L;
+                      liveLastVoiceMs = 0L;
+                      liveAudioBytes = 0;
+                  }
+
                   try {
                       JSONObject commit = new JSONObject();
                       commit.put("type", "input_audio_buffer.commit");
@@ -722,14 +745,10 @@ jobs:
                       JSONObject resp = new JSONObject();
                       resp.put("type", "response.create");
                       JSONObject response = new JSONObject();
-                      response.put("instructions", liveChunkInstructions());
+                      response.put("instructions", instructions());
                       resp.put("response", response);
-                      liveResponseMode = true;
                       responseInProgress = true;
                       ws.send(resp.toString());
-
-                      lastLiveCommitMs = now;
-                      audioBytesSinceCommit = 0;
                   } catch(Exception ignored) {}
               }
 
@@ -792,7 +811,7 @@ jobs:
 
                       if(type.equals("response.done")) {
                           responseInProgress = false;
-                          liveResponseMode = false;
+                          if(streaming) maybeCommitLiveAudio(false);
                       }
 
                       if(type.equals("response.text.delta") || type.equals("response.output_text.delta")) {
@@ -810,6 +829,15 @@ jobs:
                           JSONObject er = o.optJSONObject("error");
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
                           if(msg.contains("response in progress")) responseInProgress = true;
+                          if(msg.toLowerCase(Locale.ROOT).contains("buffer too small")) {
+                              responseInProgress = false;
+                              synchronized(liveLock) {
+                                  liveWindowStartMs = 0L;
+                                  liveLastVoiceMs = 0L;
+                                  liveAudioBytes = 0;
+                              }
+                              return;
+                          }
                           if(dirtyResponseMode || pendingDirtyBlockId >= 0) {
                               runOnUiThread(() -> handleConnectionFailure(new RuntimeException(msg)));
                           } else {
@@ -921,12 +949,6 @@ jobs:
               }
 
               void routeAiOutput(String out) {
-                  if(out == null) return;
-                  String trimmedOut = out.trim();
-                  if(trimmedOut.equalsIgnoreCase("WAIT")) {
-                      liveResponseMode = false;
-                      return;
-                  }
                   // Dirty/blokk újrafordítás válasza SOHA nem lehet új blokk.
                   // Akkor is a meglévő blokkba írjuk vissza, ha a manualResponseMode valamiért közben elveszne.
                   if(dirtyResponseMode || pendingDirtyBlockId >= 0) {
@@ -940,22 +962,22 @@ jobs:
                       manualResponseMode = false;
                   }
 
-                  String sourceLang = extractAfter(out, "SOURCE_LANG:").toUpperCase(Locale.ROOT);
-                  String original = extractAfter(out, "ORIGINAL:");
-                  String translation = extractAfter(out, "TRANSLATION:");
-
-                  if(original.length() == 0 && translation.length() == 0) {
-                      translation = out;
+                  ArrayList<String[]> triples = parseTriples(out);
+                  if(!triples.isEmpty()) {
+                      for(String[] trp: triples) {
+                          String sourceLang = trp[0].toUpperCase(Locale.ROOT);
+                          String original = trp[1];
+                          String translation = trp[2];
+                          boolean sourceIsTop = sourceLang.contains(code(topLang));
+                          boolean sourceIsBottom = sourceLang.contains(code(bottomLang));
+                          if(!sourceIsTop && !sourceIsBottom) sourceIsTop = manualTopSource;
+                          if(original.length() > 0 || translation.length() > 0) addBlock(sourceIsTop, original, translation);
+                      }
+                      return;
                   }
 
-                  boolean sourceIsTop = sourceLang.contains(code(topLang));
-                  boolean sourceIsBottom = sourceLang.contains(code(bottomLang));
-
-                  if(!sourceIsTop && !sourceIsBottom) {
-                      sourceIsTop = manualTopSource;
-                  }
-
-                  if(original.length() > 0 || translation.length() > 0) addBlock(sourceIsTop, original, translation);
+                  // Tartalék: ha a modell mégsem címkézett formátumot ad, ne dobjuk el.
+                  if(out.trim().length() > 0) addBlock(manualTopSource, "", out.trim());
               }
 
               void applyDirtyTranslation(String out) {
@@ -1015,6 +1037,28 @@ jobs:
                       clean.append(line);
                   }
                   return clean.toString().trim();
+              }
+
+              ArrayList<String[]> parseTriples(String out) {
+                  ArrayList<String[]> list = new ArrayList<>();
+                  if(out == null) return list;
+                  String marker = "SOURCE_LANG:";
+                  int pos = 0;
+                  while(true) {
+                      int start = out.indexOf(marker, pos);
+                      if(start < 0) break;
+                      int next = out.indexOf(marker, start + marker.length());
+                      String part = next >= 0 ? out.substring(start, next) : out.substring(start);
+                      String sourceLang = extractAfter(part, "SOURCE_LANG:");
+                      String original = extractAfter(part, "ORIGINAL:");
+                      String translation = extractAfter(part, "TRANSLATION:");
+                      if(original.length() > 0 || translation.length() > 0) {
+                          list.add(new String[]{sourceLang, original, translation});
+                      }
+                      if(next < 0) break;
+                      pos = next;
+                  }
+                  return list;
               }
 
               String extractAfter(String out, String key) {
@@ -1199,20 +1243,21 @@ jobs:
               }
 
               String profilePrompt() {
-                  if(profile.equals("truck_bulk")) return "Light logistics terminology preference: bulk transport, silo loading, unloading, weighing, site logistics and freight. Use these meanings only when the context clearly supports them; otherwise translate as normal conversation.";
-                  if(profile.equals("truck_tarp")) return "Light logistics terminology preference: tarpaulin truck transport, loading, straps, pallets, CMR and site logistics. Do not force truck meanings onto general sentences.";
-                  if(profile.equals("truck_general")) return "Light logistics terminology preference: truck driving, freight, route, dispatcher, loading and site communication. If uncertain, prefer the everyday meaning.";
-                  if(profile.equals("logistics")) return "Light logistics terminology preference: loading, unloading, warehouse, ramp, pallet, documents and delivery. Use only when context is clearly logistics.";
-                  if(profile.equals("medical")) return "Light medical terminology preference: symptoms, examination, medicine and treatment. Use medical terminology only in medical context.";
-                  if(profile.equals("restaurant")) return "Light restaurant terminology preference: ordering, food, drinks, payment and service. Keep normal conversation natural.";
-                  if(profile.equals("tourism")) return "Light travel terminology preference: tourism, directions, tickets and programs. Do not over-formalize.";
-                  if(profile.equals("hotel")) return "Light accommodation terminology preference: apartment, booking, arrival, departure and payment. Keep everyday speech natural.";
-                  if(profile.equals("bank")) return "Light banking terminology preference: account, card, transfer and identification. Use only when context requires it.";
-                  if(profile.equals("office")) return "Light official-administration terminology preference: documents, certificates and customer service. Avoid legalistic wording unless needed.";
-                  if(profile.equals("customs")) return "Light customs/border terminology preference: documents, freight and inspection. Use only in clear customs context.";
-                  if(profile.equals("service")) return "Light technical terminology preference: vehicle service or machine repair, faults, parts and repair. Do not invent technical details.";
-                  if(profile.equals("pharmacy")) return "Light pharmacy terminology preference: medicine, dosage and symptoms. Use only when context is clearly health or pharmacy.";
-                  return "General conversation. No domain should be forced.";
+                  String base = "Default to natural everyday meaning. The profile is only a light terminology hint, not a forced interpretation. ";
+                  if(profile.equals("truck_bulk")) return base + "If clearly relevant, prefer logistics/bulk transport terms such as loaded, unloaded, silo, weighing, site, freight, trailer, loading point and delivery point. Do not force truck meaning onto normal conversation.";
+                  if(profile.equals("truck_tarp")) return base + "If clearly relevant, prefer road freight terms such as tarpaulin, straps, pallets, CMR, trailer, loading and unloading. Do not force truck meaning onto normal conversation.";
+                  if(profile.equals("truck_general")) return base + "If clearly relevant, prefer transport, dispatcher, route, loading, unloading and site communication terminology. Do not force truck meaning onto normal conversation.";
+                  if(profile.equals("logistics")) return base + "If clearly relevant, prefer logistics, warehouse, loading dock, pallet, shipment, sender and recipient terminology.";
+                  if(profile.equals("medical")) return base + "Use medical terminology only when the text is clearly about symptoms, examination, medicine or treatment.";
+                  if(profile.equals("restaurant")) return base + "Use natural restaurant ordering, food, drinks, payment and service language.";
+                  if(profile.equals("tourism")) return base + "Use natural travel, directions, tickets and program vocabulary when relevant.";
+                  if(profile.equals("hotel")) return base + "Use accommodation, booking, arrival, departure and payment vocabulary when relevant.";
+                  if(profile.equals("bank")) return base + "Use banking, account, card, transfer and identification terms only when relevant.";
+                  if(profile.equals("office")) return base + "Use official administration, document and customer service wording when relevant, without becoming overly legalistic.";
+                  if(profile.equals("customs")) return base + "Use customs, border, freight document and inspection terminology only when clearly relevant.";
+                  if(profile.equals("service")) return base + "Use vehicle service, machine repair, fault, part and repair terminology only when clearly relevant. Do not invent technical details.";
+                  if(profile.equals("pharmacy")) return base + "Use pharmacy, medicine, dosage and symptom terminology only when relevant.";
+                  return base + "General conversation.";
               }
 
               String modelLabel() { return labelOf(models, model); }
@@ -1291,14 +1336,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V40.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V40.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V41.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V41.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V40
+          name: Fordito_V41
           path: |
             artifact/*.apk
             artifact/*.aab
