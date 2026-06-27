@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 33; versionName = "3.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 34; versionName = "3.4" }
 
               signingConfigs {
                   create("release") {
@@ -249,7 +249,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v3.3");
+                  TextView title = label("Fordító Konzol v3.4");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -368,12 +368,19 @@ jobs:
                       String newText = parts.get(i);
                       String oldText = top ? b.topText : b.bottomText;
                       if(!oldText.equals(newText)) {
-                          if(top) b.topText = newText; else b.bottomText = newText;
+                          if(top) {
+                              b.topText = newText;
+                              // Blokkszintű dirty: ha a forrásblokk bármely része változik,
+                              // a teljes blokk fordítása érvénytelen. Nem részletet toldunk/cserélünk,
+                              // hanem a párablak teljes fordításblokkját újraírjuk.
+                              b.bottomText = "";
+                          } else {
+                              b.bottomText = newText;
+                              b.topText = "";
+                          }
                           b.dirty = true;
                           b.dirtyTopSource = top;
                           b.retryCount = 0;
-                          // Ha a forrásblokk változott, a párja régi fordítás lehet. Ne töröljük,
-                          // amíg az új fordítás meg nem érkezik, hogy ne villogjon az ablak.
                       }
                       rebuilt.add(b);
                   }
