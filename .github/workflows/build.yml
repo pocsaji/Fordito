@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V47" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V48" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -253,7 +253,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V47");
+                  TextView title = label("Fordito_V48");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -616,7 +616,7 @@ jobs:
 
                       JSONObject tr = new JSONObject();
                       tr.put("model", "gpt-realtime-whisper");
-                      String langHint = topActive ? code(topLang) : code(bottomLang);
+                      String langHint = topActive ? apiCode(topLang) : apiCode(bottomLang);
                       if(langHint.length() == 2) tr.put("language", langHint);
                       tr.put("delay", "low");
                       input.put("transcription", tr);
@@ -1381,6 +1381,15 @@ jobs:
                   return code.toUpperCase(Locale.ROOT);
               }
 
+              String apiCode(String code) {
+                  if(code == null || code.isEmpty() || code.equals("AUTO")) return "";
+                  for(String[] l: langs) {
+                      if(l[1].equalsIgnoreCase(code)) return l[2];
+                      if(l[2].equalsIgnoreCase(code)) return l[2];
+                  }
+                  return code.toLowerCase(Locale.ROOT);
+              }
+
               void updateButtons() {
                   micBtn.setText(streaming ? "STOP" : "MIKROFON");
                   micBtn.setBackgroundColor(streaming ? Color.rgb(30,130,70) : Color.rgb(90,50,50));
@@ -1441,14 +1450,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V47.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V47.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V48.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V48.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V47
+          name: Fordito_V48
           path: |
             artifact/*.apk
             artifact/*.aab
