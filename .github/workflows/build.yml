@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 29; versionName = "2.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 31; versionName = "3.1" }
 
               signingConfigs {
                   create("release") {
@@ -145,6 +145,8 @@ jobs:
               }
 
               final ArrayList<TextBlock> textBlocks = new ArrayList<>();
+              final ArrayList<int[]> topRanges = new ArrayList<>();
+              final ArrayList<int[]> bottomRanges = new ArrayList<>();
               boolean dirtyResponseMode = false;
               int pendingDirtyBlockId = -1;
 
@@ -246,7 +248,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v3.0");
+                  TextView title = label("Fordító Konzol v3.1");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -353,18 +355,29 @@ jobs:
 
               void syncEditedBoxToBlocks(boolean top, String text) {
                   ArrayList<String> parts = splitTextToBlocks(text);
-                  while(textBlocks.size() < parts.size()) textBlocks.add(new TextBlock());
 
-                  for(int i=0;i<parts.size();i++) {
-                      TextBlock b = textBlocks.get(i);
+                  // A teljes ablak csak megjelenítés. A valós adat a textBlocks lista.
+                  // Beillesztéskor / hosszú kézi bevitelkor újraépítjük a forrásoldali blokkokat,
+                  // de az azonos helyen lévő meglévő fordításokat megtartjuk.
+                  ArrayList<TextBlock> rebuilt = new ArrayList<>();
+                  int count = parts.size();
+                  for(int i=0;i<count;i++) {
+                      TextBlock old = i < textBlocks.size() ? textBlocks.get(i) : null;
+                      TextBlock b = old != null ? old : new TextBlock();
                       String newText = parts.get(i);
                       String oldText = top ? b.topText : b.bottomText;
                       if(!oldText.equals(newText)) {
                           if(top) b.topText = newText; else b.bottomText = newText;
                           b.dirty = true;
                           b.dirtyTopSource = top;
+                          // Ha a forrásblokk változott, a párja régi fordítás lehet. Ne töröljük,
+                          // amíg az új fordítás meg nem érkezik, hogy ne villogjon az ablak.
                       }
+                      rebuilt.add(b);
                   }
+
+                  textBlocks.clear();
+                  textBlocks.addAll(rebuilt);
               }
 
               ArrayList<String> splitTextToBlocks(String text) {
@@ -439,12 +452,25 @@ jobs:
 
                   StringBuilder top = new StringBuilder();
                   StringBuilder bottom = new StringBuilder();
-                  for(TextBlock b: textBlocks) {
-                      if(b.topText.length() > 0) top.append(b.topText).append("\n");
-                      else top.append("\n");
-                      if(b.bottomText.length() > 0) bottom.append(b.bottomText).append("\n");
-                      else bottom.append("\n");
+                  topRanges.clear();
+                  bottomRanges.clear();
+
+                  for(int i=0;i<textBlocks.size();i++) {
+                      TextBlock b = textBlocks.get(i);
+
+                      int ts = top.length();
+                      top.append(b.topText == null ? "" : b.topText);
+                      int te = top.length();
+                      topRanges.add(new int[]{ts, te});
+                      if(i < textBlocks.size()-1) top.append("\n");
+
+                      int bs = bottom.length();
+                      bottom.append(b.bottomText == null ? "" : b.bottomText);
+                      int be = bottom.length();
+                      bottomRanges.add(new int[]{bs, be});
+                      if(i < textBlocks.size()-1) bottom.append("\n");
                   }
+
                   programmaticChange = true;
                   try {
                       topBox.setText(top.toString());
