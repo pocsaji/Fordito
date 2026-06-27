@@ -717,9 +717,9 @@ jobs:
                       Toast.makeText(this, top ? "A felső ablak üres." : "Az alsó ablak üres.", Toast.LENGTH_SHORT).show();
                       return;
                   }
-                  ClipboardManager cm = (ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+                  android.content.ClipboardManager cm = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
                   if(cm != null) {
-                      cm.setPrimaryClip(ClipData.newPlainText(top ? "Felső ablak" : "Alsó ablak", text));
+                      cm.setPrimaryClip(android.content.ClipData.newPlainText(top ? "Felső ablak" : "Alsó ablak", text));
                       Toast.makeText(this, top ? "Felső ablak másolva." : "Alsó ablak másolva.", Toast.LENGTH_SHORT).show();
                   }
               }
