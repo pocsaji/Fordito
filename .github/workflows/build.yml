@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 21; versionName = "2.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 22; versionName = "2.2" }
 
               signingConfigs {
                   create("release") {
@@ -231,7 +231,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v2.1");
+                  TextView title = label("Fordító Konzol v2.2");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -323,8 +323,8 @@ jobs:
                       Toast.makeText(this, "Nincs másolható szöveg.", Toast.LENGTH_SHORT).show();
                       return;
                   }
-                  ClipboardManager cm = (ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
-                  cm.setPrimaryClip(ClipData.newPlainText("Fordító Konzol", s));
+                  android.content.ClipboardManager cm = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+                  cm.setPrimaryClip(android.content.ClipData.newPlainText("Fordító Konzol", s));
                   Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
               }
 
@@ -878,19 +878,19 @@ jobs:
           EOF
 
       - name: Build signed release APK and AAB
-        run: gradle assembleRelease bundleRelease
+        run: gradle assembleRelease bundleRelease --stacktrace
 
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/ForditoKonzol-Realtime-v21-release-signed.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/ForditoKonzol-Realtime-v21-release-signed.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/ForditoKonzol-Realtime-v22-release-signed.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/ForditoKonzol-Realtime-v22-release-signed.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: ForditoKonzol-Realtime-v21-release-signed
+          name: ForditoKonzol-Realtime-v22-release-signed
           path: |
             artifact/*.apk
             artifact/*.aab
