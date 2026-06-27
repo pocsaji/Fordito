@@ -134,7 +134,7 @@ jobs:
               int bottomManualStart = -1;
 
               static final int MAX_BLOCK_SENTENCES = 3;
-              static final int MAX_BLOCK_CHARS = 800;
+              static final int MAX_BLOCK_CHARS = 260;
               static final int MAX_DIRTY_BLOCKS_PER_REQUEST = 1;
 
               static class TextBlock {
@@ -155,7 +155,7 @@ jobs:
               String model = "gpt-realtime-2";
               String profile = "truck_bulk";
               String mode = "natural";
-              String vadMode = "medium";
+              String vadMode = "low";
               String topLang = "hu";
               String bottomLang = "fr";
 
@@ -223,10 +223,10 @@ jobs:
                   model = sp.getString("model", "gpt-realtime-2");
                   profile = sp.getString("profile", "truck_bulk");
                   mode = sp.getString("mode", "natural");
-                  vadMode = sp.getString("vadMode", "medium");
+                  vadMode = sp.getString("vadMode", "low");
                   topLang = sp.getString("topLang", "hu");
                   bottomLang = sp.getString("bottomLang", "fr");
-                  if("normal".equals(vadMode)) vadMode = "medium";
+                  if("normal".equals(vadMode)) vadMode = "low";
               }
 
               void save() {
@@ -630,6 +630,8 @@ jobs:
                     "Detect whether the current input is " + top + " or " + bottom + ". " +
                     "If the input is " + top + ", translate to " + bottom + ". If the input is " + bottom + ", translate to " + top + ". " +
                     "If the current audio window is not meaningful enough yet, output nothing. " +
+                    "Do not wait for a long monologue. As soon as one short sentence, clear clause, or complete thought is available, close that thought and output it as its own item. " +
+                    "Keep each ORIGINAL item short: preferably 1 sentence, maximum about 15 to 20 words. If the speaker continues for a long time, split the speech into multiple SOURCE_LANG / ORIGINAL / TRANSLATION items instead of one large paragraph. " +
                     "For every completed thought, output exactly three lines in this format: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <clean source transcript> then TRANSLATION: <natural translation into the other selected language>. " +
                     "Conversation profile: " + profilePrompt() + " " +
                     "Translation mode: " + modePrompt() + " " +
