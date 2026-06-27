@@ -16,7 +16,7 @@ jobs:
           cat > settings.gradle.kts <<'EOF'
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
           dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
-          rootProject.name = "ForditoKonzol"
+          rootProject.name = "Fordito_V37"
           include(":app")
           EOF
 
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 35; versionName = "3.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 37; versionName = "3.7" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordító Konzol" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V37" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -249,7 +249,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v3.5");
+                  TextView title = label("Fordito_V37");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -349,7 +349,9 @@ jobs:
                       public void afterTextChanged(Editable e) {
                           if(programmaticChange) return;
                           syncEditedBoxToBlocks(top, e.toString());
-                          renderPeerWindow(top);
+                          // V37: gépelés közben nem nyúlunk a másik ablakhoz.
+                          // Csak gyűjtjük a módosítást dirty blokként.
+                          // A fordítási oldal majd a FORDÍT gomb után frissül.
                           updateButtons();
                       }
                   };
@@ -371,13 +373,13 @@ jobs:
                       if(!oldText.equals(newText)) {
                           if(top) {
                               b.topText = newText;
-                              // Blokkszintű dirty: ha a forrásblokk bármely része változik,
-                              // a teljes blokk fordítása érvénytelen. Nem részletet toldunk/cserélünk,
-                              // hanem a párablak teljes fordításblokkját újraírjuk.
-                              b.bottomText = "";
+                              // V37: a régi fordítást írás közben megtartjuk.
+                              // Nem csonkoljuk a kimeneti oldalt; csak dirty-re jelöljük.
+                              // A kész új fordítás majd egyben felülírja ezt a blokkot.
                           } else {
                               b.bottomText = newText;
-                              b.topText = "";
+                              // Ugyanez fordított irányban is: a párablak régi szövege marad,
+                              // amíg az új fordítás valóban elkészül.
                           }
                           b.dirty = true;
                           b.dirtyTopSource = top;
@@ -1232,14 +1234,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/ForditoKonzol-Realtime-v27-release-signed.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/ForditoKonzol-Realtime-v27-release-signed.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V37.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V37.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: ForditoKonzol-Realtime-v27-release-signed
+          name: Fordito_V37
           path: |
             artifact/*.apk
             artifact/*.aab
