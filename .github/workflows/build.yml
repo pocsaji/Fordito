@@ -151,16 +151,6 @@ jobs:
               boolean dirtyResponseMode = false;
               int pendingDirtyBlockId = -1;
 
-              static final long LIVE_MIN_COMMIT_MS = 3000L;
-              static final long LIVE_MAX_COMMIT_MS = 5000L;
-              static final long LIVE_SILENCE_FLUSH_MS = 900L;
-              static final int LIVE_MIN_AUDIO_BYTES = 120000;
-              static final int LIVE_VOICE_LEVEL = 180;
-              final Object liveLock = new Object();
-              long liveWindowStartMs = 0L;
-              long liveLastVoiceMs = 0L;
-              int liveAudioBytes = 0;
-
               String apiKey = "";
               String model = "gpt-realtime-2";
               String profile = "truck_bulk";
@@ -603,10 +593,15 @@ jobs:
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
 
-                      // V43: nem a szerver VAD dönti el a túl rövid fordításokat.
-                      // A kliens 3-5 mp-es hangablakokban commitol, így nincs buffer-too-small hiba.
+                      // Speech recognition: use Realtime semantic VAD.
+                      // The client only streams PCM16 audio; the API decides speech boundaries.
+                      JSONObject vad = new JSONObject();
+                      vad.put("type", "semantic_vad");
+                      vad.put("eagerness", vadMode);
+                      vad.put("create_response", true);
+
                       JSONObject input = new JSONObject();
-                      input.put("turn_detection", JSONObject.NULL);
+                      input.put("turn_detection", vad);
 
                       JSONObject audio = new JSONObject();
                       audio.put("input", input);
@@ -669,11 +664,6 @@ jobs:
 
                   rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
                   streaming = true;
-                  synchronized(liveLock) {
-                      liveWindowStartMs = 0L;
-                      liveLastVoiceMs = 0L;
-                      liveAudioBytes = 0;
-                  }
                   rec.startRecording();
                   updateButtons();
 
@@ -683,76 +673,15 @@ jobs:
                           int read = rec.read(buf, 0, buf.length);
                           if(read > 0) {
                               try {
-                                  int level = audioLevel(buf, read);
-                                  if(level < LIVE_VOICE_LEVEL) {
-                                      maybeCommitLiveAudio(false);
-                                      continue;
-                                  }
-
                                   byte[] chunk = Arrays.copyOf(buf, read);
                                   JSONObject evt = new JSONObject();
                                   evt.put("type", "input_audio_buffer.append");
                                   evt.put("audio", Base64.encodeToString(chunk, Base64.NO_WRAP));
                                   ws.send(evt.toString());
-
-                                  long now = System.currentTimeMillis();
-                                  synchronized(liveLock) {
-                                      if(liveWindowStartMs == 0L) liveWindowStartMs = now;
-                                      liveLastVoiceMs = now;
-                                      liveAudioBytes += read;
-                                  }
-                                  maybeCommitLiveAudio(false);
                               } catch(Exception ignored) {}
                           }
                       }
-                      maybeCommitLiveAudio(true);
                   });
-              }
-
-              int audioLevel(byte[] data, int len) {
-                  long sum = 0;
-                  int samples = 0;
-                  for(int i=0;i+1<len;i+=2) {
-                      int lo = data[i] & 0xff;
-                      int hi = data[i+1];
-                      short v = (short)((hi << 8) | lo);
-                      sum += Math.abs((int)v);
-                      samples++;
-                  }
-                  if(samples == 0) return 0;
-                  return (int)(sum / samples);
-              }
-
-              void maybeCommitLiveAudio(boolean force) {
-                  if(ws == null || !connected) return;
-                  if(responseInProgress && !force) return;
-
-                  boolean doCommit = false;
-                  synchronized(liveLock) {
-                      if(liveWindowStartMs == 0L || liveAudioBytes < LIVE_MIN_AUDIO_BYTES) return;
-                      long now = System.currentTimeMillis();
-                      long age = now - liveWindowStartMs;
-                      long silence = now - liveLastVoiceMs;
-                      doCommit = force || age >= LIVE_MAX_COMMIT_MS || (age >= LIVE_MIN_COMMIT_MS && silence >= LIVE_SILENCE_FLUSH_MS);
-                      if(!doCommit) return;
-                      liveWindowStartMs = 0L;
-                      liveLastVoiceMs = 0L;
-                      liveAudioBytes = 0;
-                  }
-
-                  try {
-                      JSONObject commit = new JSONObject();
-                      commit.put("type", "input_audio_buffer.commit");
-                      ws.send(commit.toString());
-
-                      JSONObject resp = new JSONObject();
-                      resp.put("type", "response.create");
-                      JSONObject response = new JSONObject();
-                      response.put("instructions", instructions());
-                      resp.put("response", response);
-                      responseInProgress = true;
-                      ws.send(resp.toString());
-                  } catch(Exception ignored) {}
               }
 
               void handleConnectionFailure(Throwable t) {
@@ -814,7 +743,6 @@ jobs:
 
                       if(type.equals("response.done")) {
                           responseInProgress = false;
-                          if(streaming) maybeCommitLiveAudio(false);
                       }
 
                       if(type.equals("response.text.delta") || type.equals("response.output_text.delta")) {
@@ -832,15 +760,6 @@ jobs:
                           JSONObject er = o.optJSONObject("error");
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
                           if(msg.contains("response in progress")) responseInProgress = true;
-                          if(msg.toLowerCase(Locale.ROOT).contains("buffer too small")) {
-                              responseInProgress = false;
-                              synchronized(liveLock) {
-                                  liveWindowStartMs = 0L;
-                                  liveLastVoiceMs = 0L;
-                                  liveAudioBytes = 0;
-                              }
-                              return;
-                          }
                           if(dirtyResponseMode || pendingDirtyBlockId >= 0) {
                               runOnUiThread(() -> handleConnectionFailure(new RuntimeException(msg)));
                           } else {
