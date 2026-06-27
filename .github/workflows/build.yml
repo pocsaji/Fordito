@@ -16,7 +16,7 @@ jobs:
           cat > settings.gradle.kts <<'EOF'
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
           dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
-          rootProject.name = "Fordito_V39"
+          rootProject.name = "ForditoKonzol"
           include(":app")
           EOF
 
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 39; versionName = "3.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 40; versionName = "4.0" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V39" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -127,6 +127,9 @@ jobs:
               boolean responseInProgress = false;
               long sessionStart = 0L;
               String pendingOutput = "";
+              long lastLiveCommitMs = 0L;
+              int audioBytesSinceCommit = 0;
+              boolean liveResponseMode = false;
               String pendingManualText = "";
               boolean manualResponseMode = false;
               boolean programmaticChange = false;
@@ -134,8 +137,11 @@ jobs:
               int bottomManualStart = -1;
 
               static final int MAX_BLOCK_SENTENCES = 3;
-              static final int MAX_BLOCK_CHARS = 550;
+              static final int MAX_BLOCK_CHARS = 800;
               static final int MAX_DIRTY_BLOCKS_PER_REQUEST = 1;
+              static final long LIVE_COMMIT_MS = 1200;
+              static final int LIVE_MIN_AUDIO_BYTES = 26000;
+              static final int LIVE_FORCE_AUDIO_BYTES = 90000;
 
               static class TextBlock {
                   String topText = "";
@@ -143,12 +149,6 @@ jobs:
                   boolean dirty = false;
                   boolean dirtyTopSource = true;
                   int retryCount = 0;
-              }
-
-              static class AiRecord {
-                  String sourceLang = "";
-                  String original = "";
-                  String translation = "";
               }
 
               final ArrayList<TextBlock> textBlocks = new ArrayList<>();
@@ -255,7 +255,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v3.5");
+                  TextView title = label("Fordito_V40");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -354,9 +354,9 @@ jobs:
                       }
                       public void afterTextChanged(Editable e) {
                           if(programmaticChange) return;
+                          // Írás közben csak a blokklistát jelöljük dirty-re.
+                          // A másik ablakot nem rajzoljuk újra, így nem csonkolódik a régi fordítás.
                           syncEditedBoxToBlocks(top, e.toString());
-                          // Írás közben nem nyúlunk a másik ablakhoz: csak gyűjtjük a dirty blokkot.
-                          // A párablak csak FORDÍT után vagy kész élő fordításnál frissül.
                           updateButtons();
                       }
                   };
@@ -379,11 +379,12 @@ jobs:
                           if(top) {
                               b.topText = newText;
                               // Blokkszintű dirty: ha a forrásblokk bármely része változik,
-                              // a teljes blokk fordítása érvénytelen. Írás közben a régi fordítást
-                              // meghagyjuk, hogy a másik ablak ne csonkolódjon.
+                              // a teljes blokk fordítása érvénytelen. Nem részletet toldunk/cserélünk,
+                              // hanem a párablak teljes fordításblokkját újraírjuk.
+                              // A régi fordítást megtartjuk addig, amíg az új fordítás meg nem érkezik.
                           } else {
                               b.bottomText = newText;
-                              // Írás közben a régi felső oldali fordítást meghagyjuk.
+                              // A régi fordítást megtartjuk addig, amíg az új fordítás meg nem érkezik.
                           }
                           b.dirty = true;
                           b.dirtyTopSource = top;
@@ -548,6 +549,7 @@ jobs:
                   if(!hasKey()) { showApi(); return; }
                   if(withAudio && Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reqMic(); return; }
                   if(withAudio && sessionStart == 0L) sessionStart = System.currentTimeMillis();
+                  if(withAudio) { audioBytesSinceCommit = 0; lastLiveCommitMs = 0L; liveResponseMode = false; }
                   if(withAudio && System.currentTimeMillis() - sessionStart > 20L*60L*1000L) { confirm(); return; }
 
                   state.setText("kapcsolódás");
@@ -603,7 +605,7 @@ jobs:
                       JSONObject vad = new JSONObject();
                       vad.put("type", "semantic_vad");
                       vad.put("eagerness", vadMode);
-                      vad.put("create_response", true);
+                      vad.put("create_response", false);
 
                       JSONObject input = new JSONObject();
                       input.put("turn_detection", vad);
@@ -630,15 +632,14 @@ jobs:
                     "Detect whether the current input is " + top + " or " + bottom + ". " +
                     "If the input is " + top + ", translate to " + bottom + ". If the input is " + bottom + ", translate to " + top + ". " +
                     "Ignore other languages and background speech unless it clearly belongs to the active speaker. " +
-                    "For every completed thought, output records in this exact format: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <clean source transcript> then TRANSLATION: <natural translation into the other selected language>. " +
-                    "If the speaker continues for a long time, split your answer into several records, each about 2-3 sentences or maximum 550 characters. Do not return one huge block. " +
-                    "Use the previous record as context, but translate only the current record. " +
+                    "For every completed thought, output exactly three lines in this format: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <clean source transcript> then TRANSLATION: <natural translation into the other selected language>. " +
+                    "If a short live audio chunk is not yet meaningful enough to translate, output exactly WAIT. " +
                     "Conversation profile: " + profilePrompt() + " " +
                     "Translation mode: " + modePrompt() + " " +
-                    "The audio transcript may contain speech recognition errors; fix only obvious errors when the intended meaning is clear. Do not invent missing information. Do not add details that were not said. " +
+                    "The profile is only a light terminology preference. Do not force the profile if the sentence is general conversation. " +
+                    "Do not invent missing information. Do not add details that were not said. " +
                     "If the audio is unclear, omit the unclear part or mark it briefly as unclear. " +
-                    "Use semantic turn detection, but do not wait until a very long monologue becomes one block. " +
-                    "Output after a complete sentence or a compact complete thought. " +
+                    "You decide the natural sentence and thought boundaries. The app only sends raw live chunks. " +
                     "The translation must be grammatically natural in the target language. " +
                     "Keep the output readable on a phone screen.";
               }
@@ -653,10 +654,22 @@ jobs:
                     "Return ONLY the translated text. " +
                     "Never include labels such as SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT or TRANSLATION. " +
                     "No markdown, no quotes, no explanation. " +
-                    "The input may contain speech recognition errors; fix only obvious errors when the intended meaning is clear. " +
-                    "Keep meaning, context and tone. " + modePrompt() + " " + profilePrompt();
+                    "Keep meaning, context and tone. " + modePrompt();
               }
 
+
+              String liveChunkInstructions() {
+                  String top = code(topLang);
+                  String bottom = code(bottomLang);
+                  return "This is a short live chunk from speech recognition/audio. " +
+                    "The chunk may be incomplete, raw, unpunctuated or contain recognition errors. " +
+                    "You, not the app, decide whether a meaningful sentence, clause or thought is ready. " +
+                    "If nothing meaningful is ready yet, return exactly WAIT. " +
+                    "If meaningful content is ready, clean obvious recognition errors and output exactly: " +
+                    "SOURCE_LANG: <" + top + " or " + bottom + ">\nORIGINAL: <clean source>\nTRANSLATION: <natural translation>. " +
+                    "Use the selected profile only as light terminology guidance, never as a forced interpretation. " +
+                    "No markdown, no extra explanation. " + modePrompt();
+              }
 
               String modePrompt() {
                   if(mode.equals("precise")) return "Precise mode: stay close to the meaning, do not expand, but always use correct natural grammar.";
@@ -685,10 +698,39 @@ jobs:
                                   evt.put("type", "input_audio_buffer.append");
                                   evt.put("audio", Base64.encodeToString(chunk, Base64.NO_WRAP));
                                   ws.send(evt.toString());
+                                  audioBytesSinceCommit += read;
+                                  maybeCommitLiveAudio(false);
                               } catch(Exception ignored) {}
                           }
                       }
                   });
+              }
+
+              void maybeCommitLiveAudio(boolean force) {
+                  if(ws == null || !connected || dirtyResponseMode || manualResponseMode) return;
+                  long now = System.currentTimeMillis();
+                  boolean enoughTime = now - lastLiveCommitMs >= LIVE_COMMIT_MS;
+                  boolean enoughAudio = audioBytesSinceCommit >= LIVE_MIN_AUDIO_BYTES;
+                  boolean tooMuchAudio = audioBytesSinceCommit >= LIVE_FORCE_AUDIO_BYTES;
+                  if(!force && !(tooMuchAudio || (enoughTime && enoughAudio))) return;
+                  if(responseInProgress) return;
+                  try {
+                      JSONObject commit = new JSONObject();
+                      commit.put("type", "input_audio_buffer.commit");
+                      ws.send(commit.toString());
+
+                      JSONObject resp = new JSONObject();
+                      resp.put("type", "response.create");
+                      JSONObject response = new JSONObject();
+                      response.put("instructions", liveChunkInstructions());
+                      resp.put("response", response);
+                      liveResponseMode = true;
+                      responseInProgress = true;
+                      ws.send(resp.toString());
+
+                      lastLiveCommitMs = now;
+                      audioBytesSinceCommit = 0;
+                  } catch(Exception ignored) {}
               }
 
               void handleConnectionFailure(Throwable t) {
@@ -750,6 +792,7 @@ jobs:
 
                       if(type.equals("response.done")) {
                           responseInProgress = false;
+                          liveResponseMode = false;
                       }
 
                       if(type.equals("response.text.delta") || type.equals("response.output_text.delta")) {
@@ -878,7 +921,14 @@ jobs:
               }
 
               void routeAiOutput(String out) {
+                  if(out == null) return;
+                  String trimmedOut = out.trim();
+                  if(trimmedOut.equalsIgnoreCase("WAIT")) {
+                      liveResponseMode = false;
+                      return;
+                  }
                   // Dirty/blokk újrafordítás válasza SOHA nem lehet új blokk.
+                  // Akkor is a meglévő blokkba írjuk vissza, ha a manualResponseMode valamiért közben elveszne.
                   if(dirtyResponseMode || pendingDirtyBlockId >= 0) {
                       dirtyResponseMode = false;
                       manualResponseMode = false;
@@ -888,17 +938,6 @@ jobs:
 
                   if(manualResponseMode) {
                       manualResponseMode = false;
-                  }
-
-                  ArrayList<AiRecord> records = parseAiRecords(out);
-                  if(records.size() > 0) {
-                      for(AiRecord r: records) {
-                          boolean sourceIsTop = r.sourceLang.toUpperCase(Locale.ROOT).contains(code(topLang));
-                          boolean sourceIsBottom = r.sourceLang.toUpperCase(Locale.ROOT).contains(code(bottomLang));
-                          if(!sourceIsTop && !sourceIsBottom) sourceIsTop = manualTopSource;
-                          addBlock(sourceIsTop, r.original, r.translation);
-                      }
-                      return;
                   }
 
                   String sourceLang = extractAfter(out, "SOURCE_LANG:").toUpperCase(Locale.ROOT);
@@ -917,33 +956,6 @@ jobs:
                   }
 
                   if(original.length() > 0 || translation.length() > 0) addBlock(sourceIsTop, original, translation);
-              }
-
-              ArrayList<AiRecord> parseAiRecords(String out) {
-                  ArrayList<AiRecord> list = new ArrayList<>();
-                  if(out == null) return list;
-                  int pos = 0;
-                  while(pos < out.length()) {
-                      int sIdx = indexOfIgnoreCase(out, "SOURCE_LANG:", pos);
-                      if(sIdx < 0) break;
-                      int oIdx = indexOfIgnoreCase(out, "ORIGINAL:", sIdx + 12);
-                      int tIdx = indexOfIgnoreCase(out, "TRANSLATION:", oIdx < 0 ? sIdx + 12 : oIdx + 9);
-                      if(oIdx < 0 || tIdx < 0) break;
-                      int nextS = indexOfIgnoreCase(out, "SOURCE_LANG:", tIdx + 12);
-                      AiRecord r = new AiRecord();
-                      r.sourceLang = out.substring(sIdx + "SOURCE_LANG:".length(), oIdx).trim();
-                      r.original = out.substring(oIdx + "ORIGINAL:".length(), tIdx).trim();
-                      r.translation = out.substring(tIdx + "TRANSLATION:".length(), nextS >= 0 ? nextS : out.length()).trim();
-                      if(r.original.length() > 0 || r.translation.length() > 0) list.add(r);
-                      if(nextS < 0) break;
-                      pos = nextS;
-                  }
-                  return list;
-              }
-
-              int indexOfIgnoreCase(String haystack, String needle, int from) {
-                  if(haystack == null || needle == null) return -1;
-                  return haystack.toLowerCase(Locale.ROOT).indexOf(needle.toLowerCase(Locale.ROOT), Math.max(0, from));
               }
 
               void applyDirtyTranslation(String out) {
@@ -1187,23 +1199,20 @@ jobs:
               }
 
               String profilePrompt() {
-                  String base = "Context profile is only a light terminology hint. Translate general conversation naturally. Use specialist terminology only when the sentence clearly requires it. If unsure, choose the everyday meaning.";
-                  if(profile.equals("truck_bulk")) return base + " Logistics/bulk transport hint: loading, unloading, silo, weighing, site, truck, trailer, CMR, ADR, chargé, déchargé, quai. Do not force truck meaning onto normal conversation.";
-                  if(profile.equals("truck_tarp")) return base + " Logistics/tarpaulin hint: loading, straps, pallets, trailer, CMR, site communication. Do not force logistics meaning unless clear.";
-                  if(profile.equals("truck_general")) return base + " Truck/logistics hint: route, dispatcher, loading, unloading, site communication, freight. Use only when context clearly fits.";
-                  if(profile.equals("truck_tank")) return base + " Tanker transport hint: loading, unloading, tank, hose, seal, weighing, ADR when relevant. Use only when clear.";
-                  if(profile.equals("logistics")) return base + " Logistics hint: warehouse, dock, pallet, CMR, loading, unloading, sender, recipient, appointment.";
-                  if(profile.equals("medical")) return base + " Medical hint: symptoms, examination, medicine, dosage and treatment. Use medical terminology only in medical context.";
-                  if(profile.equals("restaurant")) return base + " Restaurant hint: ordering, menu, food, drinks, payment and service.";
-                  if(profile.equals("tourism")) return base + " Tourism hint: travel, directions, tickets, programs, parking and opening hours.";
-                  if(profile.equals("hotel")) return base + " Accommodation hint: apartment, booking, arrival, departure, payment, keys and house rules.";
-                  if(profile.equals("bank")) return base + " Banking hint: account, card, transfer, payment and identification. Avoid legalese unless required.";
-                  if(profile.equals("office")) return base + " Official administration hint: documents, certificates, forms and customer service. Keep it clear, not over-legal.";
-                  if(profile.equals("customs")) return base + " Customs/border hint: documents, freight, inspection, declaration and border control. Use only when clearly relevant.";
-                  if(profile.equals("service")) return base + " Technical/service hint: vehicle or machine repair, faults, parts and repair steps. Do not invent technical details.";
-                  if(profile.equals("pharmacy")) return base + " Pharmacy hint: medicines, dosage, symptoms and use instructions.";
-                  if(profile.equals("police")) return base + " Police/official hint: checks, documents, traffic situations and official communication. Keep exact meaning.";
-                  return "General conversation. Translate naturally and fluently, with light correction of obvious speech recognition errors only.";
+                  if(profile.equals("truck_bulk")) return "Light logistics terminology preference: bulk transport, silo loading, unloading, weighing, site logistics and freight. Use these meanings only when the context clearly supports them; otherwise translate as normal conversation.";
+                  if(profile.equals("truck_tarp")) return "Light logistics terminology preference: tarpaulin truck transport, loading, straps, pallets, CMR and site logistics. Do not force truck meanings onto general sentences.";
+                  if(profile.equals("truck_general")) return "Light logistics terminology preference: truck driving, freight, route, dispatcher, loading and site communication. If uncertain, prefer the everyday meaning.";
+                  if(profile.equals("logistics")) return "Light logistics terminology preference: loading, unloading, warehouse, ramp, pallet, documents and delivery. Use only when context is clearly logistics.";
+                  if(profile.equals("medical")) return "Light medical terminology preference: symptoms, examination, medicine and treatment. Use medical terminology only in medical context.";
+                  if(profile.equals("restaurant")) return "Light restaurant terminology preference: ordering, food, drinks, payment and service. Keep normal conversation natural.";
+                  if(profile.equals("tourism")) return "Light travel terminology preference: tourism, directions, tickets and programs. Do not over-formalize.";
+                  if(profile.equals("hotel")) return "Light accommodation terminology preference: apartment, booking, arrival, departure and payment. Keep everyday speech natural.";
+                  if(profile.equals("bank")) return "Light banking terminology preference: account, card, transfer and identification. Use only when context requires it.";
+                  if(profile.equals("office")) return "Light official-administration terminology preference: documents, certificates and customer service. Avoid legalistic wording unless needed.";
+                  if(profile.equals("customs")) return "Light customs/border terminology preference: documents, freight and inspection. Use only in clear customs context.";
+                  if(profile.equals("service")) return "Light technical terminology preference: vehicle service or machine repair, faults, parts and repair. Do not invent technical details.";
+                  if(profile.equals("pharmacy")) return "Light pharmacy terminology preference: medicine, dosage and symptoms. Use only when context is clearly health or pharmacy.";
+                  return "General conversation. No domain should be forced.";
               }
 
               String modelLabel() { return labelOf(models, model); }
@@ -1282,14 +1291,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V39.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V39.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V40.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V40.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V39
+          name: Fordito_V40
           path: |
             artifact/*.apk
             artifact/*.aab
