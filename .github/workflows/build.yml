@@ -437,8 +437,7 @@ jobs:
                       TextBlock b = textBlocks.get(i);
                       String part = editedTop ? b.bottomText : b.topText;
                       sb.append(part == null ? "" : part);
-                      if(i < textBlocks.size()-1) sb.append("
-");
+                      if(i < textBlocks.size()-1) sb.append("\n\n");
                   }
 
                   programmaticChange = true;
