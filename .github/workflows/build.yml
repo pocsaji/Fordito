@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 32; versionName = "3.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 33; versionName = "3.3" }
 
               signingConfigs {
                   create("release") {
@@ -249,7 +249,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v3.2");
+                  TextView title = label("Fordító Konzol v3.3");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -722,7 +722,11 @@ jobs:
                           JSONObject er = o.optJSONObject("error");
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
                           if(msg.contains("response in progress")) responseInProgress = true;
-                          runOnUiThread(() -> append("\n[hiba] " + msg));
+                          if(dirtyResponseMode || pendingDirtyBlockId >= 0) {
+                              runOnUiThread(() -> handleConnectionFailure(new RuntimeException(msg)));
+                          } else {
+                              runOnUiThread(() -> Toast.makeText(this, "API hiba: " + msg, Toast.LENGTH_LONG).show());
+                          }
                       }
                   } catch(Exception e) {
                       runOnUiThread(() -> append("\n[event hiba] " + e.getMessage()));
@@ -824,18 +828,22 @@ jobs:
                       responseInProgress = true;
                       ws.send(resp.toString());
                   } catch(Exception e) {
-                      append("\n[kézi fordítás hiba] " + e.getMessage());
+                      Toast.makeText(this, "Kézi fordítás hiba, blokk később újrafordítható.", Toast.LENGTH_LONG).show();
                   }
               }
 
               void routeAiOutput(String out) {
+                  // Dirty/blokk újrafordítás válasza SOHA nem lehet új blokk.
+                  // Akkor is a meglévő blokkba írjuk vissza, ha a manualResponseMode valamiért közben elveszne.
+                  if(dirtyResponseMode || pendingDirtyBlockId >= 0) {
+                      dirtyResponseMode = false;
+                      manualResponseMode = false;
+                      applyDirtyTranslation(out);
+                      return;
+                  }
+
                   if(manualResponseMode) {
                       manualResponseMode = false;
-                      if(dirtyResponseMode) {
-                          dirtyResponseMode = false;
-                          applyDirtyTranslation(out);
-                          return;
-                      }
                   }
 
                   String sourceLang = extractAfter(out, "SOURCE_LANG:").toUpperCase(Locale.ROOT);
