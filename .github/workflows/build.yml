@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 19; versionName = "1.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 24; versionName = "2.4" }
 
               signingConfigs {
                   create("release") {
@@ -231,7 +231,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v1.9");
+                  TextView title = label("Fordító Konzol v2.4");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -265,12 +265,9 @@ jobs:
                   bottomBox.addTextChangedListener(manualWatcher(false));
                   topLangBtn.setOnClickListener(v -> chooseLang(true));
                   bottomLangBtn.setOnClickListener(v -> chooseLang(false));
-                  topLangBtn.setOnLongClickListener(v -> { copyBox(topBox, "Felső ablak másolva"); return true; });
-                  bottomLangBtn.setOnLongClickListener(v -> { copyBox(bottomBox, "Alsó ablak másolva"); return true; });
                   micBtn.setOnClickListener(v -> { if(streaming) stop(); else start(true); });
                   translateBtn.setOnClickListener(v -> manualTranslate());
                   menuBtn.setOnClickListener(v -> menu());
-                  menuBtn.setOnLongClickListener(v -> { clearBothBoxes(); return true; });
 
                   updateButtons();
               }
@@ -309,42 +306,9 @@ jobs:
                   e.setGravity(Gravity.TOP|Gravity.START);
                   e.setSingleLine(false);
                   e.setMinLines(5);
-                  e.setVerticalScrollBarEnabled(true);
-                  e.setScrollbarFadingEnabled(false);
                   e.setBackgroundColor(Color.rgb(27,32,41));
                   e.setPadding(14,14,14,14);
                   return e;
-              }
-
-              void copyBox(EditText box, String message) {
-                  String s = box.getText().toString();
-                  if(s.trim().isEmpty()) {
-                      Toast.makeText(this, "Nincs másolható szöveg.", Toast.LENGTH_SHORT).show();
-                      return;
-                  }
-                  try {
-                      android.content.ClipboardManager cm = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
-                      cm.setPrimaryClip(android.content.ClipData.newPlainText("Fordító Konzol", s));
-                      Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-                  } catch(Exception e) {
-                      Toast.makeText(this, "Másolási hiba: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                  }
-              }
-
-              void clearBothBoxes() {
-                  programmaticChange = true;
-                  try {
-                      topBox.setText("");
-                      bottomBox.setText("");
-                      topManualStart = -1;
-                      bottomManualStart = -1;
-                      pendingOutput = "";
-                      pendingManualText = "";
-                      manualResponseMode = false;
-                  } finally {
-                      programmaticChange = false;
-                  }
-                  Toast.makeText(this, "Mindkét ablak törölve.", Toast.LENGTH_SHORT).show();
               }
 
               TextWatcher manualWatcher(final boolean top) {
@@ -719,8 +683,6 @@ jobs:
                       "Beszélgetési profil: " + profileLabel(),
                       "Fordítási mód: " + modeLabel(),
                       "Semantic VAD: " + vadLabel(),
-                      "Felső ablak másolása",
-                      "Alsó ablak másolása",
                       "Felső ablak törlése",
                       "Alsó ablak törlése",
                       "Mindkét ablak törlése"
@@ -732,11 +694,9 @@ jobs:
                       if(w==2) chooseProfile();
                       if(w==3) chooseMode();
                       if(w==4) chooseVad();
-                      if(w==5) copyBox(topBox, "Felső ablak másolva");
-                      if(w==6) copyBox(bottomBox, "Alsó ablak másolva");
-                      if(w==7) { programmaticChange=true; topBox.setText(""); programmaticChange=false; topManualStart=-1; }
-                      if(w==8) { programmaticChange=true; bottomBox.setText(""); programmaticChange=false; bottomManualStart=-1; }
-                      if(w==9) clearBothBoxes();
+                      if(w==5) { programmaticChange=true; topBox.setText(""); programmaticChange=false; topManualStart=-1; }
+                      if(w==6) { programmaticChange=true; bottomBox.setText(""); programmaticChange=false; bottomManualStart=-1; }
+                      if(w==7) { programmaticChange=true; topBox.setText(""); bottomBox.setText(""); programmaticChange=false; topManualStart=-1; bottomManualStart=-1; }
                       updateButtons();
                   }).show();
               }
@@ -886,14 +846,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/ForditoKonzol-Realtime-v19-release-signed.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/ForditoKonzol-Realtime-v19-release-signed.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/ForditoKonzol-Realtime-v24-release-signed.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/ForditoKonzol-Realtime-v24-release-signed.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: ForditoKonzol-Realtime-v19-release-signed
+          name: ForditoKonzol-Realtime-v24-release-signed
           path: |
             artifact/*.apk
             artifact/*.aab
