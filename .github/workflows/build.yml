@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V51" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V52" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -132,6 +132,8 @@ jobs:
               boolean liveHadTranscriptDelta = false;
               int pendingLiveBlockId = -1;
               final ArrayDeque<Integer> liveTranslateQueue = new ArrayDeque<>();
+              final HashSet<String> recentLiveBlockHashes = new HashSet<>();
+              final ArrayDeque<String> recentLiveBlockHashOrder = new ArrayDeque<>();
               String pendingManualText = "";
               boolean manualResponseMode = false;
               boolean programmaticChange = false;
@@ -254,7 +256,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V51");
+                  TextView title = label("Fordito_V52");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -761,6 +763,8 @@ jobs:
                   liveTranslateMode = false;
                   pendingLiveBlockId = -1;
                   liveTranslateQueue.clear();
+                  recentLiveBlockHashes.clear();
+                  recentLiveBlockHashOrder.clear();
                   try { if(ws != null) ws.close(1000, "stop"); } catch(Exception ignored) {}
                   ws = null;
                   runOnUiThread(() -> {
@@ -942,61 +946,55 @@ jobs:
                   while(true) {
                       String b = popReadySpeechBlock(flushAll);
                       if(b == null || b.trim().length() == 0) break;
-                      int id = addSourceOnlyBlock(topActive, b.trim());
+                      b = finalizeSpeechBlockText(b);
+                      if(b.length() == 0) continue;
+                      if(!markLiveBlockQueued(b)) continue;
+                      int id = addSourceOnlyBlock(topActive, b);
                       liveTranslateQueue.add(id);
                   }
                   processNextLiveTranslation();
+              }
+
+              String finalizeSpeechBlockText(String raw) {
+                  if(raw == null) return "";
+                  String t = raw.trim().replaceAll("\\s+", " ");
+                  while(t.startsWith(",") || t.startsWith(";") || t.startsWith(":")) t = t.substring(1).trim();
+                  if(t.length() == 0) return "";
+                  char last = t.charAt(t.length() - 1);
+                  if(last == ',' || last == ';' || last == ':') t = t.substring(0, t.length() - 1).trim() + ".";
+                  return t;
+              }
+
+              boolean markLiveBlockQueued(String block) {
+                  String h = normalizeLiveBlockHash(block);
+                  if(h.length() < 3) return false;
+                  if(recentLiveBlockHashes.contains(h)) return false;
+                  recentLiveBlockHashes.add(h);
+                  recentLiveBlockHashOrder.add(h);
+                  while(recentLiveBlockHashOrder.size() > 80) {
+                      String old = recentLiveBlockHashOrder.poll();
+                      if(old != null) recentLiveBlockHashes.remove(old);
+                  }
+                  return true;
+              }
+
+              String normalizeLiveBlockHash(String block) {
+                  if(block == null) return "";
+                  return block.toLowerCase(Locale.ROOT)
+                          .replaceAll("[\\p{Punct}\\s]+", " ")
+                          .trim();
               }
 
               String popReadySpeechBlock(boolean flushAll) {
                   String s = liveTranscriptBuffer == null ? "" : liveTranscriptBuffer;
                   if(s.trim().length() == 0) { liveTranscriptBuffer = ""; return null; }
 
-                  int cut = -1;
-                  for(int i=0;i<s.length();i++) {
-                      char ch = s.charAt(i);
-                      if(ch == '.' || ch == '!' || ch == '?' || ch == '…' || ch == '\n') {
-                          cut = i + 1;
-                          break;
-                      }
-                  }
+                  int cut = firstHardSentenceEnd(s);
 
-                  // V51: nem időalapú vágás. Ha a beszélő nagyon hosszan beszél,
-                  // a szövegpufferben keresünk természetes magyar mondat/gondolat töréspontot.
-                  // Az audio pipeline változatlan: nincs saját VAD, nincs hangerőszűrés, nincs kézi commit.
-                  if(cut < 0 && s.length() >= 115) {
-                      String lower = s.toLowerCase(Locale.ROOT);
-                      int limit = Math.min(s.length(), 165);
-
-                      // Erős természetes töréspontok: itt általában új gondolat kezdődik.
-                      for(String sep: new String[]{
-                              ", akkor ", ", és akkor ", ", de ", ", viszont ", ", hanem ",
-                              ", mert ", ", tehát ", ", illetve ", ", majd ", ", aztán ",
-                              "; ", ": ", " - "
-                      }) {
-                          int pos = lower.lastIndexOf(sep, limit);
-                          if(pos >= 65) { cut = pos + 2; break; }
-                      }
-
-                      // Gyengébb töréspontok: ha nincs erős pont, hosszú mondatnál itt is vágható.
-                      if(cut < 0) {
-                          for(String sep: new String[]{
-                                  ", hogy ", ", ha ", ", és ha ", ", amikor ", ", ahol ",
-                                  ", ami ", ", ezt ", ", mint ", ", mint például ", ", nagyjából ",
-                                  ", bár ", ", ugye ", ", szintén ", ", valamint ", ", vagy "
-                          }) {
-                              int pos = lower.lastIndexOf(sep, limit);
-                              if(pos >= 80) { cut = pos + 2; break; }
-                          }
-                      }
-
-                      // Végső védelem: ha 170+ karakteren sincs értelmes írásjel vagy kötőszó,
-                      // szóhatáron vágunk, hogy ne álljon össze 1000 karakteres blokk.
-                      if(cut < 0 && s.length() >= 170) {
-                          int spc = s.lastIndexOf(' ', Math.min(s.length(), 170));
-                          if(spc >= 100) cut = spc + 1;
-                      }
-                  }
+                  // V52: kizárólag szöveg-alapú, nyelvi blokkzárás.
+                  // Nem időalapú, nem hangerőalapú, nem saját VAD.
+                  // Ha nincs végleges írásjel, hosszú élő beszédnél természetes gondolathatárt keresünk.
+                  if(cut < 0) cut = smartLinguisticCut(s);
 
                   if(cut < 0 && flushAll) cut = s.length();
                   if(cut < 0) return null;
@@ -1004,6 +1002,68 @@ jobs:
                   String out = s.substring(0, cut).trim();
                   liveTranscriptBuffer = s.substring(cut).trim();
                   return out;
+              }
+
+              int firstHardSentenceEnd(String s) {
+                  for(int i=0;i<s.length();i++) {
+                      char ch = s.charAt(i);
+                      if(ch == '.' || ch == '!' || ch == '?' || ch == '…' || ch == '\n') return i + 1;
+                  }
+                  return -1;
+              }
+
+              int smartLinguisticCut(String s) {
+                  int len = s.length();
+                  if(len < 120) return -1;
+
+                  String lower = s.toLowerCase(Locale.ROOT);
+                  int preferredEnd = Math.min(len, 185);
+                  int preferredStart = Math.min(len, 115);
+
+                  // 1) Erős gondolatváltók. Itt az előző rész általában önállóan is érthető.
+                  int cut = lastConnectorCut(lower, preferredStart, preferredEnd, new String[]{
+                          ", de ", ", viszont ", ", hanem ", ", tehát ", ", ezért ",
+                          ", aztán ", ", majd ", ", utána ", "; ", ": ", " - "
+                  });
+                  if(cut > 0) return cut;
+
+                  // 2) Feltételes / következő gondolat kezdete. Csak akkor vágunk, ha már nem túl korai.
+                  cut = lastConnectorCut(lower, 135, preferredEnd, new String[]{
+                          ", és akkor ", ", akkor ", ", hogyha ", ", ha ", ", amikor ",
+                          ", ahol ", ", amíg ", ", miközben "
+                  });
+                  if(cut > 0) return cut;
+
+                  // 3) Felsorolás vagy hosszú mellékmondat. Vágás vessző után, de csak 150 karakter fölött.
+                  cut = lastCommaCut(s, 150, preferredEnd);
+                  if(cut > 0) return cut;
+
+                  // 4) Végső szöveges biztonsági szelep: 210+ karakternél szóhatáron zárunk.
+                  // Ez nem időalapú, csak azt akadályozza meg, hogy több száz karakteres monológblokk legyen.
+                  if(len >= 210) {
+                      int spc = s.lastIndexOf(' ', Math.min(len, 205));
+                      if(spc >= 140) return spc + 1;
+                  }
+
+                  return -1;
+              }
+
+              int lastConnectorCut(String lower, int minPos, int maxPos, String[] connectors) {
+                  int best = -1;
+                  int end = Math.min(lower.length(), maxPos);
+                  for(String sep: connectors) {
+                      int pos = lower.lastIndexOf(sep, end);
+                      if(pos >= minPos && pos > best) best = pos;
+                  }
+                  if(best < 0) return -1;
+                  return best + 1; // a vessző/írásjel az előző blokk végén marad
+              }
+
+              int lastCommaCut(String s, int minPos, int maxPos) {
+                  int end = Math.min(s.length(), maxPos);
+                  int pos = s.lastIndexOf(',', end);
+                  if(pos >= minPos) return pos + 1;
+                  return -1;
               }
 
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
@@ -1484,14 +1544,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V51.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V51.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V52.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V52.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V51
+          name: Fordito_V52
           path: |
             artifact/*.apk
             artifact/*.aab
