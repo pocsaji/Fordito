@@ -248,15 +248,18 @@ jobs:
                   topBox = box("FELSŐ ABLAK — átirat / fordítás / kézi bevitel");
                   bottomBox = box("ALSÓ ABLAK — átirat / fordítás / kézi bevitel");
                   root.addView(topBox, new LinearLayout.LayoutParams(-1,0,1));
+                  android.view.View divider = new android.view.View(this);
+                  divider.setBackgroundColor(Color.rgb(95,100,108));
+                  root.addView(divider, new LinearLayout.LayoutParams(-1,8));
                   root.addView(bottomBox, new LinearLayout.LayoutParams(-1,0,1));
 
                   LinearLayout controls = row();
                   micBtn = btn("MIKROFON");
                   translateBtn = btn("FORDÍT");
                   menuBtn = btn("MENÜ");
-                  controls.addView(micBtn, new LinearLayout.LayoutParams(0,58,1));
-                  controls.addView(translateBtn, new LinearLayout.LayoutParams(0,58,1));
-                  controls.addView(menuBtn, new LinearLayout.LayoutParams(0,58,1));
+                  controls.addView(micBtn, new LinearLayout.LayoutParams(0,74,1));
+                  controls.addView(translateBtn, new LinearLayout.LayoutParams(0,74,1));
+                  controls.addView(menuBtn, new LinearLayout.LayoutParams(0,74,1));
                   root.addView(controls);
 
                   topBox.setOnClickListener(v -> { manualTopSource = true; updateButtons(); });
@@ -270,6 +273,7 @@ jobs:
                   micBtn.setOnClickListener(v -> { if(streaming) stop(); else start(true); });
                   translateBtn.setOnClickListener(v -> manualTranslate());
                   menuBtn.setOnClickListener(v -> menu());
+                  menuBtn.setOnLongClickListener(v -> { clearBothBoxes(); return true; });
 
                   updateButtons();
               }
@@ -688,11 +692,7 @@ jobs:
                       "Beszélgetési profil: " + profileLabel(),
                       "Fordítási mód: " + modeLabel(),
                       "Semantic VAD: " + vadLabel(),
-                      "Felső ablak másolása",
-                      "Alsó ablak másolása",
-                      "Felső ablak törlése",
-                      "Alsó ablak törlése",
-                      "Mindkét ablak törlése"
+                      "Ablakkezelés / másolás-törlés"
                   };
 
                   new AlertDialog.Builder(this).setTitle("Menü").setItems(items, (d,w) -> {
@@ -701,13 +701,54 @@ jobs:
                       if(w==2) chooseProfile();
                       if(w==3) chooseMode();
                       if(w==4) chooseVad();
-                      if(w==5) copyBox(true);
-                      if(w==6) copyBox(false);
-                      if(w==7) { programmaticChange=true; topBox.setText(""); programmaticChange=false; topManualStart=-1; }
-                      if(w==8) { programmaticChange=true; bottomBox.setText(""); programmaticChange=false; bottomManualStart=-1; }
-                      if(w==9) { programmaticChange=true; topBox.setText(""); bottomBox.setText(""); programmaticChange=false; topManualStart=-1; bottomManualStart=-1; }
+                      if(w==5) windowMenu();
                       updateButtons();
                   }).show();
+              }
+
+              void windowMenu() {
+                  String[] items = {
+                      "Felső ablak másolása — felső nyelvgomb hosszú",
+                      "Alsó ablak másolása — alsó nyelvgomb hosszú",
+                      "Felső ablak törlése",
+                      "Alsó ablak törlése",
+                      "Mindkét ablak törlése — MENÜ hosszú"
+                  };
+
+                  new AlertDialog.Builder(this).setTitle("Ablakkezelés").setItems(items, (d,w) -> {
+                      if(w==0) copyBox(true);
+                      if(w==1) copyBox(false);
+                      if(w==2) clearTopBox();
+                      if(w==3) clearBottomBox();
+                      if(w==4) clearBothBoxes();
+                      updateButtons();
+                  }).show();
+              }
+
+              void clearTopBox() {
+                  programmaticChange=true;
+                  topBox.setText("");
+                  programmaticChange=false;
+                  topManualStart=-1;
+                  Toast.makeText(this, "Felső ablak törölve.", Toast.LENGTH_SHORT).show();
+              }
+
+              void clearBottomBox() {
+                  programmaticChange=true;
+                  bottomBox.setText("");
+                  programmaticChange=false;
+                  bottomManualStart=-1;
+                  Toast.makeText(this, "Alsó ablak törölve.", Toast.LENGTH_SHORT).show();
+              }
+
+              void clearBothBoxes() {
+                  programmaticChange=true;
+                  topBox.setText("");
+                  bottomBox.setText("");
+                  programmaticChange=false;
+                  topManualStart=-1;
+                  bottomManualStart=-1;
+                  Toast.makeText(this, "Mindkét ablak törölve.", Toast.LENGTH_SHORT).show();
               }
 
               void copyBox(boolean top) {
