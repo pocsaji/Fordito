@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V52" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V53" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -128,6 +128,7 @@ jobs:
               long sessionStart = 0L;
               String pendingOutput = "";
               String liveTranscriptBuffer = "";
+              int liveStableReadyChars = 0;
               boolean liveTranslateMode = false;
               boolean liveHadTranscriptDelta = false;
               int pendingLiveBlockId = -1;
@@ -256,7 +257,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V52");
+                  TextView title = label("Fordito_V53");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -925,7 +926,14 @@ jobs:
               void handleTranscriptDelta(String delta) {
                   if(delta == null || delta.length() == 0) return;
                   liveHadTranscriptDelta = true;
+
+                  // V53: stabil átirat alapú blokkzárás.
+                  // Az új delta előtti puffer-rész legalább egy későbbi delta érkezéséig változatlan maradt,
+                  // ezért ezt tekintjük stabilnak. A laza, nyelvi vágás csak ebből a stabil részből dolgozik.
+                  int beforeLen = liveTranscriptBuffer == null ? 0 : liveTranscriptBuffer.length();
                   liveTranscriptBuffer += delta;
+                  if(beforeLen > liveStableReadyChars) liveStableReadyChars = beforeLen;
+
                   flushReadyTranscriptBlocks(false);
               }
 
@@ -938,6 +946,7 @@ jobs:
                   if(!liveHadTranscriptDelta && liveTranscriptBuffer.trim().length() == 0 && transcript != null && transcript.trim().length() > 0) {
                       liveTranscriptBuffer = transcript;
                   }
+                  liveStableReadyChars = liveTranscriptBuffer == null ? 0 : liveTranscriptBuffer.length();
                   flushReadyTranscriptBlocks(true);
                   liveHadTranscriptDelta = false;
               }
@@ -987,62 +996,72 @@ jobs:
 
               String popReadySpeechBlock(boolean flushAll) {
                   String s = liveTranscriptBuffer == null ? "" : liveTranscriptBuffer;
-                  if(s.trim().length() == 0) { liveTranscriptBuffer = ""; return null; }
+                  if(s.trim().length() == 0) {
+                      liveTranscriptBuffer = "";
+                      liveStableReadyChars = 0;
+                      return null;
+                  }
 
                   int cut = firstHardSentenceEnd(s);
 
-                  // V52: kizárólag szöveg-alapú, nyelvi blokkzárás.
-                  // Nem időalapú, nem hangerőalapú, nem saját VAD.
-                  // Ha nincs végleges írásjel, hosszú élő beszédnél természetes gondolathatárt keresünk.
-                  if(cut < 0) cut = smartLinguisticCut(s);
+                  // V53: stabil transcript alapú blokkzárás.
+                  // Nem idő, nem hangerő, nem saját VAD. A laza vágás csak azon a szövegrészen történhet,
+                  // amely már legalább egy további delta érkezéséig változatlan maradt.
+                  if(cut < 0) cut = stableTranscriptCut(s);
 
                   if(cut < 0 && flushAll) cut = s.length();
                   if(cut < 0) return null;
 
                   String out = s.substring(0, cut).trim();
                   liveTranscriptBuffer = s.substring(cut).trim();
+                  liveStableReadyChars = Math.max(0, liveStableReadyChars - cut);
+                  if(liveStableReadyChars > liveTranscriptBuffer.length()) liveStableReadyChars = liveTranscriptBuffer.length();
                   return out;
               }
 
               int firstHardSentenceEnd(String s) {
                   for(int i=0;i<s.length();i++) {
                       char ch = s.charAt(i);
-                      if(ch == '.' || ch == '!' || ch == '?' || ch == '…' || ch == '\n') return i + 1;
+                      if(ch == '.' || ch == '!' || ch == '?' || ch == '…' || ch == '
+') return i + 1;
                   }
                   return -1;
               }
 
-              int smartLinguisticCut(String s) {
+              int stableTranscriptCut(String s) {
                   int len = s.length();
-                  if(len < 120) return -1;
+                  int stableLen = Math.min(liveStableReadyChars, len);
+                  if(stableLen < 135) return -1;
 
-                  String lower = s.toLowerCase(Locale.ROOT);
-                  int preferredEnd = Math.min(len, 185);
-                  int preferredStart = Math.min(len, 115);
+                  String stable = s.substring(0, stableLen);
+                  String lower = stable.toLowerCase(Locale.ROOT);
 
-                  // 1) Erős gondolatváltók. Itt az előző rész általában önállóan is érthető.
+                  int preferredEnd = Math.min(stableLen, 210);
+                  int preferredStart = Math.min(stableLen, 110);
+
+                  // 1) Erős gondolatváltók stabil szövegben. Ezeknél az előző rész többnyire önállóan fordítható.
                   int cut = lastConnectorCut(lower, preferredStart, preferredEnd, new String[]{
                           ", de ", ", viszont ", ", hanem ", ", tehát ", ", ezért ",
                           ", aztán ", ", majd ", ", utána ", "; ", ": ", " - "
                   });
                   if(cut > 0) return cut;
 
-                  // 2) Feltételes / következő gondolat kezdete. Csak akkor vágunk, ha már nem túl korai.
-                  cut = lastConnectorCut(lower, 135, preferredEnd, new String[]{
+                  // 2) Természetes új gondolat kezdete. Csak stabil, nem frissen érkező szövegben vágunk.
+                  cut = lastConnectorCut(lower, 130, preferredEnd, new String[]{
                           ", és akkor ", ", akkor ", ", hogyha ", ", ha ", ", amikor ",
-                          ", ahol ", ", amíg ", ", miközben "
+                          ", ahol ", ", amíg ", ", miközben ", ", mint például ", ", például "
                   });
                   if(cut > 0) return cut;
 
-                  // 3) Felsorolás vagy hosszú mellékmondat. Vágás vessző után, de csak 150 karakter fölött.
-                  cut = lastCommaCut(s, 150, preferredEnd);
+                  // 3) Hosszú, de stabil rész: vessző után vágunk, ha már nem túl korai.
+                  cut = lastCommaCut(stable, 145, preferredEnd);
                   if(cut > 0) return cut;
 
-                  // 4) Végső szöveges biztonsági szelep: 210+ karakternél szóhatáron zárunk.
-                  // Ez nem időalapú, csak azt akadályozza meg, hogy több száz karakteres monológblokk legyen.
-                  if(len >= 210) {
-                      int spc = s.lastIndexOf(' ', Math.min(len, 205));
-                      if(spc >= 140) return spc + 1;
+                  // 4) Stabilitási biztonsági szelep. Ez nem időalapú: csak akkor lép életbe,
+                  // ha a szöveg eleje már stabilan bent maradt, de nincs tiszta mondatzárás.
+                  if(stableLen >= 220) {
+                      int spc = stable.lastIndexOf(' ', Math.min(stableLen, 205));
+                      if(spc >= 150) return spc + 1;
                   }
 
                   return -1;
@@ -1544,14 +1563,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V52.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V52.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V53.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V53.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V52
+          name: Fordito_V53
           path: |
             artifact/*.apk
             artifact/*.aab
