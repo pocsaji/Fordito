@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V54" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V55" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -256,7 +256,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V54");
+                  TextView title = label("Fordito_V55");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -784,6 +784,13 @@ jobs:
 
                       if(type.equals("response.done")) {
                           responseInProgress = false;
+                          // V55: élő fordítási sor csak akkor induljon tovább,
+                          // amikor az előző response ténylegesen lezárult a szerver szerint.
+                          // Különben a következő response.create könnyen "response in progress" hibára fut,
+                          // és a fordítás az első blokk után megáll.
+                          if(!liveTranslateMode && !liveTranslateQueue.isEmpty()) {
+                              runOnUiThread(() -> processNextLiveTranslation());
+                          }
                       }
 
                       if(type.equals("conversation.item.input_audio_transcription.delta")) {
@@ -810,7 +817,18 @@ jobs:
                       if(type.equals("error")) {
                           JSONObject er = o.optJSONObject("error");
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
-                          if(msg.contains("response in progress")) responseInProgress = true;
+                          if(msg.contains("response in progress")) {
+                              responseInProgress = true;
+                              // V55: ha live fordítás közben túl korán próbáltunk új választ indítani,
+                              // ne nyeljük le végleg a sort: röviden visszarakjuk a blokkot és újrapróbáljuk.
+                              if(liveTranslateMode && pendingLiveBlockId >= 0) {
+                                  int retryId = pendingLiveBlockId;
+                                  pendingLiveBlockId = -1;
+                                  liveTranslateMode = false;
+                                  liveTranslateQueue.add(retryId);
+                                  new Handler().postDelayed(() -> processNextLiveTranslation(), 700);
+                              }
+                          }
                           if(dirtyResponseMode || pendingDirtyBlockId >= 0) {
                               runOnUiThread(() -> handleConnectionFailure(new RuntimeException(msg)));
                           } else {
@@ -1020,7 +1038,7 @@ jobs:
                   int preferredEnd = Math.min(len, 185);
                   int preferredStart = Math.min(len, 105);
 
-                  // V54: V52 alap + stabil transcript pufferkezelés.
+                  // V55: V52 alap + stabil transcript pufferkezelés.
                   // Nem audio, nem VAD, nem időzítő. Csak a már beérkezett szöveg stabil elejét vágjuk le,
                   // hogy hosszú folyamatos beszédnél se legyen egyetlen óriás blokk.
 
@@ -1146,7 +1164,10 @@ jobs:
                   }
                   pendingLiveBlockId = -1;
                   liveTranslateMode = false;
-                  processNextLiveTranslation();
+                  // V55: nem indítjuk azonnal a következő live fordítást itt.
+                  // Megvárjuk a response.done eseményt, mert a text.done után
+                  // a szerver oldalon még lehet aktív válasz, és a következő
+                  // response.create különben megakaszthatja a sort.
               }
 
               void routeAiOutput(String out) {
@@ -1551,14 +1572,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V54.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V54.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V55.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V55.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V54
+          name: Fordito_V55
           path: |
             artifact/*.apk
             artifact/*.aab
