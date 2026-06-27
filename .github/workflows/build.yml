@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 41; versionName = "4.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 43; versionName = "4.3" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V41" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V43" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -259,7 +259,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V41");
+                  TextView title = label("Fordito_V43");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -603,7 +603,7 @@ jobs:
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
 
-                      // V41: nem a szerver VAD dönti el a túl rövid fordításokat.
+                      // V43: nem a szerver VAD dönti el a túl rövid fordításokat.
                       // A kliens 3-5 mp-es hangablakokban commitol, így nincs buffer-too-small hiba.
                       JSONObject input = new JSONObject();
                       input.put("turn_detection", JSONObject.NULL);
@@ -628,6 +628,9 @@ jobs:
                   return "You are a live interpreter. Output text only. No explanations. " +
                     "Work ONLY with these two selected languages: " + top + " and " + bottom + ". " +
                     "The input is raw live speech audio. It may be fragmented, noisy, badly punctuated or contain obvious recognition mistakes. " +
+                    "Translate only what was very likely spoken by a human. Do not turn background noise, engine hum, wind, radio, clicks, breathing or uncertain sound into words. " +
+                    "If you are not confident that meaningful human speech is present, output nothing and wait for the next audio window. " +
+                    "Never narrate the situation, never comment on noise, and never write phrases such as 'noise is heard' unless those words were actually spoken. " +
                     "You decide the natural thought boundaries and clean only clear recognition errors without inventing facts. " +
                     "Detect whether the current input is " + top + " or " + bottom + ". " +
                     "If the input is " + top + ", translate to " + bottom + ". If the input is " + bottom + ", translate to " + top + ". " +
@@ -1336,14 +1339,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V41.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V41.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V43.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V43.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V41
+          name: Fordito_V43
           path: |
             artifact/*.apk
             artifact/*.aab
