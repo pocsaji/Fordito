@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V49" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V50" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -129,6 +129,7 @@ jobs:
               String pendingOutput = "";
               String liveTranscriptBuffer = "";
               boolean liveTranslateMode = false;
+              boolean liveHadTranscriptDelta = false;
               int pendingLiveBlockId = -1;
               final ArrayDeque<Integer> liveTranslateQueue = new ArrayDeque<>();
               String pendingManualText = "";
@@ -253,7 +254,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V49");
+                  TextView title = label("Fordito_V50");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -756,6 +757,7 @@ jobs:
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception ignored) {}
                   rec = null;
                   liveTranscriptBuffer = "";
+                  liveHadTranscriptDelta = false;
                   liveTranslateMode = false;
                   pendingLiveBlockId = -1;
                   liveTranslateQueue.clear();
@@ -918,16 +920,22 @@ jobs:
 
               void handleTranscriptDelta(String delta) {
                   if(delta == null || delta.length() == 0) return;
+                  liveHadTranscriptDelta = true;
                   liveTranscriptBuffer += delta;
                   flushReadyTranscriptBlocks(false);
               }
 
               void handleTranscriptCompleted(String transcript) {
-                  // Ha delta nem érkezett, legalább a kész transcriptet dolgozzuk fel.
-                  if(liveTranscriptBuffer.trim().length() == 0 && transcript != null && transcript.trim().length() > 0) {
+                  // V50 duplázás-javítás:
+                  // A completed esemény sokszor ugyanazt a teljes mondatot küldi újra,
+                  // amit a delta eseményekből már kiírtunk és fordítottunk.
+                  // Ha volt delta ebben a körben, NEM töltjük vissza a teljes transcriptet,
+                  // csak a bufferben maradt befejezetlen részt zárjuk le.
+                  if(!liveHadTranscriptDelta && liveTranscriptBuffer.trim().length() == 0 && transcript != null && transcript.trim().length() > 0) {
                       liveTranscriptBuffer = transcript;
                   }
                   flushReadyTranscriptBlocks(true);
+                  liveHadTranscriptDelta = false;
               }
 
               void flushReadyTranscriptBlocks(boolean flushAll) {
@@ -1454,14 +1462,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V49.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V49.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V50.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V50.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V49
+          name: Fordito_V50
           path: |
             artifact/*.apk
             artifact/*.aab
