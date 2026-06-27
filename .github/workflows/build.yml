@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 26; versionName = "2.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 27; versionName = "2.7" }
 
               signingConfigs {
                   create("release") {
@@ -135,6 +135,7 @@ jobs:
 
               static final int MAX_BLOCK_SENTENCES = 3;
               static final int MAX_BLOCK_CHARS = 800;
+              static final int MAX_DIRTY_BLOCKS_PER_REQUEST = 4;
 
               static class TextBlock {
                   String topText = "";
@@ -244,7 +245,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v2.6");
+                  TextView title = label("Fordító Konzol v2.7");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -663,6 +664,7 @@ jobs:
 
               String dirtyPayload() {
                   StringBuilder sb = new StringBuilder();
+                  int sent = 0;
                   for(int i=0;i<textBlocks.size();i++) {
                       TextBlock b = textBlocks.get(i);
                       if(!b.dirty) continue;
@@ -674,6 +676,8 @@ jobs:
                       sb.append("SOURCE_LANG: ").append(srcCode).append("\n");
                       sb.append("TARGET_LANG: ").append(tgtCode).append("\n");
                       sb.append("TEXT: ").append(src.trim()).append("\n---\n");
+                      sent++;
+                      if(sent >= MAX_DIRTY_BLOCKS_PER_REQUEST) break;
                   }
                   return sb.toString();
               }
@@ -748,8 +752,9 @@ jobs:
 
               void applyDirtyTranslations(String out) {
                   try {
-                      String[] lines = out.split("\\n");
+                      String[] lines = out.split("\n");
                       int currentId = -1;
+                      int applied = 0;
                       for(String raw: lines) {
                           String line = raw.trim();
                           if(line.startsWith("BLOCK_ID:")) {
@@ -761,11 +766,21 @@ jobs:
                               if(b.dirtyTopSource) b.bottomText = tr;
                               else b.topText = tr;
                               b.dirty = false;
+                              applied++;
                               currentId = -1;
                           }
                       }
                       renderBlocks();
-                      Toast.makeText(this, "Módosított blokkok újrafordítva.", Toast.LENGTH_SHORT).show();
+                      if(applied == 0) {
+                          Toast.makeText(this, "Nem sikerült blokkfordítást kiolvasni. Nyomd meg újra a FORDÍT gombot.", Toast.LENGTH_LONG).show();
+                          return;
+                      }
+                      if(!dirtyBlocks().isEmpty()) {
+                          Toast.makeText(this, "Hosszú beillesztés: folytatom a következő blokkokkal...", Toast.LENGTH_SHORT).show();
+                          topBox.postDelayed(() -> manualTranslate(), 500);
+                      } else {
+                          Toast.makeText(this, "Módosított blokkok újrafordítva.", Toast.LENGTH_SHORT).show();
+                      }
                   } catch(Exception e) {
                       append("\n[dirty fordítás hiba] " + e.getMessage());
                   }
@@ -1044,14 +1059,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/ForditoKonzol-Realtime-v25-release-signed.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/ForditoKonzol-Realtime-v25-release-signed.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/ForditoKonzol-Realtime-v27-release-signed.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/ForditoKonzol-Realtime-v27-release-signed.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: ForditoKonzol-Realtime-v25-release-signed
+          name: ForditoKonzol-Realtime-v27-release-signed
           path: |
             artifact/*.apk
             artifact/*.aab
