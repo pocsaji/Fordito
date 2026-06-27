@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 28; versionName = "2.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 29; versionName = "2.9" }
 
               signingConfigs {
                   create("release") {
@@ -246,7 +246,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v2.8");
+                  TextView title = label("Fordító Konzol v2.9");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -550,6 +550,20 @@ jobs:
                     "Keep the output readable on a phone screen.";
               }
 
+              String manualBlockInstructions() {
+                  String top = code(topLang);
+                  String bottom = code(bottomLang);
+                  return "You are a translation engine for one edited text block. " +
+                    "The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. " +
+                    "Translate TEXT from SOURCE_LANG to TARGET_LANG. " +
+                    "The selected languages are " + top + " and " + bottom + ". " +
+                    "Return ONLY the translated text. " +
+                    "Never include labels such as SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT or TRANSLATION. " +
+                    "No markdown, no quotes, no explanation. " +
+                    "Keep meaning, context and tone. " + modePrompt();
+              }
+
+
               String modePrompt() {
                   if(mode.equals("precise")) return "Precise mode: stay close to the meaning, do not expand, but always use correct natural grammar.";
                   if(mode.equals("interpreter")) return "Interpreter mode: use context strongly, make the translation sound like a human interpreter, but do not invent facts.";
@@ -712,7 +726,7 @@ jobs:
                       dirtyResponseMode = true;
                       manualResponseMode = true;
                       pendingDirtyBlockId = blockId;
-                      c.put("text", "Translate this ONE edited block only. Keep meaning, context and tone. Return ONLY the translated text, no labels, no explanation.\n\n" + text);
+                      c.put("text", "MANUAL_BLOCK_TRANSLATION\n" + text + "\n\nReturn ONLY the translated text. Do not write SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT, TRANSLATION, markdown, quotes or explanation.");
                       content.put(c);
                       item.put("content", content);
                       msg.put("item", item);
@@ -721,7 +735,7 @@ jobs:
                       JSONObject resp = new JSONObject();
                       resp.put("type", "response.create");
                       JSONObject response = new JSONObject();
-                      response.put("instructions", instructions());
+                      response.put("instructions", manualBlockInstructions());
                       resp.put("response", response);
                       responseInProgress = true;
                       ws.send(resp.toString());
@@ -790,12 +804,30 @@ jobs:
               String cleanOneBlockTranslation(String out) {
                   if(out == null) return "";
                   String s = out.trim();
-                  if(s.startsWith("TRANSLATION:")) s = s.substring("TRANSLATION:".length()).trim();
-                  if(s.startsWith("FORDÍTÁS:")) s = s.substring("FORDÍTÁS:".length()).trim();
-                  if(s.startsWith("```")) {
-                      s = s.replace("```", "").trim();
+                  if(s.startsWith("```")) s = s.replace("```", "").trim();
+
+                  String upper = s.toUpperCase(Locale.ROOT);
+                  int trPos = upper.lastIndexOf("TRANSLATION:");
+                  if(trPos >= 0) {
+                      s = s.substring(trPos + "TRANSLATION:".length()).trim();
                   }
-                  return s;
+                  if(s.toUpperCase(Locale.ROOT).startsWith("FORDÍTÁS:")) s = s.substring("FORDÍTÁS:".length()).trim();
+
+                  // Biztonsági tisztítás: ha a modell mégis címkéket adott vissza,
+                  // ne írjuk be őket a fordítási ablakba.
+                  StringBuilder clean = new StringBuilder();
+                  String[] lines = s.split("\n");
+                  for(String line: lines) {
+                      String t = line.trim();
+                      String u = t.toUpperCase(Locale.ROOT);
+                      if(u.startsWith("SOURCE_LANG:") || u.startsWith("TARGET_LANG:") ||
+                         u.startsWith("ORIGINAL:") || u.equals("TEXT:") || u.startsWith("TEXT:")) {
+                          continue;
+                      }
+                      if(clean.length() > 0) clean.append("\n");
+                      clean.append(line);
+                  }
+                  return clean.toString().trim();
               }
 
               String extractAfter(String out, String key) {
