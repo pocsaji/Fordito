@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 27; versionName = "2.7" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 28; versionName = "2.8" }
 
               signingConfigs {
                   create("release") {
@@ -135,7 +135,7 @@ jobs:
 
               static final int MAX_BLOCK_SENTENCES = 3;
               static final int MAX_BLOCK_CHARS = 800;
-              static final int MAX_DIRTY_BLOCKS_PER_REQUEST = 4;
+              static final int MAX_DIRTY_BLOCKS_PER_REQUEST = 1;
 
               static class TextBlock {
                   String topText = "";
@@ -146,6 +146,7 @@ jobs:
 
               final ArrayList<TextBlock> textBlocks = new ArrayList<>();
               boolean dirtyResponseMode = false;
+              int pendingDirtyBlockId = -1;
 
               String apiKey = "";
               String model = "gpt-realtime-2";
@@ -245,7 +246,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v2.7");
+                  TextView title = label("Fordító Konzol v2.8");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -472,8 +473,9 @@ jobs:
                               updateButtons();
                               if(!withAudio && pendingManualText.length() > 0) {
                                   String p = pendingManualText;
+                                  int id = pendingDirtyBlockId;
                                   pendingManualText = "";
-                                  new Handler().postDelayed(() -> sendManualText(p), 500);
+                                  new Handler().postDelayed(() -> sendManualText(p, id), 500);
                               }
                           });
                       }
@@ -645,14 +647,17 @@ jobs:
 
                   if(!hasKey()) { showApi(); return; }
 
-                  String payload = dirtyPayload();
+                  int blockId = firstDirtyBlockId();
+                  if(blockId < 0) return;
+                  String payload = dirtyPayload(blockId);
                   if(payload.trim().isEmpty()) return;
 
                   if(ws == null || !connected) {
+                      pendingDirtyBlockId = blockId;
                       pendingManualText = payload;
                       start(false);
                   } else {
-                      sendManualText(payload);
+                      sendManualText(payload, blockId);
                   }
               }
 
@@ -662,27 +667,29 @@ jobs:
                   return out;
               }
 
-              String dirtyPayload() {
-                  StringBuilder sb = new StringBuilder();
-                  int sent = 0;
+              int firstDirtyBlockId() {
                   for(int i=0;i<textBlocks.size();i++) {
                       TextBlock b = textBlocks.get(i);
                       if(!b.dirty) continue;
                       String src = b.dirtyTopSource ? b.topText : b.bottomText;
-                      if(src == null || src.trim().isEmpty()) continue;
-                      String srcCode = b.dirtyTopSource ? code(topLang) : code(bottomLang);
-                      String tgtCode = b.dirtyTopSource ? code(bottomLang) : code(topLang);
-                      sb.append("BLOCK_ID: ").append(i).append("\n");
-                      sb.append("SOURCE_LANG: ").append(srcCode).append("\n");
-                      sb.append("TARGET_LANG: ").append(tgtCode).append("\n");
-                      sb.append("TEXT: ").append(src.trim()).append("\n---\n");
-                      sent++;
-                      if(sent >= MAX_DIRTY_BLOCKS_PER_REQUEST) break;
+                      if(src != null && src.trim().length() > 0) return i;
                   }
-                  return sb.toString();
+                  return -1;
               }
 
-              void sendManualText(String text) {
+              String dirtyPayload(int blockId) {
+                  if(blockId < 0 || blockId >= textBlocks.size()) return "";
+                  TextBlock b = textBlocks.get(blockId);
+                  String src = b.dirtyTopSource ? b.topText : b.bottomText;
+                  if(src == null || src.trim().isEmpty()) return "";
+                  String srcCode = b.dirtyTopSource ? code(topLang) : code(bottomLang);
+                  String tgtCode = b.dirtyTopSource ? code(bottomLang) : code(topLang);
+                  return "SOURCE_LANG: " + srcCode + "\n"
+                       + "TARGET_LANG: " + tgtCode + "\n"
+                       + "TEXT:\n" + src.trim();
+              }
+
+              void sendManualText(String text, int blockId) {
                   topActive = manualTopSource;
                   updateButtons();
                   if(responseInProgress && ws != null) {
@@ -704,7 +711,8 @@ jobs:
                       c.put("type", "input_text");
                       dirtyResponseMode = true;
                       manualResponseMode = true;
-                      c.put("text", "Manual corrected block translation. Translate ONLY the changed blocks below. Keep meaning, context and tone. Do not add explanations. For EACH block output exactly two lines: BLOCK_ID: <same number> then TRANSLATION: <translation>. Preserve block order. Blocks:\n" + text);
+                      pendingDirtyBlockId = blockId;
+                      c.put("text", "Translate this ONE edited block only. Keep meaning, context and tone. Return ONLY the translated text, no labels, no explanation.\n\n" + text);
                       content.put(c);
                       item.put("content", content);
                       msg.put("item", item);
@@ -727,7 +735,7 @@ jobs:
                       manualResponseMode = false;
                       if(dirtyResponseMode) {
                           dirtyResponseMode = false;
-                          applyDirtyTranslations(out);
+                          applyDirtyTranslation(out);
                           return;
                       }
                   }
@@ -750,40 +758,44 @@ jobs:
                   if(original.length() > 0 || translation.length() > 0) addBlock(sourceIsTop, original, translation);
               }
 
-              void applyDirtyTranslations(String out) {
+              void applyDirtyTranslation(String out) {
                   try {
-                      String[] lines = out.split("\n");
-                      int currentId = -1;
-                      int applied = 0;
-                      for(String raw: lines) {
-                          String line = raw.trim();
-                          if(line.startsWith("BLOCK_ID:")) {
-                              try { currentId = Integer.parseInt(line.substring("BLOCK_ID:".length()).trim()); }
-                              catch(Exception e) { currentId = -1; }
-                          } else if(line.startsWith("TRANSLATION:") && currentId >= 0 && currentId < textBlocks.size()) {
-                              String tr = line.substring("TRANSLATION:".length()).trim();
-                              TextBlock b = textBlocks.get(currentId);
-                              if(b.dirtyTopSource) b.bottomText = tr;
-                              else b.topText = tr;
-                              b.dirty = false;
-                              applied++;
-                              currentId = -1;
-                          }
-                      }
-                      renderBlocks();
-                      if(applied == 0) {
-                          Toast.makeText(this, "Nem sikerült blokkfordítást kiolvasni. Nyomd meg újra a FORDÍT gombot.", Toast.LENGTH_LONG).show();
+                      int id = pendingDirtyBlockId;
+                      pendingDirtyBlockId = -1;
+                      if(id < 0 || id >= textBlocks.size()) {
+                          Toast.makeText(this, "Nincs érvényes módosított blokk.", Toast.LENGTH_LONG).show();
                           return;
                       }
+                      String tr = cleanOneBlockTranslation(out);
+                      if(tr.length() == 0) {
+                          Toast.makeText(this, "Üres fordítás érkezett. Nyomd meg újra a FORDÍT gombot.", Toast.LENGTH_LONG).show();
+                          return;
+                      }
+                      TextBlock b = textBlocks.get(id);
+                      if(b.dirtyTopSource) b.bottomText = tr;
+                      else b.topText = tr;
+                      b.dirty = false;
+                      renderBlocks();
                       if(!dirtyBlocks().isEmpty()) {
-                          Toast.makeText(this, "Hosszú beillesztés: folytatom a következő blokkokkal...", Toast.LENGTH_SHORT).show();
-                          topBox.postDelayed(() -> manualTranslate(), 500);
+                          Toast.makeText(this, "Hosszú beillesztés: folytatom a következő blokkal...", Toast.LENGTH_SHORT).show();
+                          topBox.postDelayed(() -> manualTranslate(), 150);
                       } else {
                           Toast.makeText(this, "Módosított blokkok újrafordítva.", Toast.LENGTH_SHORT).show();
                       }
                   } catch(Exception e) {
                       append("\n[dirty fordítás hiba] " + e.getMessage());
                   }
+              }
+
+              String cleanOneBlockTranslation(String out) {
+                  if(out == null) return "";
+                  String s = out.trim();
+                  if(s.startsWith("TRANSLATION:")) s = s.substring("TRANSLATION:".length()).trim();
+                  if(s.startsWith("FORDÍTÁS:")) s = s.substring("FORDÍTÁS:".length()).trim();
+                  if(s.startsWith("```")) {
+                      s = s.replace("```", "").trim();
+                  }
+                  return s;
               }
 
               String extractAfter(String out, String key) {
