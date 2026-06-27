@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 34; versionName = "3.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 35; versionName = "3.5" }
 
               signingConfigs {
                   create("release") {
@@ -249,7 +249,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v3.4");
+                  TextView title = label("Fordító Konzol v3.5");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -349,6 +349,7 @@ jobs:
                       public void afterTextChanged(Editable e) {
                           if(programmaticChange) return;
                           syncEditedBoxToBlocks(top, e.toString());
+                          renderPeerWindow(top);
                           updateButtons();
                       }
                   };
@@ -420,6 +421,35 @@ jobs:
                   if(s == null) return;
                   String clean = s.trim();
                   if(clean.length() > 0) out.add(clean);
+              }
+
+              void renderPeerWindow(boolean editedTop) {
+                  // A szerkesztett ablakban a felhasználó éppen gépel: ahhoz nem nyúlunk,
+                  // hogy ne ugorjon a kurzor. A másik ablakot viszont azonnal a blokklistából
+                  // rajzoljuk újra, így nem marad benne régi/stale fordítás.
+                  EditText peer = editedTop ? bottomBox : topBox;
+                  int peerScroll = peer.getScrollY();
+                  int peerSel = Math.max(0, peer.getSelectionStart());
+                  boolean peerHadFocus = peer.hasFocus();
+
+                  StringBuilder sb = new StringBuilder();
+                  for(int i=0;i<textBlocks.size();i++) {
+                      TextBlock b = textBlocks.get(i);
+                      String part = editedTop ? b.bottomText : b.topText;
+                      sb.append(part == null ? "" : part);
+                      if(i < textBlocks.size()-1) sb.append("
+");
+                  }
+
+                  programmaticChange = true;
+                  try {
+                      peer.setText(sb.toString());
+                      peer.setSelection(Math.min(peerSel, peer.getText().length()));
+                      if(peerHadFocus) peer.requestFocus();
+                      peer.post(() -> peer.scrollTo(0, peerScroll));
+                  } finally {
+                      programmaticChange = false;
+                  }
               }
 
               void addBlock(boolean sourceIsTop, String original, String translation) {
