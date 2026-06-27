@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 24; versionName = "2.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 26; versionName = "2.6" }
 
               signingConfigs {
                   create("release") {
@@ -132,6 +132,19 @@ jobs:
               boolean programmaticChange = false;
               int topManualStart = -1;
               int bottomManualStart = -1;
+
+              static final int MAX_BLOCK_SENTENCES = 3;
+              static final int MAX_BLOCK_CHARS = 800;
+
+              static class TextBlock {
+                  String topText = "";
+                  String bottomText = "";
+                  boolean dirty = false;
+                  boolean dirtyTopSource = true;
+              }
+
+              final ArrayList<TextBlock> textBlocks = new ArrayList<>();
+              boolean dirtyResponseMode = false;
 
               String apiKey = "";
               String model = "gpt-realtime-2";
@@ -231,7 +244,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v2.4");
+                  TextView title = label("Fordító Konzol v2.6");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -325,17 +338,105 @@ jobs:
                       public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
                       public void onTextChanged(CharSequence s, int start, int before, int count) {
                           if(programmaticChange) return;
-                          if(top) {
-                              manualTopSource = true;
-                              if(topManualStart < 0) topManualStart = Math.max(0, Math.min(start, s.length()));
-                          } else {
-                              manualTopSource = false;
-                              if(bottomManualStart < 0) bottomManualStart = Math.max(0, Math.min(start, s.length()));
-                          }
+                          if(top) manualTopSource = true;
+                          else manualTopSource = false;
+                      }
+                      public void afterTextChanged(Editable e) {
+                          if(programmaticChange) return;
+                          syncEditedBoxToBlocks(top, e.toString());
                           updateButtons();
                       }
-                      public void afterTextChanged(Editable e) {}
                   };
+              }
+
+              void syncEditedBoxToBlocks(boolean top, String text) {
+                  ArrayList<String> parts = splitTextToBlocks(text);
+                  while(textBlocks.size() < parts.size()) textBlocks.add(new TextBlock());
+
+                  for(int i=0;i<parts.size();i++) {
+                      TextBlock b = textBlocks.get(i);
+                      String newText = parts.get(i);
+                      String oldText = top ? b.topText : b.bottomText;
+                      if(!oldText.equals(newText)) {
+                          if(top) b.topText = newText; else b.bottomText = newText;
+                          b.dirty = true;
+                          b.dirtyTopSource = top;
+                      }
+                  }
+              }
+
+              ArrayList<String> splitTextToBlocks(String text) {
+                  ArrayList<String> out = new ArrayList<>();
+                  if(text == null) return out;
+                  String[] paragraphs = text.split("\\n", -1);
+                  for(String paragraph: paragraphs) {
+                      String p = paragraph.trim();
+                      if(p.length() == 0) continue;
+                      StringBuilder block = new StringBuilder();
+                      int sentenceCount = 0;
+                      for(int i=0;i<p.length();i++) {
+                          char ch = p.charAt(i);
+                          block.append(ch);
+                          if(ch == '.' || ch == '!' || ch == '?' || ch == '…') sentenceCount++;
+                          boolean sentenceLimit = sentenceCount >= MAX_BLOCK_SENTENCES;
+                          boolean charLimit = block.length() >= MAX_BLOCK_CHARS;
+                          boolean softBreak = (sentenceLimit || charLimit) && (i == p.length()-1 || Character.isWhitespace(p.charAt(i+1)));
+                          if(softBreak) {
+                              addCleanBlock(out, block.toString());
+                              block.setLength(0);
+                              sentenceCount = 0;
+                          }
+                      }
+                      addCleanBlock(out, block.toString());
+                  }
+                  return out;
+              }
+
+              void addCleanBlock(ArrayList<String> out, String s) {
+                  if(s == null) return;
+                  String clean = s.trim();
+                  if(clean.length() > 0) out.add(clean);
+              }
+
+              void addBlock(boolean sourceIsTop, String original, String translation) {
+                  ArrayList<String> originals = splitTextToBlocks(original);
+                  ArrayList<String> translations = splitTextToBlocks(translation);
+                  int count = Math.max(originals.size(), translations.size());
+                  if(count == 0) return;
+                  for(int i=0;i<count;i++) {
+                      TextBlock b = new TextBlock();
+                      String o = i < originals.size() ? originals.get(i) : "";
+                      String t = i < translations.size() ? translations.get(i) : "";
+                      if(sourceIsTop) {
+                          b.topText = o;
+                          b.bottomText = t;
+                      } else {
+                          b.topText = t;
+                          b.bottomText = o;
+                      }
+                      textBlocks.add(b);
+                  }
+                  renderBlocks();
+              }
+
+              void renderBlocks() {
+                  StringBuilder top = new StringBuilder();
+                  StringBuilder bottom = new StringBuilder();
+                  for(TextBlock b: textBlocks) {
+                      if(b.topText.length() > 0) top.append(b.topText).append("\n");
+                      else top.append("\n");
+                      if(b.bottomText.length() > 0) bottom.append(b.bottomText).append("\n");
+                      else bottom.append("\n");
+                  }
+                  programmaticChange = true;
+                  try {
+                      topBox.setText(top.toString());
+                      bottomBox.setText(bottom.toString());
+                      topBox.setSelection(topBox.getText().length());
+                      bottomBox.setSelection(bottomBox.getText().length());
+                  } finally {
+                      programmaticChange = false;
+                  }
               }
 
               void reqMic() {
@@ -528,15 +629,14 @@ jobs:
               }
 
               void manualTranslate() {
-                  EditText source = manualTopSource ? topBox : bottomBox;
-                  String text = manualSourceText(source, manualTopSource).trim();
-                  if(text.isEmpty()) {
-                      Toast.makeText(this, "Nincs új kézi bevitel. Írj a felső vagy alsó ablakba, utána FORDÍT.", Toast.LENGTH_LONG).show();
+                  ArrayList<TextBlock> dirty = dirtyBlocks();
+                  if(dirty.isEmpty()) {
+                      Toast.makeText(this, "Nincs módosított blokk. Javíts bele egy blokkba, utána FORDÍT.", Toast.LENGTH_LONG).show();
                       return;
                   }
 
+                  EditText source = manualTopSource ? topBox : bottomBox;
                   source.clearFocus();
-                  source.setSelection(source.getText().length());
                   try {
                       InputMethodManager imm = (InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
                       imm.hideSoftInputFromWindow(source.getWindowToken(), 0);
@@ -544,27 +644,38 @@ jobs:
 
                   if(!hasKey()) { showApi(); return; }
 
+                  String payload = dirtyPayload();
+                  if(payload.trim().isEmpty()) return;
+
                   if(ws == null || !connected) {
-                      pendingManualText = text;
+                      pendingManualText = payload;
                       start(false);
                   } else {
-                      sendManualText(text);
+                      sendManualText(payload);
                   }
               }
 
-              String manualSourceText(EditText source, boolean top) {
-                  String all = source.getText().toString();
-                  if(all.length() == 0) return "";
-
-                  int start = top ? topManualStart : bottomManualStart;
-                  if(start < 0 || start > all.length()) return "";
-
-                  return all.substring(start);
+              ArrayList<TextBlock> dirtyBlocks() {
+                  ArrayList<TextBlock> out = new ArrayList<>();
+                  for(TextBlock b: textBlocks) if(b.dirty) out.add(b);
+                  return out;
               }
 
-              void clearManualBlock(boolean top) {
-                  if(top) topManualStart = -1;
-                  else bottomManualStart = -1;
+              String dirtyPayload() {
+                  StringBuilder sb = new StringBuilder();
+                  for(int i=0;i<textBlocks.size();i++) {
+                      TextBlock b = textBlocks.get(i);
+                      if(!b.dirty) continue;
+                      String src = b.dirtyTopSource ? b.topText : b.bottomText;
+                      if(src == null || src.trim().isEmpty()) continue;
+                      String srcCode = b.dirtyTopSource ? code(topLang) : code(bottomLang);
+                      String tgtCode = b.dirtyTopSource ? code(bottomLang) : code(topLang);
+                      sb.append("BLOCK_ID: ").append(i).append("\n");
+                      sb.append("SOURCE_LANG: ").append(srcCode).append("\n");
+                      sb.append("TARGET_LANG: ").append(tgtCode).append("\n");
+                      sb.append("TEXT: ").append(src.trim()).append("\n---\n");
+                  }
+                  return sb.toString();
               }
 
               void sendManualText(String text) {
@@ -587,10 +698,9 @@ jobs:
                       JSONArray content = new JSONArray();
                       JSONObject c = new JSONObject();
                       c.put("type", "input_text");
-                      String srcCode = manualTopSource ? code(topLang) : code(bottomLang);
-                      String tgtCode = manualTopSource ? code(bottomLang) : code(topLang);
+                      dirtyResponseMode = true;
                       manualResponseMode = true;
-                      c.put("text", "Manual text input. Source language is " + srcCode + ". Target language is " + tgtCode + ". Translate ONLY the following text. Output exactly one line in this format: TRANSLATION: <translation>. Do not repeat the source text. Text:\n" + text);
+                      c.put("text", "Manual corrected block translation. Translate ONLY the changed blocks below. Keep meaning, context and tone. Do not add explanations. For EACH block output exactly two lines: BLOCK_ID: <same number> then TRANSLATION: <translation>. Preserve block order. Blocks:\n" + text);
                       content.put(c);
                       item.put("content", content);
                       msg.put("item", item);
@@ -609,21 +719,21 @@ jobs:
               }
 
               void routeAiOutput(String out) {
+                  if(manualResponseMode) {
+                      manualResponseMode = false;
+                      if(dirtyResponseMode) {
+                          dirtyResponseMode = false;
+                          applyDirtyTranslations(out);
+                          return;
+                      }
+                  }
+
                   String sourceLang = extractAfter(out, "SOURCE_LANG:").toUpperCase(Locale.ROOT);
                   String original = extractAfter(out, "ORIGINAL:");
                   String translation = extractAfter(out, "TRANSLATION:");
 
                   if(original.length() == 0 && translation.length() == 0) {
                       translation = out;
-                  }
-
-                  if(manualResponseMode) {
-                      manualResponseMode = false;
-                      boolean sourceWasTop = manualTopSource;
-                      EditText dstBox = sourceWasTop ? bottomBox : topBox;
-                      if(translation.length() > 0) appendTo(dstBox, translation + "\n");
-                      clearManualBlock(sourceWasTop);
-                      return;
                   }
 
                   boolean sourceIsTop = sourceLang.contains(code(topLang));
@@ -633,11 +743,32 @@ jobs:
                       sourceIsTop = manualTopSource;
                   }
 
-                  EditText srcBox = sourceIsTop ? topBox : bottomBox;
-                  EditText dstBox = sourceIsTop ? bottomBox : topBox;
+                  if(original.length() > 0 || translation.length() > 0) addBlock(sourceIsTop, original, translation);
+              }
 
-                  if(original.length() > 0) appendTo(srcBox, original + "\n");
-                  if(translation.length() > 0) appendTo(dstBox, translation + "\n");
+              void applyDirtyTranslations(String out) {
+                  try {
+                      String[] lines = out.split("\\n");
+                      int currentId = -1;
+                      for(String raw: lines) {
+                          String line = raw.trim();
+                          if(line.startsWith("BLOCK_ID:")) {
+                              try { currentId = Integer.parseInt(line.substring("BLOCK_ID:".length()).trim()); }
+                              catch(Exception e) { currentId = -1; }
+                          } else if(line.startsWith("TRANSLATION:") && currentId >= 0 && currentId < textBlocks.size()) {
+                              String tr = line.substring("TRANSLATION:".length()).trim();
+                              TextBlock b = textBlocks.get(currentId);
+                              if(b.dirtyTopSource) b.bottomText = tr;
+                              else b.topText = tr;
+                              b.dirty = false;
+                              currentId = -1;
+                          }
+                      }
+                      renderBlocks();
+                      Toast.makeText(this, "Módosított blokkok újrafordítva.", Toast.LENGTH_SHORT).show();
+                  } catch(Exception e) {
+                      append("\n[dirty fordítás hiba] " + e.getMessage());
+                  }
               }
 
               String extractAfter(String out, String key) {
@@ -730,6 +861,7 @@ jobs:
                   topBox.setText("");
                   programmaticChange=false;
                   topManualStart=-1;
+                  textBlocks.clear();
                   Toast.makeText(this, "Felső ablak törölve.", Toast.LENGTH_SHORT).show();
               }
 
@@ -738,6 +870,7 @@ jobs:
                   bottomBox.setText("");
                   programmaticChange=false;
                   bottomManualStart=-1;
+                  textBlocks.clear();
                   Toast.makeText(this, "Alsó ablak törölve.", Toast.LENGTH_SHORT).show();
               }
 
@@ -748,6 +881,7 @@ jobs:
                   programmaticChange=false;
                   topManualStart=-1;
                   bottomManualStart=-1;
+                  textBlocks.clear();
                   Toast.makeText(this, "Mindkét ablak törölve.", Toast.LENGTH_SHORT).show();
               }
 
@@ -910,14 +1044,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/ForditoKonzol-Realtime-v24-release-signed.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/ForditoKonzol-Realtime-v24-release-signed.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/ForditoKonzol-Realtime-v25-release-signed.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/ForditoKonzol-Realtime-v25-release-signed.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: ForditoKonzol-Realtime-v24-release-signed
+          name: ForditoKonzol-Realtime-v25-release-signed
           path: |
             artifact/*.apk
             artifact/*.aab
