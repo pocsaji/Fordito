@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V43" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V46" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -155,7 +155,7 @@ jobs:
               String model = "gpt-realtime-2";
               String profile = "truck_bulk";
               String mode = "natural";
-              String vadMode = "low";
+              String vadMode = "high";
               String topLang = "hu";
               String bottomLang = "fr";
 
@@ -204,9 +204,9 @@ jobs:
               };
 
               final String[][] vadModes = {
-                  {"Gyors","low"},
+                  {"Gyors","high"},
                   {"Normál","medium"},
-                  {"Türelmes","high"},
+                  {"Türelmes","low"},
                   {"Automatikus","auto"}
               };
 
@@ -223,10 +223,10 @@ jobs:
                   model = sp.getString("model", "gpt-realtime-2");
                   profile = sp.getString("profile", "truck_bulk");
                   mode = sp.getString("mode", "natural");
-                  vadMode = sp.getString("vadMode", "low");
+                  vadMode = sp.getString("vadMode", "high");
                   topLang = sp.getString("topLang", "hu");
                   bottomLang = sp.getString("bottomLang", "fr");
-                  if("normal".equals(vadMode)) vadMode = "low";
+                  if("normal".equals(vadMode)) vadMode = "high";
               }
 
               void save() {
@@ -249,7 +249,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V43");
+                  TextView title = label("Fordito_V46");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -593,8 +593,8 @@ jobs:
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
 
-                      // Speech recognition: use Realtime semantic VAD.
-                      // The client only streams PCM16 audio; the API decides speech boundaries.
+                      // Speech recognition: use Realtime semantic VAD, not a fixed silence timer.
+                      // The client only streams PCM16 audio; the API decides semantic speech boundaries.
                       JSONObject vad = new JSONObject();
                       vad.put("type", "semantic_vad");
                       vad.put("eagerness", vadMode);
@@ -630,8 +630,9 @@ jobs:
                     "Detect whether the current input is " + top + " or " + bottom + ". " +
                     "If the input is " + top + ", translate to " + bottom + ". If the input is " + bottom + ", translate to " + top + ". " +
                     "If the current audio window is not meaningful enough yet, output nothing. " +
-                    "Do not wait for a long monologue. As soon as one short sentence, clear clause, or complete thought is available, close that thought and output it as its own item. " +
-                    "Keep each ORIGINAL item short: preferably 1 sentence, maximum about 15 to 20 words. If the speaker continues for a long time, split the speech into multiple SOURCE_LANG / ORIGINAL / TRANSLATION items instead of one large paragraph. " +
+                    "Do not wait for a long monologue. Treat every semantically complete sentence, short clause, numbered item, or list item as a finished thought. " +
+                    "Examples: 'microphone test one' is one complete item; 'microphone test two' is the next complete item. A long counting/list sequence must be returned as many separate items, not as one paragraph. " +
+                    "Keep each ORIGINAL item short: preferably 1 sentence or one list item, maximum about 12 to 18 words. If the speaker continues for a long time, split the speech into multiple SOURCE_LANG / ORIGINAL / TRANSLATION items instead of one large paragraph. " +
                     "For every completed thought, output exactly three lines in this format: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <clean source transcript> then TRANSLATION: <natural translation into the other selected language>. " +
                     "Conversation profile: " + profilePrompt() + " " +
                     "Translation mode: " + modePrompt() + " " +
@@ -1260,14 +1261,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V43.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V43.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V46.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V46.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V43
+          name: Fordito_V46
           path: |
             artifact/*.apk
             artifact/*.aab
