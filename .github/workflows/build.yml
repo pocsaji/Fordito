@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 23; versionName = "2.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 19; versionName = "1.9" }
 
               signingConfigs {
                   create("release") {
@@ -194,29 +194,10 @@ jobs:
 
               @Override public void onCreate(Bundle b) {
                   super.onCreate(b);
-                  try {
-                      sp = getSharedPreferences("settings", MODE_PRIVATE);
-                      load();
-                      ui();
-                      reqMic();
-                  } catch(Exception e) {
-                      emergencyUi(e);
-                  }
-              }
-
-              void emergencyUi(Exception e) {
-                  try {
-                      LinearLayout root = new LinearLayout(this);
-                      root.setOrientation(LinearLayout.VERTICAL);
-                      root.setPadding(20,60,20,20);
-                      root.setBackgroundColor(Color.rgb(16,19,24));
-                      TextView t = new TextView(this);
-                      t.setTextColor(Color.WHITE);
-                      t.setTextSize(16);
-                      t.setText("Indítási hiba:\n" + e.getClass().getSimpleName() + "\n" + e.getMessage());
-                      root.addView(t, new LinearLayout.LayoutParams(-1,-1));
-                      setContentView(root);
-                  } catch(Exception ignored) {}
+                  sp = getSharedPreferences("settings", MODE_PRIVATE);
+                  load();
+                  ui();
+                  reqMic();
               }
 
               void load() {
@@ -250,7 +231,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordító Konzol v2.3");
+                  TextView title = label("Fordító Konzol v1.9");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -341,9 +322,13 @@ jobs:
                       Toast.makeText(this, "Nincs másolható szöveg.", Toast.LENGTH_SHORT).show();
                       return;
                   }
-                  android.content.ClipboardManager cm = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
-                  cm.setPrimaryClip(android.content.ClipData.newPlainText("Fordító Konzol", s));
-                  Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+                  try {
+                      android.content.ClipboardManager cm = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+                      cm.setPrimaryClip(android.content.ClipData.newPlainText("Fordító Konzol", s));
+                      Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+                  } catch(Exception e) {
+                      Toast.makeText(this, "Másolási hiba: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                  }
               }
 
               void clearBothBoxes() {
@@ -896,19 +881,19 @@ jobs:
           EOF
 
       - name: Build signed release APK and AAB
-        run: gradle assembleRelease bundleRelease --stacktrace --stacktrace
+        run: gradle assembleRelease bundleRelease --stacktrace
 
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/ForditoKonzol-Realtime-v23-release-signed.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/ForditoKonzol-Realtime-v23-release-signed.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/ForditoKonzol-Realtime-v19-release-signed.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/ForditoKonzol-Realtime-v19-release-signed.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: ForditoKonzol-Realtime-v23-release-signed
+          name: ForditoKonzol-Realtime-v19-release-signed
           path: |
             artifact/*.apk
             artifact/*.aab
