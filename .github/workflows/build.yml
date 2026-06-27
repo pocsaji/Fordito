@@ -16,7 +16,7 @@ jobs:
           cat > settings.gradle.kts <<'EOF'
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
           dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
-          rootProject.name = "ForditoKonzol"
+          rootProject.name = "Fordito_V38"
           include(":app")
           EOF
 
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 37; versionName = "3.7" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 38; versionName = "3.8" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V37" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V38" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -249,7 +249,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V37");
+                  TextView title = label("Fordito_V38");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1004,81 +1004,17 @@ jobs:
                     .show();
               }
 
-              int dp(int v) {
-                  return (int)(v * getResources().getDisplayMetrics().density + 0.5f);
-              }
-
-              TextView menuText(String text, float size, int color, int style) {
-                  TextView t = new TextView(this);
-                  t.setText(text);
-                  t.setTextColor(color);
-                  t.setTextSize(size);
-                  t.setTypeface(android.graphics.Typeface.DEFAULT, style);
-                  t.setGravity(Gravity.CENTER);
-                  t.setPadding(dp(4), dp(2), dp(4), dp(2));
-                  return t;
-              }
-
-              void prettyMenu(String title, String[] labels, String[] hints, DialogInterface.OnClickListener click) {
-                  AlertDialog dlg = new AlertDialog.Builder(this).create();
-                  ScrollView scroll = new ScrollView(this);
-                  LinearLayout list = new LinearLayout(this);
-                  list.setOrientation(LinearLayout.VERTICAL);
-                  list.setPadding(dp(22), dp(20), dp(22), dp(20));
-                  list.setBackgroundColor(Color.rgb(66,66,66));
-
-                  TextView head = menuText(title, 24, Color.WHITE, android.graphics.Typeface.BOLD);
-                  head.setGravity(Gravity.START);
-                  head.setPadding(dp(4), dp(2), dp(4), dp(18));
-                  list.addView(head, new LinearLayout.LayoutParams(-1, -2));
-
-                  for(int i=0;i<labels.length;i++) {
-                      final int idx = i;
-                      LinearLayout item = new LinearLayout(this);
-                      item.setOrientation(LinearLayout.VERTICAL);
-                      item.setGravity(Gravity.CENTER);
-                      item.setPadding(dp(4), dp(8), dp(4), dp(10));
-
-                      TextView main = menuText(labels[i], 19, Color.WHITE, android.graphics.Typeface.BOLD);
-                      item.addView(main, new LinearLayout.LayoutParams(-1, -2));
-
-                      if(hints != null && idx < hints.length && hints[idx] != null && hints[idx].trim().length() > 0) {
-                          TextView hint = menuText(hints[idx], 13, Color.LTGRAY, android.graphics.Typeface.NORMAL);
-                          hint.setMaxLines(2);
-                          item.addView(hint, new LinearLayout.LayoutParams(-1, -2));
-                      }
-
-                      item.setOnClickListener(v -> {
-                          dlg.dismiss();
-                          click.onClick(dlg, idx);
-                      });
-                      list.addView(item, new LinearLayout.LayoutParams(-1, -2));
-                  }
-
-                  scroll.addView(list);
-                  dlg.setView(scroll);
-                  dlg.show();
-              }
-
               void menu() {
-                  String[] labels = {
+                  String[] items = {
                       "OpenAI API kulcs",
-                      "AI modell",
-                      "Beszélgetési profil",
-                      "Fordítási mód",
-                      "Semantic VAD",
-                      "Ablakkezelés"
-                  };
-                  String[] hints = {
-                      "Kulcs mentése / módosítása",
-                      modelLabel(),
-                      profileLabel(),
-                      modeLabel(),
-                      vadLabel(),
-                      "Másolás és törlés kezelése"
+                      "AI modell: " + modelLabel(),
+                      "Beszélgetési profil: " + profileLabel(),
+                      "Fordítási mód: " + modeLabel(),
+                      "Semantic VAD: " + vadLabel(),
+                      "Ablakkezelés / másolás-törlés"
                   };
 
-                  prettyMenu("Menü", labels, hints, (d,w) -> {
+                  new AlertDialog.Builder(this).setTitle("Menü").setItems(items, (d,w) -> {
                       if(w==0) showApi();
                       if(w==1) chooseModel();
                       if(w==2) chooseProfile();
@@ -1086,33 +1022,26 @@ jobs:
                       if(w==4) chooseVad();
                       if(w==5) windowMenu();
                       updateButtons();
-                  });
+                  }).show();
               }
 
               void windowMenu() {
-                  String[] labels = {
-                      "Felső ablak másolása",
-                      "Alsó ablak másolása",
+                  String[] items = {
+                      "Felső ablak másolása — felső nyelvgomb hosszú",
+                      "Alsó ablak másolása — alsó nyelvgomb hosszú",
                       "Felső ablak törlése",
                       "Alsó ablak törlése",
-                      "Mindkét ablak törlése"
-                  };
-                  String[] hints = {
-                      "Felső nyelvgomb\nhosszú megnyomása",
-                      "Alsó nyelvgomb\nhosszú megnyomása",
-                      "Csak a felső ablak ürítése",
-                      "Csak az alsó ablak ürítése",
-                      "MENÜ gomb\nhosszú megnyomása"
+                      "Mindkét ablak törlése — MENÜ hosszú"
                   };
 
-                  prettyMenu("Ablakkezelés", labels, hints, (d,w) -> {
+                  new AlertDialog.Builder(this).setTitle("Ablakkezelés").setItems(items, (d,w) -> {
                       if(w==0) copyBox(true);
                       if(w==1) copyBox(false);
                       if(w==2) clearTopBox();
                       if(w==3) clearBottomBox();
                       if(w==4) clearBothBoxes();
                       updateButtons();
-                  });
+                  }).show();
               }
 
               void clearTopBox() {
@@ -1303,14 +1232,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V37-release-signed.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V37-release-signed.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V38.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V38.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V37-release-signed
+          name: Fordito_V38
           path: |
             artifact/*.apk
             artifact/*.aab
