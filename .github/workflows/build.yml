@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V66" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V67" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -258,7 +258,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V66");
+                  TextView title = label("Fordito_V67");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -618,7 +618,7 @@ jobs:
                       format.put("rate", 24000);
                       input.put("format", format);
 
-                      // V66: OpenAI Realtime hivatalos zajcsökkentés.
+                      // V67: OpenAI Realtime hivatalos zajcsökkentés.
                       // Nem Android NoiseSuppressor, nem AGC, nem saját audio-szűrés.
                       // A dokumentáció szerint ez az input audio buffer előtt, a VAD/model előtt szűr.
                       JSONObject nr = new JSONObject();
@@ -628,14 +628,12 @@ jobs:
                       input.put("turn_detection", vad);
 
                       JSONObject tr = new JSONObject();
-                      tr.put("model", "gpt-realtime-whisper");
-                      // V60: Realtime transcription nem támogat prompt paramétert ezen az endpointon.
-                      // Ezért itt NEM küldünk promptot; a nyelvpár-döntés az átirat beérkezése után történik.
-                      // V56: ne kössük a beszédfelismerést az éppen fókuszos ablak nyelvéhez.
-                      // A mikrofon futása közbeni nyelvváltásnál ez keverte össze a felső/alsó ablakot.
-                      // A Realtime automatikusan felismeri a beszélt nyelvet, mi pedig a transcript szövege alapján
-                      // döntjük el, hogy a két kiválasztott nyelv közül melyik oldal a forrás.
-                      tr.put("delay", "low");
+                      // V67: a két kiválasztott nyelv korlátozását a dokumentáció szerint
+                      // NEM gpt-realtime-whisper prompttal adjuk meg, mert az nem támogatott.
+                      // Olyan Realtime transcription modellt használunk, ahol a prompt támogatott.
+                      // Így az STT már a nyers átiratnál tudja: csak a felső és alsó nyelv között kereshet.
+                      tr.put("model", "gpt-4o-mini-transcribe");
+                      tr.put("prompt", sttPairPrompt());
                       input.put("transcription", tr);
 
                       JSONObject audio = new JSONObject();
@@ -655,16 +653,49 @@ jobs:
               String sttPairPrompt() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
-                  return "The spoken audio is only in one of these two selected languages: " + top + " or " + bottom + ". " +
-                    "Do not detect or transcribe any third language. If a word is unclear, choose the closest plausible word from " + top + " or " + bottom + ". " +
-                    "The speaker may switch between the two selected languages during the same session. Preserve the actual selected-language words; do not force " + bottom + " speech into " + top + " or force " + top + " speech into " + bottom + ".";
+                  String topName = langName(topLang);
+                  String bottomName = langName(bottomLang);
+                  return "Only these two input languages are possible: " + topName + " (" + top + ") and " + bottomName + " (" + bottom + "). " +
+                    "Never transcribe as any third language or script. If uncertain, choose the closest phrase in " + topName + " or " + bottomName + ", or leave unclear sounds out. " +
+                    "The speaker may switch between these two languages at any time. Preserve the actual words of the selected language. " +
+                    "Keywords: " + pairKeywords(topLang) + "; " + pairKeywords(bottomLang) + ".";
+              }
+
+              String langName(String lang) {
+                  if(lang == null) return "selected language";
+                  if(lang.equals("hu")) return "Hungarian";
+                  if(lang.equals("fr")) return "French";
+                  if(lang.equals("en")) return "English";
+                  if(lang.equals("de")) return "German";
+                  if(lang.equals("it")) return "Italian";
+                  if(lang.equals("es")) return "Spanish";
+                  if(lang.equals("ro")) return "Romanian";
+                  if(lang.equals("hr")) return "Croatian";
+                  if(lang.equals("sk")) return "Slovak";
+                  if(lang.equals("sl")) return "Slovenian";
+                  return lang;
+              }
+
+              String pairKeywords(String lang) {
+                  if(lang == null) return "";
+                  if(lang.equals("hu")) return "jó napot, kérem, köszönöm, igen, nem, szeretnék, mikrofon próba";
+                  if(lang.equals("fr")) return "bonjour, monsieur, madame, merci, pardon, s'il vous plaît, café, baguette, croissant";
+                  if(lang.equals("en")) return "hello, please, thank you, sorry, good morning, I would like";
+                  if(lang.equals("de")) return "guten Tag, bitte, danke, Entschuldigung, ich möchte";
+                  if(lang.equals("it")) return "buongiorno, grazie, per favore, scusi, vorrei";
+                  if(lang.equals("es")) return "buenos días, gracias, por favor, perdón, quisiera";
+                  if(lang.equals("ro")) return "bună ziua, vă rog, mulțumesc, îmi pare rău, aș dori";
+                  if(lang.equals("hr")) return "dobar dan, molim, hvala, oprostite, želio bih";
+                  if(lang.equals("sk")) return "dobrý deň, prosím, ďakujem, prepáčte, chcel by som";
+                  if(lang.equals("sl")) return "dober dan, prosim, hvala, oprostite, rad bi";
+                  return lang;
               }
 
               String instructions() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
                   return "You are a live interpreter for a two-language translation app. Output text only. No explanations. " +
-                    "The ONLY selected languages are " + top + " and " + bottom + ". Never choose, label, or infer a third language. " +
+                    "The ONLY selected languages are " + langName(topLang) + " (" + top + ") and " + langName(bottomLang) + " (" + bottom + "). Never choose, label, transcribe, translate, or infer any third language. " +
                     "The app needs short live phone-screen blocks, not one long monologue. " +
                     "When asked to process live speech, segment the content into semantically complete blocks: one sentence, one short clause, or one list item. " +
                     "Prefer 1 sentence per block. Do not merge separate thoughts. Do not wait for a long monologue. " +
@@ -886,6 +917,9 @@ jobs:
                       pendingManualText = payload;
                       start(false);
                   } else {
+                      // V67: FORDÍT gombnál is frissítjük a sessiont az aktuális két nyelvre,
+                      // hogy nyelvváltás után a fordítási instrukció biztosan naprakész legyen.
+                      sessionUpdateIfConnected();
                       sendManualText(payload, blockId);
                   }
               }
@@ -988,7 +1022,7 @@ jobs:
                       b = finalizeSpeechBlockText(b);
                       if(b.length() == 0) continue;
                       if(!markLiveBlockQueued(b)) continue;
-                      // V66: a fókusz nem ragadhat az előző ablakon.
+                      // V67: a fókusz nem ragadhat az előző ablakon.
                       // Minden lezárt transcript-blokknál újra eldöntjük, hogy a kiválasztott
                       // KÉT nyelv közül melyik a forrás, és azonnal abba az ablakba írjuk.
                       // Nem STT prompt, nem fix HU/FR, nem teljes új logika: csak a forrásoldal kijelölése.
@@ -1303,7 +1337,7 @@ jobs:
                       boolean sourceIsTop = b.dirtyTopSource;
                       String clean = cleanOneBlockTranslation(out);
 
-                      // V66: a forrásoldalt nem a régi fókusz és nem egy harmadik nyelvet kereső AI-válasz dönti el.
+                      // V67: a forrásoldalt nem a régi fókusz és nem egy harmadik nyelvet kereső AI-válasz dönti el.
                       // A blokk már a beérkező átiratnál a kiválasztott két nyelv közül lett besorolva.
                       // Itt csak a fordítást írjuk a másik ablakba, ezért nem kerülhet vissza a francia szöveg a magyar ablakba.
                       if(sourceIsTop) b.bottomText = clean;
@@ -1746,14 +1780,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V66.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V66.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V67.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V67.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V66
+          name: Fordito_V67
           path: |
             artifact/*.apk
             artifact/*.aab
