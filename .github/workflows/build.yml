@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V58" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V59" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -258,7 +258,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V58");
+                  TextView title = label("Fordito_V59");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -621,7 +621,10 @@ jobs:
 
                       JSONObject tr = new JSONObject();
                       tr.put("model", "gpt-realtime-whisper");
-                      // V58: ne kössük a beszédfelismerést az éppen fókuszos ablak nyelvéhez.
+                      // V59: a STT ne világnyelv-automatikával találgasson.
+                      // Nem rögzítjük egyetlen oldalra a nyelvet, csak a KÉT kiválasztott nyelvpárra szűkítjük.
+                      tr.put("prompt", sttPairPrompt());
+                      // V56: ne kössük a beszédfelismerést az éppen fókuszos ablak nyelvéhez.
                       // A mikrofon futása közbeni nyelvváltásnál ez keverte össze a felső/alsó ablakot.
                       // A Realtime automatikusan felismeri a beszélt nyelvet, mi pedig a transcript szövege alapján
                       // döntjük el, hogy a két kiválasztott nyelv közül melyik oldal a forrás.
@@ -642,13 +645,19 @@ jobs:
                   }
               }
 
+              String sttPairPrompt() {
+                  String top = code(topLang);
+                  String bottom = code(bottomLang);
+                  return "The spoken audio is only in one of these two selected languages: " + top + " or " + bottom + ". " +
+                    "Do not detect or transcribe any third language. If a word is unclear, choose the closest plausible word from " + top + " or " + bottom + ". " +
+                    "The speaker may switch between the two selected languages during the same session. Preserve the actual selected-language words; do not force " + bottom + " speech into " + top + " or force " + top + " speech into " + bottom + ".";
+              }
+
               String instructions() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
                   return "You are a live interpreter. Output text only. No explanations. " +
                     "Work ONLY with these two selected languages: " + top + " and " + bottom + ". " +
-                    "For language detection, choose between these two selected languages only. Do not consider a third language as the source. " +
-                    "If the speaker uses the other selected language, switch source direction automatically; never force the other selected language into the currently focused side. " +
                     "The input is raw live speech audio. It may be fragmented, noisy, badly punctuated or contain obvious recognition mistakes. " +
                     "Translate only what was very likely spoken by a human. Do not turn background noise, engine hum, wind, radio, clicks, breathing or uncertain sound into words. " +
                     "If you are not confident that meaningful human speech is present, output nothing and wait for the next audio window. " +
@@ -656,7 +665,6 @@ jobs:
                     "You decide the natural thought boundaries and clean only clear recognition errors without inventing facts. " +
                     "Detect whether the current input is " + top + " or " + bottom + ". " +
                     "If the input is " + top + ", translate to " + bottom + ". If the input is " + bottom + ", translate to " + top + ". " +
-                    "If a word or phrase seems like a third language, do not make it a third source language; keep the most plausible meaning within the selected pair without corrupting real words from the other selected language. " +
                     "If the current audio window is not meaningful enough yet, output nothing. " +
                     "Do not wait for a long monologue. Treat every semantically complete sentence, short clause, numbered item, or list item as a finished thought. " +
                     "Examples: 'microphone test one' is one complete item; 'microphone test two' is the next complete item. A long counting/list sequence must be returned as many separate items, not as one paragraph. " +
@@ -674,7 +682,7 @@ jobs:
                   return "You are a translation engine for one edited text block. " +
                     "The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. " +
                     "Translate TEXT from SOURCE_LANG to TARGET_LANG. " +
-                    "The selected languages are " + top + " and " + bottom + ". Do not use or preserve any third language unless it is clearly a quoted proper noun. " +
+                    "The selected languages are " + top + " and " + bottom + ". " +
                     "Return ONLY the translated text. " +
                     "Never include labels such as SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT or TRANSLATION. " +
                     "No markdown, no quotes, no explanation. " +
@@ -685,10 +693,7 @@ jobs:
                   String src = sourceIsTop ? code(topLang) : code(bottomLang);
                   String tgt = sourceIsTop ? code(bottomLang) : code(topLang);
                   return "You are a live interpreter for one already-transcribed speech block. " +
-                    "The selected pair is " + src + " and " + tgt + ". " +
                     "Translate from " + src + " to " + tgt + ". " +
-                    "Do not introduce any third source language. " +
-                    "If TEXT contains words from the other selected language, do not distort them into " + src + "; preserve their meaning and translate naturally into the opposite selected language. " +
                     "Return ONLY the translation. No labels, no markdown, no explanation. " +
                     "Keep the wording natural and concise. Do not merge this block with earlier or later speech. " +
                     "Do not invent missing information. " + modePrompt();
@@ -974,6 +979,7 @@ jobs:
                   while(true) {
                       String b = popReadySpeechBlock(flushAll);
                       if(b == null || b.trim().length() == 0) break;
+                      b = cleanTranscriptForSelectedPair(b);
                       b = finalizeSpeechBlockText(b);
                       if(b.length() == 0) continue;
                       if(!markLiveBlockQueued(b)) continue;
@@ -1050,7 +1056,7 @@ jobs:
                   int preferredEnd = Math.min(len, 220);
                   int preferredStart = Math.min(len, 95);
 
-                  // V58: V55 alap, de kevésbé engedékeny hosszú blokkoknál.
+                  // V56: V55 alap, de kevésbé engedékeny hosszú blokkoknál.
                   // Nem audio, nem VAD, nem időzítő. Csak a már beérkezett szöveg stabil elejét vágjuk le,
                   // hogy hosszú folyamatos beszédnél se legyen egyetlen óriás blokk.
 
@@ -1129,37 +1135,81 @@ jobs:
                   updateButtons();
               }
 
+              String cleanTranscriptForSelectedPair(String text) {
+                  if(text == null) return "";
+                  // V59: ha az automatikus STT mégis harmadik írásrendszert szúr be,
+                  // azt nem tekintjük valódi bevitelnek. A magyar/francia/angol/stb. latin betűs nyelvekhez
+                  // ez biztonságosabb, mint a furcsa Unicode-töredékek továbbfordítása.
+                  String x = text.replaceAll("[^\\p{L}\\p{N}\\p{Punct}\\sáéíóöőúüűÁÉÍÓÖŐÚÜŰàâçéèêëîïôùûüÿœÀÂÇÉÈÊËÎÏÔÙÛÜŸŒäöüßÄÖÜñÑ]", " ");
+                  return x.replaceAll("\\s+", " ").trim();
+              }
+
               boolean detectSourceIsTop(String text) {
                   int topScore = languageScore(text, topLang);
                   int bottomScore = languageScore(text, bottomLang);
-                  if(topScore > bottomScore + 1) return true;
-                  if(bottomScore > topScore + 1) return false;
+
+                  // V59: nem a fókusz dönt. A fókusz csak tartalék, ha tényleg nincs nyelvi jel.
+                  // Különösen fontos mikrofon közbeni nyelvváltásnál.
+                  if(topScore >= bottomScore + 2) return true;
+                  if(bottomScore >= topScore + 2) return false;
+
+                  boolean topStrong = strongLanguageSignal(text, topLang);
+                  boolean bottomStrong = strongLanguageSignal(text, bottomLang);
+                  if(topStrong && !bottomStrong) return true;
+                  if(bottomStrong && !topStrong) return false;
+
                   return topActive;
+              }
+
+              boolean strongLanguageSignal(String text, String lang) {
+                  if(text == null || lang == null) return false;
+                  String l = text.toLowerCase(Locale.ROOT);
+                  if(lang.equals("hu")) return l.matches(".*[áéíóöőúüű].*") || containsAnyLoose(l, new String[]{"hogy", "magyar", "kérem", "köszönöm", "szeretnék", "jó napot", "nem", "igen", "akkor"});
+                  if(lang.equals("fr")) return l.matches(".*[àâçéèêëîïôùûüÿœ].*") || containsAnyLoose(l, new String[]{"bonjour", "monsieur", "messieur", "messieurs", "madame", "merci", "pardon", "voudrais", "voudrai", "s'il", "sil vous", "sivou", "plait", "plaît", "cafe", "café", "baguette", "croissant"});
+                  if(lang.equals("en")) return containsAnyLoose(l, new String[]{"hello", "please", "thank", "sorry", "good morning", "i would", "you", "the"});
+                  if(lang.equals("de")) return l.matches(".*[äöüß].*") || containsAnyLoose(l, new String[]{"guten", "bitte", "danke", "herr", "frau", "nicht", "ich"});
+                  if(lang.equals("it")) return containsAnyLoose(l, new String[]{"buongiorno", "grazie", "prego", "signore", "signora", "vorrei", "per favore"});
+                  if(lang.equals("es")) return l.matches(".*[áéíñóúü].*") || containsAnyLoose(l, new String[]{"buenos", "gracias", "señor", "señora", "por favor", "quisiera"});
+                  return false;
               }
 
               int languageScore(String text, String lang) {
                   if(text == null || lang == null) return 0;
-                  String t = " " + text.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}]+", " ") + " ";
+                  String raw = text.toLowerCase(Locale.ROOT);
+                  String t = " " + raw.replaceAll("[^\\p{L}]+", " ") + " ";
                   int score = 0;
                   if(lang.equals("hu")) {
-                      score += countAny(t, new String[]{" a "," az "," és "," hogy "," nem "," igen "," neked "," van "," vagy "," akkor "," ezt "," azt "," utcán "," hölgy "," uram "," kérem "," köszönöm "," szeretné "," találok "," név "," cím "});
+                      score += countAny(t, new String[]{" a "," az "," és "," hogy "," nem "," igen "," neked "," van "," vagy "," akkor "," ezt "," azt "," utcán "," hölgy "," uram "," kérem "," köszönöm "," szeretné "," szeretnék "," találok "," név "," cím "," magyar "," nyelv "," próba "});
+                      score += countLoose(raw, new String[]{"jó napot", "mikrofon próba", "ezt elejtette"}) * 3;
                       score += accentScore(text, "áéíóöőúüű");
                   } else if(lang.equals("fr")) {
                       score += countAny(t, new String[]{" le "," la "," les "," un "," une "," des "," de "," du "," je "," tu "," vous "," il "," elle "," nous "," ce "," ça "," est "," pas "," pour "," avec "," monsieur "," messieur "," messieurs "," madame "," oui "," merci "," bonjour "," bonsoir "," pardon "," voudrais "," voudrai "," sil "," plaît "," plait "," café "," baguette "," croissant "});
+                      score += countLoose(raw, new String[]{"bonjour", "monsieur", "messieur", "s il vous", "s'il vous", "sivou", "sivous", "je voud", "jevoud", "voudrais", "voudrai"}) * 4;
                       score += accentScore(text, "àâçéèêëîïôùûüÿœ");
                   } else if(lang.equals("en")) {
-                      score += countAny(t, new String[]{" the "," a "," an "," and "," or "," if "," you "," i "," it "," is "," are "," was "," this "," that "," have "," has "," sir "," madam "," please "," thank "," sorry "});
+                      score += countAny(t, new String[]{" the "," a "," an "," and "," or "," if "," you "," i "," it "," is "," are "," was "," this "," that "," have "," has "," sir "," madam "," please "," thank "," sorry "," hello "});
                   } else if(lang.equals("de")) {
-                      score += countAny(t, new String[]{" der "," die "," das "," ein "," eine "," und "," oder "," ich "," sie "," du "," ist "," nicht "," bitte "," danke "," herr "," frau "});
+                      score += countAny(t, new String[]{" der "," die "," das "," ein "," eine "," und "," oder "," ich "," sie "," du "," ist "," nicht "," bitte "," danke "," herr "," frau "," guten "});
                       score += accentScore(text, "äöüß");
                   } else if(lang.equals("it")) {
-                      score += countAny(t, new String[]{" il "," lo "," la "," un "," una "," e "," che "," non "," per "," con "," sono "," signore "," signora "," grazie "," prego "});
+                      score += countAny(t, new String[]{" il "," lo "," la "," un "," una "," e "," che "," non "," per "," con "," sono "," signore "," signora "," grazie "," prego "," buongiorno "});
                       score += accentScore(text, "àèéìòù");
                   } else if(lang.equals("es")) {
                       score += countAny(t, new String[]{" el "," la "," los "," las "," un "," una "," y "," que "," no "," por "," con "," usted "," señor "," señora "," gracias "," por favor "});
                       score += accentScore(text, "áéíñóúü");
                   }
                   return score;
+              }
+
+              int countLoose(String text, String[] parts) {
+                  int score = 0;
+                  for(String p: parts) if(text.contains(p)) score++;
+                  return score;
+              }
+
+              boolean containsAnyLoose(String text, String[] parts) {
+                  for(String p: parts) if(text.contains(p)) return true;
+                  return false;
               }
 
               int countAny(String text, String[] words) {
@@ -1556,7 +1606,7 @@ jobs:
                   showCenteredMenu(top ? "Felső nyelv" : "Alsó nyelv", labels, (d,w) -> {
                       if(top) topLang = langs[w][2];
                       else bottomLang = langs[w][2];
-                      // V58: nyelvválasztás nem jelent forrásablak-választást.
+                      // V56: nyelvválasztás nem jelent forrásablak-választást.
                       // A beszéd következő transcript blokkjánál automatikusan döntünk a felismert nyelv alapján.
                       topBox.clearFocus();
                       bottomBox.clearFocus();
@@ -1680,14 +1730,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V58.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V58.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V59.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V59.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V58
+          name: Fordito_V59
           path: |
             artifact/*.apk
             artifact/*.aab
