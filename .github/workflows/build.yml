@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 90; versionName = "9.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 91; versionName = "9.1" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V90" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V91" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -115,8 +115,9 @@ jobs:
 
           public class MainActivity extends Activity {
               TextView state;
+              android.view.View touchBlocker;
               EditText topBox, bottomBox;
-              Button micBtn, translateBtn, menuBtn, topLangBtn, manualBtn, bottomLangBtn;
+              Button micBtn, translateBtn, menuBtn, topLangBtn, bottomLangBtn;
               SharedPreferences sp;
               OkHttpClient client;
               WebSocket ws;
@@ -261,14 +262,28 @@ jobs:
               }
 
               void ui() {
+                  FrameLayout frame = new FrameLayout(this);
+
                   LinearLayout root = new LinearLayout(this);
                   root.setOrientation(LinearLayout.VERTICAL);
                   root.setPadding(8,62,8,170);
                   root.setBackgroundColor(Color.rgb(16,19,24));
-                  setContentView(root);
+                  frame.addView(root, new FrameLayout.LayoutParams(-1, -1));
+
+                  touchBlocker = new android.view.View(this);
+                  touchBlocker.setBackgroundColor(Color.TRANSPARENT);
+                  touchBlocker.setClickable(true);
+                  touchBlocker.setFocusable(false);
+                  touchBlocker.setOnTouchListener((v, ev) -> true);
+                  touchBlocker.setVisibility(android.view.View.GONE);
+                  FrameLayout.LayoutParams blockerLp = new FrameLayout.LayoutParams(-1, -1);
+                  blockerLp.setMargins(0, 0, 0, 92);
+                  frame.addView(touchBlocker, blockerLp);
+
+                  setContentView(frame);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V90");
+                  TextView title = label("Fordito_V91");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -277,10 +292,8 @@ jobs:
 
                   LinearLayout langRow = row();
                   topLangBtn = btn("FELSŐ");
-                  manualBtn = btn("MANUÁL");
                   bottomLangBtn = btn("ALSÓ");
                   langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,64,1));
-                  langRow.addView(manualBtn, new LinearLayout.LayoutParams(0,64,1));
                   langRow.addView(bottomLangBtn, new LinearLayout.LayoutParams(0,64,1));
                   root.addView(langRow);
 
@@ -308,7 +321,6 @@ jobs:
                   bottomBox.setOnFocusChangeListener((v, hasFocus) -> { if(hasFocus) enterManualEditMode(false); });
                   topBox.addTextChangedListener(manualWatcher(true));
                   bottomBox.addTextChangedListener(manualWatcher(false));
-                  manualBtn.setOnClickListener(v -> { if(!uiLockedForLive && !finalizingStop) toggleManualEditMode(); });
                   topLangBtn.setOnClickListener(v -> { if(!uiLockedForLive && !finalizingStop) chooseLang(true); });
                   bottomLangBtn.setOnClickListener(v -> { if(!uiLockedForLive && !finalizingStop) chooseLang(false); });
                   topLangBtn.setOnLongClickListener(v -> { if(!uiLockedForLive && !finalizingStop) copyBox(true); return true; });
@@ -364,7 +376,6 @@ jobs:
                   e.setVerticalScrollBarEnabled(true);
                   e.setScrollBarStyle(EditText.SCROLLBARS_INSIDE_INSET);
                   e.setScroller(new Scroller(this));
-                  e.setMovementMethod(new android.text.method.ScrollingMovementMethod());
                   e.setBackgroundColor(Color.rgb(27,32,41));
                   e.setPadding(14,14,14,14);
                   e.setFocusable(false);
@@ -397,10 +408,6 @@ jobs:
                           if(bottomBox != null) bottomBox.clearFocus();
                           hideKeyboard();
                       }
-                      if(manualBtn != null) {
-                          manualBtn.setText(enabled ? "KÉSZ" : "MANUÁL");
-                          manualBtn.setBackgroundColor(enabled ? Color.rgb(34,139,34) : Color.rgb(65,70,80));
-                      }
                   } catch(Exception ignored) {}
               }
 
@@ -431,7 +438,7 @@ jobs:
                       }
                       public void afterTextChanged(Editable e) {
                           if(programmaticChange) return;
-                                  // V90: nincs kézi blokkállapot.
+                                  // V77: nincs kézi blokkállapot.
                           // Gépelés közben nem bontjuk újra a blokkokat.
                           // FORDÍT gombnál a teljes aktív ablak fordul újra a másik ablakba.
                           updateButtons();
@@ -444,7 +451,7 @@ jobs:
                   manualTopSource = top;
                   topActive = top;
 
-                  // V90: kézi szerkesztés és live mikrofon nem futhat egyszerre.
+                  // V91: kézi szerkesztés és live mikrofon nem futhat egyszerre.
                   // Ha a felhasználó bármelyik ablakba kattint vagy írni kezd,
                   // a mikrofon és minden függő live fordítás leáll. Így a kézi
                   // teljes ablakos fordításba nem írhat vissza későn érkező live válasz.
@@ -693,7 +700,7 @@ jobs:
                       input.put("format", format);
                       input.put("turn_detection", vad);
 
-                      // V90: OpenAI Realtime oldali zajszűrés.
+                      // V91: OpenAI Realtime oldali zajszűrés.
                       // Telefon közeli beszédhez near_field való; ez a VAD és a modell előtt szűr.
                       JSONObject nr = new JSONObject();
                       nr.put("type", "near_field");
@@ -851,7 +858,7 @@ jobs:
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4096);
 
-                  // V90: zajos kabin / ventilátor mellett VOICE_COMMUNICATION jobb,
+                  // V91: zajos kabin / ventilátor mellett VOICE_COMMUNICATION jobb,
                   // mert Android oldalon használhat AEC/AGC/NS előfeldolgozást, ha a készülék támogatja.
                   rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
                   enableAndroidAudioEffects();
@@ -880,7 +887,7 @@ jobs:
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
 
-                  // V90: kézi fordításnál nincs blokkállapot. Hiba esetén nem írunk semmit az ablakokba.
+                  // V77: kézi fordításnál nincs blokkállapot. Hiba esetén nem írunk semmit az ablakokba.
                   if(manualResponseMode) {
                       manualResponseMode = false;
                       pendingManualText = "";
@@ -930,7 +937,7 @@ jobs:
 
                       if(type.equals("response.done")) {
                           responseInProgress = false;
-                          // V90: ha egy live fordítás válasz nélkül zárult, a blokk nem számít késznek; később pótolható.
+                          // V77: ha egy live fordítás válasz nélkül zárult, a blokk nem számít késznek; később pótolható.
                           if(liveTranslateMode && pendingLiveBlockId >= 0 && pendingOutput.trim().length() == 0) {
                               int missId = pendingLiveBlockId;
                               pendingLiveBlockId = -1;
@@ -1077,7 +1084,7 @@ jobs:
                   liveTranscriptBuffer += delta;
                   flushReadyTranscriptBlocks(false);
 
-                  // V90: ha csak 2-3 szó hangzott el és utána hosszú csend van,
+                  // V75: ha csak 2-3 szó hangzott el és utána hosszú csend van,
                   // ne ragadjon a pufferben. Ez nem VAD és nem beszédvégi darabolás,
                   // csak biztonsági utóflush rövid, magára hagyott blokkokhoz.
                   final int token = ++liveIdleFlushToken;
@@ -1104,7 +1111,7 @@ jobs:
               }
 
               void flushReadyTranscriptBlocks(boolean flushAll) {
-                  // V90: az első élő blokkot nem engedjük ki azonnal 1-2 bizonytalan szóból.
+                  // V74: az első élő blokkot nem engedjük ki azonnal 1-2 bizonytalan szóból.
                   // Ez szűri a kezdő "Microfoonprobe / Kazakhstan / UFO" jellegű félrehallást,
                   // de nem nyúl az audiohoz és nem épít új nyelvfelismerőt.
                   if(!firstSpeechBlockReleased && !initialSpeechGateOpen()) return;
@@ -1115,7 +1122,7 @@ jobs:
                       b = finalizeSpeechBlockText(b);
                       if(b.length() == 0) continue;
                       if(!markLiveBlockQueued(b)) continue;
-                      // V90: nem a helyi/fókusz heurisztika dönti el véglegesen a forrásoldalt.
+                      // V71: nem a helyi/fókusz heurisztika dönti el véglegesen a forrásoldalt.
                       // A blokk ideiglenesen az utolsó aktív oldalra kerül, majd a fordító AI
                       // a kiválasztott két nyelv közül címkézi a valódi SOURCE_LANG-et,
                       // és applyLiveTranslation() a blokkot a megfelelő ablakba rendezi.
@@ -1132,7 +1139,7 @@ jobs:
                   int words = s.split("\\s+").length;
                   long age = firstSpeechHeardAt > 0L ? System.currentTimeMillis() - firstSpeechHeardAt : 0L;
 
-                  // V90: az első blokkot nem engedjük át pusztán azért, mert a bizonytalan STT
+                  // V74: az első blokkot nem engedjük át pusztán azért, mert a bizonytalan STT
                   // tett a végére pontot. Ez fogta meg a Microfoonprobe/Kazakhstan jellegű kezdést.
                   // Ugyanakkor ha a felhasználó tényleg csak 2-3 szót mond és utána hosszú csend van,
                   // 2 mp után fordítjuk, nem nyeljük el.
@@ -1201,7 +1208,7 @@ jobs:
                   int words = t.split("\\s+").length;
                   long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
                   long age = started > 0L ? System.currentTimeMillis() - started : 0L;
-                  // V90: 2-3 szavas rövid közlés 2 mp csend után forduljon akkor is,
+                  // V75: 2-3 szavas rövid közlés 2 mp csend után forduljon akkor is,
                   // ha nincs pont vagy hosszú mondathatár. 1 szavas zajt nem engedünk át.
                   return age >= 2000 && words >= 2;
               }
@@ -1303,7 +1310,7 @@ jobs:
 
               String cleanTranscriptForSelectedPair(String text) {
                   if(text == null) return "";
-                  // V90: ez továbbra sem saját nagy nyelvfelismerő. Csak biztonsági tisztítás:
+                  // V74: ez továbbra sem saját nagy nyelvfelismerő. Csak biztonsági tisztítás:
                   // idegen írásrendszeres STT-szemét nem kerülhet ki az ablakokba vagy fordításba.
                   String x = text.replaceAll("[^A-Za-z0-9\\u00C0-\\u024F\\p{Punct}\\s]", " ");
                   return x.replaceAll("\\s+", " ").trim();
@@ -1439,7 +1446,7 @@ jobs:
                           b.retryCount = 0;
                           setDetectedSourceSide(sourceIsTop);
                       } else {
-                          // V90: live módban nincs laza fallback. Ha a modell nem ad szabályos,
+                          // V74: live módban nincs laza fallback. Ha a modell nem ad szabályos,
                           // kiválasztott nyelvpárba illeszkedő választ, a blokk marad újrafordítható.
                           b.translatedOk = false;
                           b.retryCount++;
@@ -1481,7 +1488,7 @@ jobs:
                       if(any) return;
                   }
 
-                  // V90: nincs laza fallback új blokkra. Címke nélküli vagy rossz nyelvű válasz
+                  // V74: nincs laza fallback új blokkra. Címke nélküli vagy rossz nyelvű válasz
                   // nem kerülhet be, mert ez hozta vissza korábban a káoszt.
                   Toast.makeText(this, "Nem szabályos AI-válasz érkezett, a blokk újrafordítható.", Toast.LENGTH_SHORT).show();
               }
@@ -1606,7 +1613,6 @@ jobs:
                       target.setSelection(target.getText().length());
                   } finally {
                       programmaticChange = false;
-                      scrollBoxToBottom(target);
                   }
               }
 
@@ -1838,52 +1844,19 @@ jobs:
                   return code.toLowerCase(Locale.ROOT);
               }
 
-              void scrollBoxToBottom(final EditText box) {
-                  try {
-                      if(box == null) return;
-                      box.postDelayed(() -> {
-                          try {
-                              android.text.Layout layout = box.getLayout();
-                              if(layout == null) return;
-                              int y = Math.max(0, layout.getLineTop(box.getLineCount()) - box.getHeight() + box.getPaddingTop() + box.getPaddingBottom());
-                              box.scrollTo(0, y);
-                          } catch(Exception ignored) {}
-                      }, 80);
-                  } catch(Exception ignored) {}
-              }
-
-              void scrollBothToBottom() {
-                  scrollBoxToBottom(topBox);
-                  scrollBoxToBottom(bottomBox);
-              }
-
               void setLiveUiLocked(boolean locked) {
                   uiLockedForLive = locked;
                   try {
                       if(topLangBtn != null) topLangBtn.setEnabled(!locked && !finalizingStop);
                       if(bottomLangBtn != null) bottomLangBtn.setEnabled(!locked && !finalizingStop);
-                      if(manualBtn != null) manualBtn.setEnabled(!locked && !finalizingStop);
                       if(translateBtn != null) translateBtn.setEnabled(!locked && !finalizingStop);
                       if(menuBtn != null) menuBtn.setEnabled(!locked && !finalizingStop);
 
-                      // V90: az ablakok élő fordítás közben is maradjanak görgethetők.
-                      // Nem setEnabled(false), mert az a scrollt is megöli.
-                      boolean editable = !locked && !finalizingStop && manualEditMode;
-                      if(topBox != null) {
-                          topBox.setEnabled(true);
-                          topBox.setFocusable(editable);
-                          topBox.setFocusableInTouchMode(editable);
-                          topBox.setCursorVisible(editable);
-                          topBox.setLongClickable(editable);
-                          topBox.setTextIsSelectable(editable);
-                      }
-                      if(bottomBox != null) {
-                          bottomBox.setEnabled(true);
-                          bottomBox.setFocusable(editable);
-                          bottomBox.setFocusableInTouchMode(editable);
-                          bottomBox.setCursorVisible(editable);
-                          bottomBox.setLongClickable(editable);
-                          bottomBox.setTextIsSelectable(editable);
+                      if(topBox != null) topBox.setEnabled(!locked && !finalizingStop);
+                      if(bottomBox != null) bottomBox.setEnabled(!locked && !finalizingStop);
+
+                      if(touchBlocker != null) {
+                          touchBlocker.setVisibility((locked || finalizingStop) ? android.view.View.VISIBLE : android.view.View.GONE);
                       }
 
                       styleUiState();
@@ -1901,7 +1874,6 @@ jobs:
 
                       if(topLangBtn != null) topLangBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : active);
                       if(bottomLangBtn != null) bottomLangBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : active);
-                      if(manualBtn != null) manualBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : (manualEditMode ? green : inactive));
                       if(translateBtn != null) translateBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : inactive);
                       if(menuBtn != null) menuBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : inactive);
 
@@ -1995,14 +1967,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V90.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V90.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V91.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V91.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V90
+          name: Fordito_V91
           path: |
             artifact/*.apk
             artifact/*.aab
