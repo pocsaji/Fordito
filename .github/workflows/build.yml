@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V56" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V57" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -258,7 +258,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V56");
+                  TextView title = label("Fordito_V57");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -621,7 +621,7 @@ jobs:
 
                       JSONObject tr = new JSONObject();
                       tr.put("model", "gpt-realtime-whisper");
-                      // V56: ne kössük a beszédfelismerést az éppen fókuszos ablak nyelvéhez.
+                      // V57: ne kössük a beszédfelismerést az éppen fókuszos ablak nyelvéhez.
                       // A mikrofon futása közbeni nyelvváltásnál ez keverte össze a felső/alsó ablakot.
                       // A Realtime automatikusan felismeri a beszélt nyelvet, mi pedig a transcript szövege alapján
                       // döntjük el, hogy a két kiválasztott nyelv közül melyik oldal a forrás.
@@ -647,13 +647,16 @@ jobs:
                   String bottom = code(bottomLang);
                   return "You are a live interpreter. Output text only. No explanations. " +
                     "Work ONLY with these two selected languages: " + top + " and " + bottom + ". " +
+                    "Hard language lock: the speaker can only be using " + top + " or " + bottom + "; never search, infer, transcribe, translate, or preserve a third language. " +
+                    "If the transcript appears to contain Turkish, German, English, or any other unselected language, treat that as speech-recognition noise and reinterpret it as the closest plausible words in " + top + " or " + bottom + ". " +
                     "The input is raw live speech audio. It may be fragmented, noisy, badly punctuated or contain obvious recognition mistakes. " +
                     "Translate only what was very likely spoken by a human. Do not turn background noise, engine hum, wind, radio, clicks, breathing or uncertain sound into words. " +
                     "If you are not confident that meaningful human speech is present, output nothing and wait for the next audio window. " +
                     "Never narrate the situation, never comment on noise, and never write phrases such as 'noise is heard' unless those words were actually spoken. " +
                     "You decide the natural thought boundaries and clean only clear recognition errors without inventing facts. " +
-                    "Detect whether the current input is " + top + " or " + bottom + ". " +
+                    "Detect whether the current input is " + top + " or " + bottom + " only; there is no third option. " +
                     "If the input is " + top + ", translate to " + bottom + ". If the input is " + bottom + ", translate to " + top + ". " +
+                    "If a word or phrase seems to belong to any unselected language, do not output it as that language; correct it as a likely recognition error in the detected selected language. " +
                     "If the current audio window is not meaningful enough yet, output nothing. " +
                     "Do not wait for a long monologue. Treat every semantically complete sentence, short clause, numbered item, or list item as a finished thought. " +
                     "Examples: 'microphone test one' is one complete item; 'microphone test two' is the next complete item. A long counting/list sequence must be returned as many separate items, not as one paragraph. " +
@@ -671,7 +674,7 @@ jobs:
                   return "You are a translation engine for one edited text block. " +
                     "The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. " +
                     "Translate TEXT from SOURCE_LANG to TARGET_LANG. " +
-                    "The selected languages are " + top + " and " + bottom + ". " +
+                    "The selected languages are " + top + " and " + bottom + ". Do not use or preserve any third language unless it is clearly a quoted proper noun. " +
                     "Return ONLY the translated text. " +
                     "Never include labels such as SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT or TRANSLATION. " +
                     "No markdown, no quotes, no explanation. " +
@@ -682,7 +685,11 @@ jobs:
                   String src = sourceIsTop ? code(topLang) : code(bottomLang);
                   String tgt = sourceIsTop ? code(bottomLang) : code(topLang);
                   return "You are a live interpreter for one already-transcribed speech block. " +
-                    "Translate from " + src + " to " + tgt + ". " +
+                    "The selected pair is strictly " + src + " and " + tgt + ". " +
+                    "Translate from " + src + " to " + tgt + " only. " +
+                    "The TEXT may contain speech-recognition mistakes that look like a third language. " +
+                    "Do not treat those as real third-language words. Silently reinterpret them as the closest plausible " + src + " words from context, then translate naturally into " + tgt + ". " +
+                    "Never output German, Turkish, English, or any other unselected language unless that exact foreign word was clearly said as a proper noun or brand. " +
                     "Return ONLY the translation. No labels, no markdown, no explanation. " +
                     "Keep the wording natural and concise. Do not merge this block with earlier or later speech. " +
                     "Do not invent missing information. " + modePrompt();
@@ -1044,7 +1051,7 @@ jobs:
                   int preferredEnd = Math.min(len, 220);
                   int preferredStart = Math.min(len, 95);
 
-                  // V56: V55 alap, de kevésbé engedékeny hosszú blokkoknál.
+                  // V57: V55 alap, de kevésbé engedékeny hosszú blokkoknál.
                   // Nem audio, nem VAD, nem időzítő. Csak a már beérkezett szöveg stabil elejét vágjuk le,
                   // hogy hosszú folyamatos beszédnél se legyen egyetlen óriás blokk.
 
@@ -1550,7 +1557,7 @@ jobs:
                   showCenteredMenu(top ? "Felső nyelv" : "Alsó nyelv", labels, (d,w) -> {
                       if(top) topLang = langs[w][2];
                       else bottomLang = langs[w][2];
-                      // V56: nyelvválasztás nem jelent forrásablak-választást.
+                      // V57: nyelvválasztás nem jelent forrásablak-választást.
                       // A beszéd következő transcript blokkjánál automatikusan döntünk a felismert nyelv alapján.
                       topBox.clearFocus();
                       bottomBox.clearFocus();
@@ -1674,14 +1681,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V56.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V56.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V57.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V57.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V56
+          name: Fordito_V57
           path: |
             artifact/*.apk
             artifact/*.aab
