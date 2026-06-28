@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 87; versionName = "8.7" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 88; versionName = "8.8" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V87" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V88" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -150,6 +150,7 @@ jobs:
               String pendingManualText = "";
               boolean manualResponseMode = false;
               boolean programmaticChange = false;
+                      scrollBothToBottom();
               int topManualStart = -1;
               int bottomManualStart = -1;
 
@@ -268,7 +269,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V87");
+                  TextView title = label("Fordito_V88");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -443,7 +444,7 @@ jobs:
                   manualTopSource = top;
                   topActive = top;
 
-                  // V87: kézi szerkesztés és live mikrofon nem futhat egyszerre.
+                  // V88: kézi szerkesztés és live mikrofon nem futhat egyszerre.
                   // Ha a felhasználó bármelyik ablakba kattint vagy írni kezd,
                   // a mikrofon és minden függő live fordítás leáll. Így a kézi
                   // teljes ablakos fordításba nem írhat vissza későn érkező live válasz.
@@ -526,6 +527,7 @@ jobs:
                       peer.post(() -> peer.scrollTo(0, peerScroll));
                   } finally {
                       programmaticChange = false;
+                      scrollBothToBottom();
                   }
               }
 
@@ -608,6 +610,7 @@ jobs:
                       }
                   } finally {
                       programmaticChange = false;
+                      scrollBothToBottom();
                   }
               }
 
@@ -692,7 +695,7 @@ jobs:
                       input.put("format", format);
                       input.put("turn_detection", vad);
 
-                      // V87: OpenAI Realtime oldali zajszűrés.
+                      // V88: OpenAI Realtime oldali zajszűrés.
                       // Telefon közeli beszédhez near_field való; ez a VAD és a modell előtt szűr.
                       JSONObject nr = new JSONObject();
                       nr.put("type", "near_field");
@@ -850,7 +853,7 @@ jobs:
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4096);
 
-                  // V87: zajos kabin / ventilátor mellett VOICE_COMMUNICATION jobb,
+                  // V88: zajos kabin / ventilátor mellett VOICE_COMMUNICATION jobb,
                   // mert Android oldalon használhat AEC/AGC/NS előfeldolgozást, ha a készülék támogatja.
                   rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
                   enableAndroidAudioEffects();
@@ -1510,6 +1513,7 @@ jobs:
                           else topBox.setText(tr);
                       } finally {
                           programmaticChange = false;
+                      scrollBothToBottom();
                       }
 
                       rebuildBlocksFromCurrentBoxes();
@@ -1605,6 +1609,7 @@ jobs:
                       target.setSelection(target.getText().length());
                   } finally {
                       programmaticChange = false;
+                      scrollBothToBottom();
                   }
               }
 
@@ -1836,6 +1841,24 @@ jobs:
                   return code.toLowerCase(Locale.ROOT);
               }
 
+              void scrollBoxToBottom(final EditText box) {
+                  try {
+                      if(box == null) return;
+                      box.postDelayed(() -> {
+                          try {
+                              int line = box.getLineCount();
+                              if(line > 0) box.setSelection(box.getText().length());
+                              box.scrollTo(0, Math.max(0, box.getLayout() == null ? 0 : box.getLayout().getLineTop(line) - box.getHeight()));
+                          } catch(Exception ignored) {}
+                      }, 50);
+                  } catch(Exception ignored) {}
+              }
+
+              void scrollBothToBottom() {
+                  scrollBoxToBottom(topBox);
+                  scrollBoxToBottom(bottomBox);
+              }
+
               void setLiveUiLocked(boolean locked) {
                   uiLockedForLive = locked;
                   try {
@@ -1845,8 +1868,24 @@ jobs:
                       if(translateBtn != null) translateBtn.setEnabled(!locked && !finalizingStop);
                       if(menuBtn != null) menuBtn.setEnabled(!locked && !finalizingStop);
 
-                      if(topBox != null) topBox.setEnabled(!locked && !finalizingStop);
-                      if(bottomBox != null) bottomBox.setEnabled(!locked && !finalizingStop);
+                      // V88: az ablak maradjon engedélyezve, hogy görgetni és automatikusan aljára menni tudjon.
+                      // A szerkesztést nem setEnabled(false)-szal tiltjuk, hanem fókusz/kurzor/selection tiltással.
+                      if(topBox != null) {
+                          topBox.setEnabled(true);
+                          topBox.setFocusable(!locked && !finalizingStop && manualEditMode);
+                          topBox.setFocusableInTouchMode(!locked && !finalizingStop && manualEditMode);
+                          topBox.setCursorVisible(!locked && !finalizingStop && manualEditMode);
+                          topBox.setLongClickable(!locked && !finalizingStop && manualEditMode);
+                          topBox.setTextIsSelectable(!locked && !finalizingStop && manualEditMode);
+                      }
+                      if(bottomBox != null) {
+                          bottomBox.setEnabled(true);
+                          bottomBox.setFocusable(!locked && !finalizingStop && manualEditMode);
+                          bottomBox.setFocusableInTouchMode(!locked && !finalizingStop && manualEditMode);
+                          bottomBox.setCursorVisible(!locked && !finalizingStop && manualEditMode);
+                          bottomBox.setLongClickable(!locked && !finalizingStop && manualEditMode);
+                          bottomBox.setTextIsSelectable(!locked && !finalizingStop && manualEditMode);
+                      }
 
                       styleUiState();
                   } catch(Exception ignored) {}
@@ -1957,14 +1996,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V87.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V87.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V88.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V88.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V87
+          name: Fordito_V88
           path: |
             artifact/*.apk
             artifact/*.aab
