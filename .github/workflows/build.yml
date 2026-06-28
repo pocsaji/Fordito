@@ -628,7 +628,7 @@ jobs:
                       // A mikrofon futása közbeni nyelvváltásnál ez keverte össze a felső/alsó ablakot.
                       // A Realtime automatikusan felismeri a beszélt nyelvet, mi pedig a transcript szövege alapján
                       // döntjük el, hogy a két kiválasztott nyelv közül melyik oldal a forrás.
-                      tr.put("delay", "low");
+                      tr.put("delay", "medium");
                       input.put("transcription", tr);
 
                       JSONObject audio = new JSONObject();
