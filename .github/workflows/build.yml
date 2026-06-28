@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 72; versionName = "7.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 75; versionName = "7.5" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V74" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V75" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -133,6 +133,8 @@ jobs:
               boolean liveTranslateMode = false;
               boolean liveHadTranscriptDelta = false;
               long firstSpeechHeardAt = 0L;
+              long liveBufferStartedAt = 0L;
+              int liveIdleFlushToken = 0;
               boolean firstSpeechBlockReleased = false;
               int pendingLiveBlockId = -1;
               final ArrayDeque<Integer> liveTranslateQueue = new ArrayDeque<>();
@@ -261,7 +263,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V74");
+                  TextView title = label("Fordito_V75");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -777,6 +779,8 @@ jobs:
                   liveTranscriptBuffer = "";
                   liveHadTranscriptDelta = false;
                   firstSpeechHeardAt = 0L;
+                  liveBufferStartedAt = 0L;
+                  liveIdleFlushToken++;
                   firstSpeechBlockReleased = false;
                   liveTranslateMode = false;
                   pendingLiveBlockId = -1;
@@ -835,7 +839,7 @@ jobs:
                           if(!d.isEmpty()) pendingOutput += d;
                       }
 
-                      if(type.equals("response.output_text.done") || type.equals("response.text.done") || type.equals("response.done")) {
+                      if(type.equals("response.output_text.done") || type.equals("response.text.done")) {
                           String out = pendingOutput.trim();
                           pendingOutput = "";
                           if(!out.isEmpty()) runOnUiThread(() -> routeAiOutput(out));
@@ -981,9 +985,21 @@ jobs:
               void handleTranscriptDelta(String delta) {
                   if(delta == null || delta.length() == 0) return;
                   liveHadTranscriptDelta = true;
-                  if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = System.currentTimeMillis();
+                  long now = System.currentTimeMillis();
+                  if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = now;
+                  if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
                   liveTranscriptBuffer += delta;
                   flushReadyTranscriptBlocks(false);
+
+                  // V75: ha csak 2-3 szó hangzott el és utána hosszú csend van,
+                  // ne ragadjon a pufferben. Ez nem VAD és nem beszédvégi darabolás,
+                  // csak biztonsági utóflush rövid, magára hagyott blokkokhoz.
+                  final int token = ++liveIdleFlushToken;
+                  topBox.postDelayed(() -> {
+                      if(token == liveIdleFlushToken && streaming && liveTranscriptBuffer.trim().length() > 0) {
+                          flushReadyTranscriptBlocks(true);
+                      }
+                  }, 5200);
               }
 
               void handleTranscriptCompleted(String transcript) {
@@ -993,9 +1009,11 @@ jobs:
                   // Ha volt delta ebben a körben, NEM töltjük vissza a teljes transcriptet,
                   // csak a bufferben maradt befejezetlen részt zárjuk le.
                   if(!liveHadTranscriptDelta && liveTranscriptBuffer.trim().length() == 0 && transcript != null && transcript.trim().length() > 0) {
+                      liveBufferStartedAt = System.currentTimeMillis();
                       liveTranscriptBuffer = transcript;
                   }
                   flushReadyTranscriptBlocks(true);
+                  liveIdleFlushToken++;
                   liveHadTranscriptDelta = false;
               }
 
@@ -1080,12 +1098,26 @@ jobs:
                   // Ha nincs végleges írásjel, hosszú élő beszédnél természetes gondolathatárt keresünk.
                   if(cut < 0) cut = smartLinguisticCut(s);
 
+                  if(cut < 0 && shouldFlushShortIdleBlock(s)) cut = s.length();
                   if(cut < 0 && flushAll) cut = s.length();
                   if(cut < 0) return null;
 
                   String out = s.substring(0, cut).trim();
                   liveTranscriptBuffer = s.substring(cut).trim();
+                  liveBufferStartedAt = liveTranscriptBuffer.length() > 0 ? System.currentTimeMillis() : 0L;
                   return out;
+              }
+
+              boolean shouldFlushShortIdleBlock(String s) {
+                  if(s == null) return false;
+                  String t = s.trim();
+                  if(t.length() == 0) return false;
+                  int words = t.split("\\s+").length;
+                  long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
+                  long age = started > 0L ? System.currentTimeMillis() - started : 0L;
+                  // V75: 2-3 szavas rövid közlés 5 mp csend után forduljon akkor is,
+                  // ha nincs pont vagy hosszú mondathatár. 1 szavas zajt nem engedünk át.
+                  return age >= 5000 && words >= 2;
               }
 
               int firstHardSentenceEnd(String s) {
@@ -1378,6 +1410,17 @@ jobs:
                   Toast.makeText(this, "Nem szabályos AI-válasz érkezett, a blokk újrafordítható.", Toast.LENGTH_SHORT).show();
               }
 
+              boolean isCleanManualTranslation(String tr) {
+                  if(tr == null) return false;
+                  String t = tr.trim();
+                  if(t.length() == 0) return false;
+                  String low = t.toLowerCase(Locale.ROOT);
+                  if(low.contains("source_lang") || low.contains("target_lang") || low.contains("original") || low.contains("translation:")) return false;
+                  if(low.contains("error") || low.contains("hiba") || low.contains("cannot translate") || low.contains("nem tudom lefordítani")) return false;
+                  // Ha az UFO-szűrés mindent kiszedett, ne számítson kész fordításnak.
+                  return cleanTranscriptForSelectedPair(t).trim().length() > 0;
+              }
+
               void applyDirtyTranslation(String out) {
                   try {
                       int id = pendingDirtyBlockId;
@@ -1387,8 +1430,12 @@ jobs:
                           return;
                       }
                       String tr = cleanOneBlockTranslation(out);
-                      if(tr.length() == 0) {
-                          Toast.makeText(this, "Üres fordítás érkezett. Nyomd meg újra a FORDÍT gombot.", Toast.LENGTH_LONG).show();
+                      if(!isCleanManualTranslation(tr)) {
+                          TextBlock bx = textBlocks.get(id);
+                          bx.translatedOk = false;
+                          bx.dirty = true;
+                          Toast.makeText(this, "Nem tiszta fordítás érkezett. Nyomd meg újra a FORDÍT gombot.", Toast.LENGTH_LONG).show();
+                          renderBlocksKeepView();
                           return;
                       }
                       TextBlock b = textBlocks.get(id);
@@ -1768,14 +1815,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V74.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V74.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V75.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V75.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V74
+          name: Fordito_V75
           path: |
             artifact/*.apk
             artifact/*.aab
