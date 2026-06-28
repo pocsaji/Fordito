@@ -145,6 +145,8 @@ jobs:
               boolean programmaticChange = false;
               int topManualStart = -1;
               int bottomManualStart = -1;
+              int pendingManualBlockId = -1;
+              boolean pendingManualBlockTop = true;
 
               static final int MAX_BLOCK_SENTENCES = 3;
               static final int MAX_BLOCK_CHARS = 260;
@@ -263,7 +265,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V75");
+                  TextView title = label("Fordito_V76");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -354,7 +356,11 @@ jobs:
 
               TextWatcher manualWatcher(final boolean top) {
                   return new TextWatcher() {
-                      public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                      public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+                          if(programmaticChange) return;
+                          pendingManualBlockTop = top;
+                          pendingManualBlockId = blockIdAtPosition(top, start);
+                      }
                       public void onTextChanged(CharSequence s, int start, int before, int count) {
                           if(programmaticChange) return;
                           if(top) manualTopSource = true;
@@ -362,45 +368,94 @@ jobs:
                       }
                       public void afterTextChanged(Editable e) {
                           if(programmaticChange) return;
-                          syncEditedBoxToBlocks(top, e.toString());
-                          // Írás közben csak dirty jelölés: a másik ablakhoz nem nyúlunk.
-                          // A fordítási oldal csak FORDÍT / AI kész eseménynél frissül.
+                          syncEditedBoxToSingleBlock(top, e.toString());
+                          // V76: kézi javításkor csak a kurzorhoz tartozó blokk dirty.
+                          // Nem építjük újra az egész ablakot, így nem fordít újra feleslegesen több blokkot.
                           updateButtons();
                       }
                   };
               }
 
-              void syncEditedBoxToBlocks(boolean top, String text) {
-                  ArrayList<String> parts = splitTextToBlocks(text);
+              int blockIdAtPosition(boolean top, int pos) {
+                  ArrayList<int[]> ranges = top ? topRanges : bottomRanges;
+                  if(ranges == null || ranges.isEmpty()) {
+                      if(textBlocks.isEmpty()) return -1;
+                      return Math.max(0, Math.min(textBlocks.size()-1, textBlocks.size()-1));
+                  }
+                  int safe = Math.max(0, pos);
+                  for(int i=0;i<ranges.size();i++) {
+                      int[] r = ranges.get(i);
+                      if(r == null || r.length < 2) continue;
+                      if(safe >= r[0] && safe <= r[1] + 1) return i;
+                  }
+                  if(safe < ranges.get(0)[0]) return 0;
+                  return Math.min(textBlocks.size()-1, ranges.size()-1);
+              }
 
-                  // A teljes ablak csak megjelenítés. A valós adat a textBlocks lista.
-                  // Beillesztéskor / hosszú kézi bevitelkor újraépítjük a forrásoldali blokkokat,
-                  // de az azonos helyen lévő meglévő fordításokat megtartjuk.
-                  ArrayList<TextBlock> rebuilt = new ArrayList<>();
-                  int count = parts.size();
-                  for(int i=0;i<count;i++) {
-                      TextBlock old = i < textBlocks.size() ? textBlocks.get(i) : null;
-                      TextBlock b = old != null ? old : new TextBlock();
-                      String newText = parts.get(i);
-                      String oldText = top ? b.topText : b.bottomText;
-                      if(!oldText.equals(newText)) {
-                          if(top) {
-                              b.topText = newText;
-                              // A régi fordítást írás közben megtartjuk, hogy a másik ablak ne csonkolódjon.
-                              // A teljes blokk fordítása csak FORDÍT után cserélődik.
-                          } else {
-                              b.bottomText = newText;
-                              // A régi fordítást írás közben megtartjuk, hogy a másik ablak ne csonkolódjon.
-                          }
-                          b.dirty = true;
-                          b.dirtyTopSource = top;
-                          b.retryCount = 0;
+              String currentLineAtCursor(String text, int cursor) {
+                  if(text == null) return "";
+                  int c = Math.max(0, Math.min(cursor, text.length()));
+                  int start = text.lastIndexOf('\n', Math.max(0, c-1));
+                  start = start < 0 ? 0 : start + 1;
+                  int end = text.indexOf('\n', c);
+                  if(end < 0) end = text.length();
+                  return text.substring(start, end).trim();
+              }
+
+              void rebuildRangesFromBox(boolean top, String text) {
+                  ArrayList<int[]> ranges = top ? topRanges : bottomRanges;
+                  ranges.clear();
+                  if(text == null) text = "";
+                  int start = 0;
+                  int blockIndex = 0;
+                  for(int i=0;i<=text.length() && blockIndex < textBlocks.size();i++) {
+                      if(i == text.length() || text.charAt(i) == '\n') {
+                          ranges.add(new int[]{start, i});
+                          blockIndex++;
+                          start = i + 1;
                       }
-                      rebuilt.add(b);
+                  }
+                  while(ranges.size() < textBlocks.size()) {
+                      int end = text.length();
+                      ranges.add(new int[]{end, end});
+                  }
+              }
+
+              void syncEditedBoxToSingleBlock(boolean top, String text) {
+                  int id = pendingManualBlockId;
+                  EditText box = top ? topBox : bottomBox;
+                  if(id < 0 || id >= textBlocks.size()) {
+                      // Üres ablak vagy új első kézi sor: csak egy új blokkot hozunk létre.
+                      if(textBlocks.isEmpty()) {
+                          TextBlock nb = new TextBlock();
+                          String line = currentLineAtCursor(text, box.getSelectionStart());
+                          if(top) nb.topText = line; else nb.bottomText = line;
+                          nb.dirty = line.trim().length() > 0;
+                          nb.dirtyTopSource = top;
+                          nb.translatedOk = false;
+                          textBlocks.add(nb);
+                          rebuildRangesFromBox(top, text);
+                          renderPeerWindow(top);
+                      }
+                      return;
                   }
 
-                  textBlocks.clear();
-                  textBlocks.addAll(rebuilt);
+                  String newText = currentLineAtCursor(text, box.getSelectionStart());
+                  TextBlock b = textBlocks.get(id);
+                  String oldText = top ? b.topText : b.bottomText;
+                  if(oldText == null) oldText = "";
+
+                  if(!oldText.equals(newText)) {
+                      if(top) b.topText = newText;
+                      else b.bottomText = newText;
+                      b.dirty = true;
+                      b.dirtyTopSource = top;
+                      b.translatedOk = false;
+                      b.retryCount = 0;
+                  }
+
+                  rebuildRangesFromBox(top, text);
+                  renderPeerWindow(top);
               }
 
               ArrayList<String> splitTextToBlocks(String text) {
@@ -456,6 +511,7 @@ jobs:
                   programmaticChange = true;
                   try {
                       peer.setText(sb.toString());
+                      rebuildRangesFromBox(!editedTop, sb.toString());
                       peer.setSelection(Math.min(peerSel, peer.getText().length()));
                       if(peerHadFocus) peer.requestFocus();
                       peer.post(() -> peer.scrollTo(0, peerScroll));
