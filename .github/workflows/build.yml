@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 64; versionName = "6.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 65; versionName = "6.5" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V64" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V65" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -99,7 +99,6 @@ jobs:
           import android.content.pm.PackageManager;
           import android.graphics.Color;
           import android.media.*;
-          import android.media.audiofx.NoiseSuppressor;
           import android.os.*;
           import android.text.*;
           import android.text.style.*;
@@ -121,7 +120,6 @@ jobs:
               OkHttpClient client;
               WebSocket ws;
               AudioRecord rec;
-              NoiseSuppressor noiseSuppressor;
               ExecutorService audioExec = Executors.newSingleThreadExecutor();
 
               boolean connected = false;
@@ -260,7 +258,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V64");
+                  TextView title = label("Fordito_V65");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -609,10 +607,11 @@ jobs:
                       JSONObject vad = new JSONObject();
                       vad.put("type", "semantic_vad");
                       vad.put("eagerness", vadMode);
-                      // V47: a beszédhatárt továbbra is a Realtime dönti el,
-                      // de NEM kérünk automatikus nagy válaszblokkot az audio végén.
-                      // A fordítás a beérkező transcript-delta szövegblokkokból indul.
-                      vad.put("create_response", false);
+                      // V65: egyszerűsített AI-központú működés.
+                      // Nem a kliens próbál transcriptből nyelvet, ablakot és fordítást kitalálni.
+                      // A Realtime modell maga hallja az audio-t, eldönti a két kiválasztott nyelv közül a forrást,
+                      // és SOURCE_LANG / ORIGINAL / TRANSLATION formátumban adja vissza az eredményt.
+                      vad.put("create_response", true);
 
                       JSONObject input = new JSONObject();
                       JSONObject format = new JSONObject();
@@ -621,16 +620,11 @@ jobs:
                       input.put("format", format);
                       input.put("turn_detection", vad);
 
-                      JSONObject tr = new JSONObject();
-                      tr.put("model", "gpt-realtime-whisper");
-                      // V60: Realtime transcription nem támogat prompt paramétert ezen az endpointon.
-                      // Ezért itt NEM küldünk promptot; a nyelvpár-döntés az átirat beérkezése után történik.
-                      // V56: ne kössük a beszédfelismerést az éppen fókuszos ablak nyelvéhez.
-                      // A mikrofon futása közbeni nyelvváltásnál ez keverte össze a felső/alsó ablakot.
-                      // A Realtime automatikusan felismeri a beszélt nyelvet, mi pedig a transcript szövege alapján
-                      // döntjük el, hogy a két kiválasztott nyelv közül melyik oldal a forrás.
-                      tr.put("delay", "low");
-                      input.put("transcription", tr);
+                      // V65: a külön STT/transcription csatornát kikapcsoljuk.
+                      // Oka: a gpt-realtime-whisper prompt nélkül néha harmadik nyelvű/ufo karakteres átiratot gyárt,
+                      // promptot pedig ezen a GA Realtime STT útvonalon nem támogat.
+                      // Ezért a nyers transcript helyett közvetlenül a Realtime modell audio-válaszát használjuk.
+                      // Így az AI végzi a forrásnyelv-választást, tisztítást, tagolást és fordítást egy helyen.
 
                       JSONObject audio = new JSONObject();
                       audio.put("input", input);
@@ -659,12 +653,14 @@ jobs:
                   String bottom = code(bottomLang);
                   return "You are a live interpreter. Output text only. No explanations. " +
                     "Work ONLY with these two selected languages: " + top + " and " + bottom + ". " +
-                    "The input is raw live speech audio. It may be fragmented, noisy, badly punctuated or contain obvious recognition mistakes. " +
+                    "The input is raw live speech audio, not a pre-written transcript. Listen to the audio directly. " +
+                    "For every speech segment, first decide whether the speaker is using " + top + " or " + bottom + "; never choose any third language. " +
+                    "If audio is unclear, map it to the closest plausible words in either " + top + " or " + bottom + ", or output nothing if confidence is low. " +
+                    "Never output text in any other script or language outside the selected pair. " +
                     "Translate only what was very likely spoken by a human. Do not turn background noise, engine hum, wind, radio, clicks, breathing or uncertain sound into words. " +
                     "If you are not confident that meaningful human speech is present, output nothing and wait for the next audio window. " +
                     "Never narrate the situation, never comment on noise, and never write phrases such as 'noise is heard' unless those words were actually spoken. " +
                     "You decide the natural thought boundaries and clean only clear recognition errors without inventing facts. " +
-                    "Detect whether the current input is " + top + " or " + bottom + ". " +
                     "If the input is " + top + ", translate to " + bottom + ". If the input is " + bottom + ", translate to " + top + ". " +
                     "If the current audio window is not meaningful enough yet, output nothing. " +
                     "Do not wait for a long monologue. Treat every semantically complete sentence, short clause, numbered item, or list item as a finished thought. " +
@@ -716,21 +712,6 @@ jobs:
                   int bs = Math.max(min, 4096);
 
                   rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
-
-                  // V64: csak óvatos, rendszer szintű zajcsökkentés.
-                  // Nem nyúl a Realtime/VAD/nyelvpár/fókusz/blokkosítás logikához.
-                  try {
-                      if(NoiseSuppressor.isAvailable() && rec != null) {
-                          int audioSessionId = rec.getAudioSessionId();
-                          if(audioSessionId != AudioRecord.ERROR_BAD_VALUE) {
-                              noiseSuppressor = NoiseSuppressor.create(audioSessionId);
-                              if(noiseSuppressor != null) noiseSuppressor.setEnabled(true);
-                          }
-                      }
-                  } catch(Exception ignored) {
-                      noiseSuppressor = null;
-                  }
-
                   streaming = true;
                   rec.startRecording();
                   updateButtons();
@@ -790,8 +771,6 @@ jobs:
               void stop() {
                   streaming = false;
                   connected = false;
-                  try { if(noiseSuppressor != null) { noiseSuppressor.setEnabled(false); noiseSuppressor.release(); } } catch(Exception ignored) {}
-                  noiseSuppressor = null;
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception ignored) {}
                   rec = null;
                   liveTranscriptBuffer = "";
@@ -1004,7 +983,7 @@ jobs:
                       b = finalizeSpeechBlockText(b);
                       if(b.length() == 0) continue;
                       if(!markLiveBlockQueued(b)) continue;
-                      // V62: a fókusz nem ragadhat az előző ablakon.
+                      // V65: a fókusz nem ragadhat az előző ablakon.
                       // Minden lezárt transcript-blokknál újra eldöntjük, hogy a kiválasztott
                       // KÉT nyelv közül melyik a forrás, és azonnal abba az ablakba írjuk.
                       // Nem STT prompt, nem fix HU/FR, nem teljes új logika: csak a forrásoldal kijelölése.
@@ -1319,7 +1298,7 @@ jobs:
                       boolean sourceIsTop = b.dirtyTopSource;
                       String clean = cleanOneBlockTranslation(out);
 
-                      // V62: a forrásoldalt nem a régi fókusz és nem egy harmadik nyelvet kereső AI-válasz dönti el.
+                      // V65: a forrásoldalt nem a régi fókusz és nem egy harmadik nyelvet kereső AI-válasz dönti el.
                       // A blokk már a beérkező átiratnál a kiválasztott két nyelv közül lett besorolva.
                       // Itt csak a fordítást írjuk a másik ablakba, ezért nem kerülhet vissza a francia szöveg a magyar ablakba.
                       if(sourceIsTop) b.bottomText = clean;
@@ -1762,14 +1741,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V64.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V64.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V65.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V65.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V64
+          name: Fordito_V65
           path: |
             artifact/*.apk
             artifact/*.aab
