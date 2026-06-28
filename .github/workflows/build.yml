@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 93; versionName = "9.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 94; versionName = "9.4" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V93" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V94" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -217,14 +217,14 @@ jobs:
 
               final String[][] modes = {
                   {"Pontos","precise"},
-                  {"szó szerinti vagy természetes","natural"},
+                  {"A fordítás megfogalmazása","natural"},
                   {"Tolmács","interpreter"}
               };
 
               final String[][] vadModes = {
-                  {"Gyors","high"},
-                  {"Normál","medium"},
-                  {"beszédvégek felismerése","low"},
+                  {"Gyors – hamarabb lezárja a mondatot","high"},
+                  {"Normál – ajánlott","medium"},
+                  {"Várakozó – hosszabb szünetet is kivár","low"},
                   {"Automatikus","auto"}
               };
 
@@ -268,7 +268,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V93");
+                  TextView title = label("Fordito_V94");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -398,7 +398,7 @@ jobs:
                       }
                       if(manualBtn != null) {
                           manualBtn.setText(enabled ? "KÉSZ" : "MANUÁL");
-                          manualBtn.setBackgroundColor(enabled ? Color.rgb(34,139,34) : Color.rgb(65,70,80));
+                          manualBtn.setBackgroundColor(enabled ? Color.rgb(34,139,34) : Color.rgb(150,55,50));
                       }
                   } catch(Exception ignored) {}
               }
@@ -443,7 +443,7 @@ jobs:
                   manualTopSource = top;
                   topActive = top;
 
-                  // V93: kézi szerkesztés és live mikrofon nem futhat egyszerre.
+                  // V94: kézi szerkesztés és live mikrofon nem futhat egyszerre.
                   // Ha a felhasználó bármelyik ablakba kattint vagy írni kezd,
                   // a mikrofon és minden függő live fordítás leáll. Így a kézi
                   // teljes ablakos fordításba nem írhat vissza későn érkező live válasz.
@@ -559,7 +559,7 @@ jobs:
               }
 
               void renderBlocksKeepView() {
-                  // V93: élő fordítás alatt ne őrizze meg a régi scroll pozíciót,
+                  // V94: élő fordítás alatt ne őrizze meg a régi scroll pozíciót,
                   // mert ettől nem megy le az ablak az új sorokra.
                   // Kézi/készenléti módban marad a régi nézetmegőrzés.
                   renderBlocks(!(streaming || uiLockedForLive || finalizingStop));
@@ -695,7 +695,7 @@ jobs:
                       input.put("format", format);
                       input.put("turn_detection", vad);
 
-                      // V93: OpenAI Realtime oldali zajszűrés.
+                      // V94: OpenAI Realtime oldali zajszűrés.
                       // Telefon közeli beszédhez near_field való; ez a VAD és a modell előtt szűr.
                       JSONObject nr = new JSONObject();
                       nr.put("type", "near_field");
@@ -796,7 +796,7 @@ jobs:
                   else if("high".equals(delayMode)) checked = 2;
 
                   new AlertDialog.Builder(this)
-                      .setTitle("Hangbevitel pontossága")
+                      .setTitle("Beszédfelismerés pontossága")
                       .setSingleChoiceItems(names, checked, (d, which) -> {
                           delayMode = vals[which];
                           getSharedPreferences("fordito", MODE_PRIVATE)
@@ -853,7 +853,7 @@ jobs:
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4096);
 
-                  // V93: zajos kabin / ventilátor mellett VOICE_COMMUNICATION jobb,
+                  // V94: zajos kabin / ventilátor mellett VOICE_COMMUNICATION jobb,
                   // mert Android oldalon használhat AEC/AGC/NS előfeldolgozást, ha a készülék támogatja.
                   rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
                   enableAndroidAudioEffects();
@@ -1636,9 +1636,9 @@ jobs:
                       menuItem("OpenAI API kulcs", "", false),
                       menuItem("AI modell", modelLabel(), false),
                       menuItem("Beszélgetési profil", profileLabel(), false),
-                      menuItem("Fordítási mód", modeLabel(), false),
-                      menuItem("Semantic VAD", vadLabel(), false),
-                      menuItem("Hangbevitel pontossága", delayLabel(), false),
+                      menuItem("Fordítás stílusa", modeLabel(), false),
+                      menuItem("Beszéd felismerése", vadLabel(), false),
+                      menuItem("Beszédfelismerés pontossága", delayLabel(), false),
                       menuItem("Ablakkezelés", "kijelölt szöveg kezelése", false)
                   };
 
@@ -1753,8 +1753,8 @@ jobs:
 
               void chooseModel() { chooseFrom("AI modell", models, model, v -> { model = v; save(); restartIfNeeded(); }); }
               void chooseProfile() { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save(); sessionUpdateIfConnected(); }); }
-              void chooseMode() { chooseFrom("Fordítási mód", modes, mode, v -> { mode = v; save(); sessionUpdateIfConnected(); }); }
-              void chooseVad() { chooseFrom("Semantic VAD", vadModes, vadMode, v -> { vadMode = v; save(); sessionUpdateIfConnected(); }); }
+              void chooseMode() { chooseFrom("Fordítás stílusa", modes, mode, v -> { mode = v; save(); sessionUpdateIfConnected(); }); }
+              void chooseVad() { chooseFrom("Beszéd felismerése", vadModes, vadMode, v -> { vadMode = v; save(); sessionUpdateIfConnected(); }); }
 
               interface Setter { void set(String v); }
 
@@ -1842,7 +1842,7 @@ jobs:
               void setLiveUiLocked(boolean locked) {
                   uiLockedForLive = locked;
                   try {
-                      // V93: élő mikrofon alatt csak a két veszélyes alsó gomb záródik:
+                      // V94: élő mikrofon alatt csak a két veszélyes alsó gomb záródik:
                       // FORDÍT és MENÜ. Az ablakokhoz, scrollhoz, nyelvgombokhoz nem nyúlunk.
                       boolean blocked = locked || finalizingStop;
 
@@ -1864,7 +1864,7 @@ jobs:
 
                       if(topLangBtn != null) topLangBtn.setBackgroundColor(topActive ? active : inactive);
                       if(bottomLangBtn != null) bottomLangBtn.setBackgroundColor(!topActive ? active : inactive);
-                      if(manualBtn != null) manualBtn.setBackgroundColor(manualEditMode ? green : inactive);
+                      if(manualBtn != null) manualBtn.setBackgroundColor(manualEditMode ? green : red);
                       if(translateBtn != null) translateBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : inactive);
                       if(menuBtn != null) menuBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : inactive);
 
@@ -1912,7 +1912,7 @@ jobs:
               @Override public void onPause() {
                   super.onPause();
                   if(streaming) stop();
-                  // V93: ha háttérbe kerül az app, a mikrofon leáll,
+                  // V94: ha háttérbe kerül az app, a mikrofon leáll,
                   // de a FORDÍT és MENÜ gombokat is vissza kell engedni.
                   finalizingStop = false;
                   setLiveUiLocked(false);
@@ -1972,14 +1972,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V93.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V93.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V94.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V94.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V93
+          name: Fordito_V94
           path: |
             artifact/*.apk
             artifact/*.aab
