@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V59" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V61" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -258,7 +258,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V59");
+                  TextView title = label("Fordito_V61");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -621,9 +621,8 @@ jobs:
 
                       JSONObject tr = new JSONObject();
                       tr.put("model", "gpt-realtime-whisper");
-                      // V59: a STT ne világnyelv-automatikával találgasson.
-                      // Nem rögzítjük egyetlen oldalra a nyelvet, csak a KÉT kiválasztott nyelvpárra szűkítjük.
-                      tr.put("prompt", sttPairPrompt());
+                      // V60: Realtime transcription nem támogat prompt paramétert ezen az endpointon.
+                      // Ezért itt NEM küldünk promptot; a nyelvpár-döntés az átirat beérkezése után történik.
                       // V56: ne kössük a beszédfelismerést az éppen fókuszos ablak nyelvéhez.
                       // A mikrofon futása közbeni nyelvváltásnál ez keverte össze a felső/alsó ablakot.
                       // A Realtime automatikusan felismeri a beszélt nyelvet, mi pedig a transcript szövege alapján
@@ -690,13 +689,15 @@ jobs:
               }
 
               String liveBlockInstructions(boolean sourceIsTop) {
-                  String src = sourceIsTop ? code(topLang) : code(bottomLang);
-                  String tgt = sourceIsTop ? code(bottomLang) : code(topLang);
+                  String top = code(topLang);
+                  String bottom = code(bottomLang);
                   return "You are a live interpreter for one already-transcribed speech block. " +
-                    "Translate from " + src + " to " + tgt + ". " +
-                    "Return ONLY the translation. No labels, no markdown, no explanation. " +
-                    "Keep the wording natural and concise. Do not merge this block with earlier or later speech. " +
-                    "Do not invent missing information. " + modePrompt();
+                    "Only these two languages are allowed: " + top + " and " + bottom + ". " +
+                    "First decide whether TEXT is mostly " + top + " or mostly " + bottom + ". " +
+                    "If it is " + top + ", translate to " + bottom + ". If it is " + bottom + ", translate to " + top + ". " +
+                    "Do not classify TEXT as any third language. Do not force " + bottom + " speech into " + top + ", and do not force " + top + " speech into " + bottom + ". " +
+                    "Return EXACTLY three lines and nothing else: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <cleaned original text in the detected selected language> then TRANSLATION: <natural translation into the other selected language>. " +
+                    "Keep the wording natural and concise. Do not merge this block with earlier or later speech. Do not invent missing information. " + modePrompt();
               }
 
 
@@ -983,9 +984,11 @@ jobs:
                       b = finalizeSpeechBlockText(b);
                       if(b.length() == 0) continue;
                       if(!markLiveBlockQueued(b)) continue;
-                      boolean sourceIsTop = detectSourceIsTop(b);
-                      setDetectedSourceSide(sourceIsTop);
-                      int id = addSourceOnlyBlock(sourceIsTop, b);
+                      // V61: nem a helyi/fókusz heurisztika dönti el véglegesen a forrásoldalt.
+                      // A blokk ideiglenesen az utolsó aktív oldalra kerül, majd a fordító AI
+                      // a kiválasztott két nyelv közül címkézi a valódi SOURCE_LANG-et,
+                      // és applyLiveTranslation() a blokkot a megfelelő ablakba rendezi.
+                      int id = addSourceOnlyBlock(topActive, b);
                       liveTranslateQueue.add(id);
                   }
                   processNextLiveTranslation();
@@ -1137,7 +1140,7 @@ jobs:
 
               String cleanTranscriptForSelectedPair(String text) {
                   if(text == null) return "";
-                  // V59: ha az automatikus STT mégis harmadik írásrendszert szúr be,
+                  // V60: ha az automatikus STT mégis harmadik írásrendszert szúr be,
                   // azt nem tekintjük valódi bevitelnek. A magyar/francia/angol/stb. latin betűs nyelvekhez
                   // ez biztonságosabb, mint a furcsa Unicode-töredékek továbbfordítása.
                   String x = text.replaceAll("[^\\p{L}\\p{N}\\p{Punct}\\sáéíóöőúüűÁÉÍÓÖŐÚÜŰàâçéèêëîïôùûüÿœÀÂÇÉÈÊËÎÏÔÙÛÜŸŒäöüßÄÖÜñÑ]", " ");
@@ -1148,7 +1151,7 @@ jobs:
                   int topScore = languageScore(text, topLang);
                   int bottomScore = languageScore(text, bottomLang);
 
-                  // V59: nem a fókusz dönt. A fókusz csak tartalék, ha tényleg nincs nyelvi jel.
+                  // V60: nem a fókusz dönt. A fókusz csak tartalék, ha tényleg nincs nyelvi jel.
                   // Különösen fontos mikrofon közbeni nyelvváltásnál.
                   if(topScore >= bottomScore + 2) return true;
                   if(bottomScore >= topScore + 2) return false;
@@ -1264,9 +1267,9 @@ jobs:
                       JSONArray content = new JSONArray();
                       JSONObject c = new JSONObject();
                       c.put("type", "input_text");
-                      String sourceCode = sourceIsTop ? code(topLang) : code(bottomLang);
-                      String targetCode = sourceIsTop ? code(bottomLang) : code(topLang);
-                      c.put("text", "LIVE_BLOCK_TRANSLATION\nSOURCE_LANG: " + sourceCode + "\nTARGET_LANG: " + targetCode + "\nTEXT:\n" + src.trim());
+                      String topCode = code(topLang);
+                      String bottomCode = code(bottomLang);
+                      c.put("text", "LIVE_PAIR_CLASSIFY_AND_TRANSLATE\nSELECTED_TOP_LANG: " + topCode + "\nSELECTED_BOTTOM_LANG: " + bottomCode + "\nTEXT:\n" + src.trim());
                       content.put(c);
                       item.put("content", content);
                       msg.put("item", item);
@@ -1287,13 +1290,33 @@ jobs:
 
               void applyLiveTranslation(String out) {
                   int id = pendingLiveBlockId;
-                  boolean sourceIsTop = true;
                   if(id >= 0 && id < textBlocks.size()) {
                       TextBlock b = textBlocks.get(id);
-                      sourceIsTop = b.dirtyTopSource;
-                      String clean = cleanOneBlockTranslation(out);
-                      if(sourceIsTop) b.bottomText = clean;
-                      else b.topText = clean;
+                      ArrayList<String[]> triples = parseTriples(out);
+                      if(!triples.isEmpty()) {
+                          String[] trp = triples.get(0);
+                          String sourceLang = trp[0].toUpperCase(Locale.ROOT);
+                          String original = trp[1] == null ? "" : trp[1].trim();
+                          String translation = trp[2] == null ? "" : cleanOneBlockTranslation(trp[2]);
+                          boolean sourceIsTop = sourceLang.contains(code(topLang));
+                          boolean sourceIsBottom = sourceLang.contains(code(bottomLang));
+                          if(!sourceIsTop && !sourceIsBottom) sourceIsTop = b.dirtyTopSource;
+
+                          b.dirtyTopSource = sourceIsTop;
+                          if(sourceIsTop) {
+                              b.topText = original.length() > 0 ? original : (b.topText != null && b.topText.length() > 0 ? b.topText : b.bottomText);
+                              b.bottomText = translation;
+                          } else {
+                              b.bottomText = original.length() > 0 ? original : (b.bottomText != null && b.bottomText.length() > 0 ? b.bottomText : b.topText);
+                              b.topText = translation;
+                          }
+                          setDetectedSourceSide(sourceIsTop);
+                      } else {
+                          boolean sourceIsTop = b.dirtyTopSource;
+                          String clean = cleanOneBlockTranslation(out);
+                          if(sourceIsTop) b.bottomText = clean;
+                          else b.topText = clean;
+                      }
                       renderBlocksKeepView();
                   }
                   pendingLiveBlockId = -1;
@@ -1730,14 +1753,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V59.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V59.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V61.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V61.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V59
+          name: Fordito_V61
           path: |
             artifact/*.apk
             artifact/*.aab
