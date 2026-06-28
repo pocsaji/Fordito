@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 63; versionName = "6.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 64; versionName = "6.4" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V63" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V64" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -100,8 +100,6 @@ jobs:
           import android.graphics.Color;
           import android.media.*;
           import android.media.audiofx.NoiseSuppressor;
-          import android.media.audiofx.AutomaticGainControl;
-          import android.media.audiofx.AcousticEchoCanceler;
           import android.os.*;
           import android.text.*;
           import android.text.style.*;
@@ -124,8 +122,6 @@ jobs:
               WebSocket ws;
               AudioRecord rec;
               NoiseSuppressor noiseSuppressor;
-              AutomaticGainControl automaticGainControl;
-              AcousticEchoCanceler echoCanceler;
               ExecutorService audioExec = Executors.newSingleThreadExecutor();
 
               boolean connected = false;
@@ -264,7 +260,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V63");
+                  TextView title = label("Fordito_V64");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -714,47 +710,27 @@ jobs:
                   return "Natural mode: translate meaning naturally and fluently, with light correction only.";
               }
 
-              void setupAudioNoiseProtection(int audioSessionId) {
-                  // V63: óvatos Android oldali zajvédelem.
-                  // Nem saját VAD, nem hangerőküszöb, nem commit-logika: csak a készülék beépített
-                  // zajszűrő effektjeit kapcsoljuk, ha az adott telefon támogatja.
-                  try {
-                      if(audioSessionId != AudioRecord.ERROR_BAD_VALUE && NoiseSuppressor.isAvailable()) {
-                          noiseSuppressor = NoiseSuppressor.create(audioSessionId);
-                          if(noiseSuppressor != null) noiseSuppressor.setEnabled(true);
-                      }
-                  } catch(Exception ignored) {}
-                  try {
-                      // Az AGC gyakran felhúzza a kabinzajt/szelet/motorhangot. Ha elérhető, inkább kikapcsoljuk.
-                      if(audioSessionId != AudioRecord.ERROR_BAD_VALUE && AutomaticGainControl.isAvailable()) {
-                          automaticGainControl = AutomaticGainControl.create(audioSessionId);
-                          if(automaticGainControl != null) automaticGainControl.setEnabled(false);
-                      }
-                  } catch(Exception ignored) {}
-                  try {
-                      if(audioSessionId != AudioRecord.ERROR_BAD_VALUE && AcousticEchoCanceler.isAvailable()) {
-                          echoCanceler = AcousticEchoCanceler.create(audioSessionId);
-                          if(echoCanceler != null) echoCanceler.setEnabled(true);
-                      }
-                  } catch(Exception ignored) {}
-              }
-
-              void releaseAudioNoiseProtection() {
-                  try { if(noiseSuppressor != null) noiseSuppressor.release(); } catch(Exception ignored) {}
-                  try { if(automaticGainControl != null) automaticGainControl.release(); } catch(Exception ignored) {}
-                  try { if(echoCanceler != null) echoCanceler.release(); } catch(Exception ignored) {}
-                  noiseSuppressor = null;
-                  automaticGainControl = null;
-                  echoCanceler = null;
-              }
-
               void audioLoop() {
                   int sr = 24000;
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4096);
 
                   rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
-                  setupAudioNoiseProtection(rec.getAudioSessionId());
+
+                  // V64: csak óvatos, rendszer szintű zajcsökkentés.
+                  // Nem nyúl a Realtime/VAD/nyelvpár/fókusz/blokkosítás logikához.
+                  try {
+                      if(NoiseSuppressor.isAvailable() && rec != null) {
+                          int audioSessionId = rec.getAudioSessionId();
+                          if(audioSessionId != AudioRecord.ERROR_BAD_VALUE) {
+                              noiseSuppressor = NoiseSuppressor.create(audioSessionId);
+                              if(noiseSuppressor != null) noiseSuppressor.setEnabled(true);
+                          }
+                      }
+                  } catch(Exception ignored) {
+                      noiseSuppressor = null;
+                  }
+
                   streaming = true;
                   rec.startRecording();
                   updateButtons();
@@ -814,7 +790,8 @@ jobs:
               void stop() {
                   streaming = false;
                   connected = false;
-                  releaseAudioNoiseProtection();
+                  try { if(noiseSuppressor != null) { noiseSuppressor.setEnabled(false); noiseSuppressor.release(); } } catch(Exception ignored) {}
+                  noiseSuppressor = null;
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception ignored) {}
                   rec = null;
                   liveTranscriptBuffer = "";
@@ -1026,7 +1003,6 @@ jobs:
                       b = cleanTranscriptForSelectedPair(b);
                       b = finalizeSpeechBlockText(b);
                       if(b.length() == 0) continue;
-                      if(isLikelyNoiseOnlyTranscript(b)) continue;
                       if(!markLiveBlockQueued(b)) continue;
                       // V62: a fókusz nem ragadhat az előző ablakon.
                       // Minden lezárt transcript-blokknál újra eldöntjük, hogy a kiválasztott
@@ -1038,43 +1014,6 @@ jobs:
                       liveTranslateQueue.add(id);
                   }
                   processNextLiveTranslation();
-              }
-
-              boolean isLikelyNoiseOnlyTranscript(String text) {
-                  // V63: zajból született rövid, bizonytalan átiratok kiszűrése.
-                  // Fontos: nem időalapú, nem hangerőalapú, és nem akadályozza a rövid valódi mondatokat
-                  // mint pl. Bonjour, merci, igen, nem, hello.
-                  if(text == null) return true;
-                  String t = text.trim();
-                  if(t.length() < 3) return true;
-
-                  String lower = t.toLowerCase(Locale.ROOT);
-                  int letters = 0;
-                  int vowels = 0;
-                  for(int i=0;i<lower.length();i++) {
-                      char ch = lower.charAt(i);
-                      if(Character.isLetter(ch)) {
-                          letters++;
-                          if("aáàâeéèêëiíîïoóöőôuúüűûyc".indexOf(ch) >= 0) vowels++;
-                      }
-                  }
-                  if(letters < 3) return true;
-
-                  // Ha bármelyik kiválasztott nyelv egyértelmű jeleit tartalmazza, engedjük át.
-                  if(strongLanguageSignal(t, topLang) || strongLanguageSignal(t, bottomLang)) return false;
-
-                  int topScore = languageScore(t, topLang);
-                  int bottomScore = languageScore(t, bottomLang);
-                  int best = Math.max(topScore, bottomScore);
-                  int words = lower.replaceAll("[^\\p{L}]+", " ").trim().isEmpty() ? 0 : lower.replaceAll("[^\\p{L}]+", " ").trim().split("\\s+").length;
-
-                  // Rövid, nyelvi jel nélküli töredékek gyakran motor/szél/rádió/háttérzajból születnek.
-                  if(words <= 2 && best == 0) return true;
-
-                  // Magánhangzó nélküli vagy nagyon furcsa töredék: inkább ne fordítsuk.
-                  if(letters >= 5 && vowels == 0) return true;
-
-                  return false;
               }
 
               String finalizeSpeechBlockText(String raw) {
@@ -1823,14 +1762,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V63.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V63.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V64.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V64.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V63
+          name: Fordito_V64
           path: |
             artifact/*.apk
             artifact/*.aab
