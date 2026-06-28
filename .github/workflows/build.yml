@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V55" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V56" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -101,8 +101,10 @@ jobs:
           import android.media.*;
           import android.os.*;
           import android.text.*;
+          import android.text.style.*;
           import android.util.Base64;
           import android.view.Gravity;
+          import android.text.Layout;
           import android.view.inputmethod.InputMethodManager;
           import android.widget.*;
           import org.json.*;
@@ -256,7 +258,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V55");
+                  TextView title = label("Fordito_V56");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -619,8 +621,10 @@ jobs:
 
                       JSONObject tr = new JSONObject();
                       tr.put("model", "gpt-realtime-whisper");
-                      String langHint = topActive ? apiCode(topLang) : apiCode(bottomLang);
-                      if(langHint.length() == 2) tr.put("language", langHint);
+                      // V56: ne kössük a beszédfelismerést az éppen fókuszos ablak nyelvéhez.
+                      // A mikrofon futása közbeni nyelvváltásnál ez keverte össze a felső/alsó ablakot.
+                      // A Realtime automatikusan felismeri a beszélt nyelvet, mi pedig a transcript szövege alapján
+                      // döntjük el, hogy a két kiválasztott nyelv közül melyik oldal a forrás.
                       tr.put("delay", "low");
                       input.put("transcription", tr);
 
@@ -967,7 +971,9 @@ jobs:
                       b = finalizeSpeechBlockText(b);
                       if(b.length() == 0) continue;
                       if(!markLiveBlockQueued(b)) continue;
-                      int id = addSourceOnlyBlock(topActive, b);
+                      boolean sourceIsTop = detectSourceIsTop(b);
+                      setDetectedSourceSide(sourceIsTop);
+                      int id = addSourceOnlyBlock(sourceIsTop, b);
                       liveTranslateQueue.add(id);
                   }
                   processNextLiveTranslation();
@@ -1032,13 +1038,13 @@ jobs:
 
               int smartLinguisticCut(String s) {
                   int len = s.length();
-                  if(len < 120) return -1;
+                  if(len < 105) return -1;
 
                   String lower = s.toLowerCase(Locale.ROOT);
-                  int preferredEnd = Math.min(len, 185);
-                  int preferredStart = Math.min(len, 105);
+                  int preferredEnd = Math.min(len, 220);
+                  int preferredStart = Math.min(len, 95);
 
-                  // V55: V52 alap + stabil transcript pufferkezelés.
+                  // V56: V55 alap, de kevésbé engedékeny hosszú blokkoknál.
                   // Nem audio, nem VAD, nem időzítő. Csak a már beérkezett szöveg stabil elejét vágjuk le,
                   // hogy hosszú folyamatos beszédnél se legyen egyetlen óriás blokk.
 
@@ -1059,15 +1065,24 @@ jobs:
 
                   // 3) Felsorolás vagy hosszú mellékmondat. Vágás vessző után, de csak akkor,
                   // ha már van érdemi hosszúságú, önmagában is olvasható blokk.
-                  cut = lastCommaCut(s, 130, preferredEnd);
+                  cut = lastCommaCut(s, 115, Math.min(len, 205));
                   if(cut > 0) return cut;
 
-                  // 4) Stabil prefix vágás: ha a beszéd hosszúra nő és nincs biztos írásjel,
+                  // 4) Ha nincs vessző, de már hosszú a blokk, természetes kötőszavaknál is vágunk.
+                  // Ez javítja a hosszú folyamatos monológokat, de továbbra sem időalapú.
+                  cut = lastSoftWordCut(lower, 145, Math.min(len, 220), new String[]{
+                          " de ", " viszont ", " akkor ", " utána ", " majd ",
+                          " és akkor ", " hogyha ", " ha ", " amikor ", " illetve ",
+                          " mindenhol ", " szinte ", " na most ", " pedig "
+                  });
+                  if(cut > 0) return cut;
+
+                  // 5) Stabil prefix vágás: ha a beszéd hosszúra nő és nincs biztos írásjel,
                   // a puffer elejét lezárjuk szóhatáron. A maradék a pufferben marad tovább épülni.
                   // Ez szöveg-alapú biztonsági szelep, nem másodperc- vagy szünetalapú döntés.
-                  if(len >= 185) {
-                      int spc = s.lastIndexOf(' ', Math.min(len, 175));
-                      if(spc >= 125) return spc + 1;
+                  if(len >= 220) {
+                      int spc = s.lastIndexOf(' ', Math.min(len, 200));
+                      if(spc >= 145) return spc + 1;
                   }
 
                   return -1;
@@ -1089,6 +1104,69 @@ jobs:
                   int pos = s.lastIndexOf(',', end);
                   if(pos >= minPos) return pos + 1;
                   return -1;
+              }
+
+              int lastSoftWordCut(String lower, int minPos, int maxPos, String[] words) {
+                  int best = -1;
+                  int end = Math.min(lower.length(), maxPos);
+                  for(String w: words) {
+                      int pos = lower.lastIndexOf(w, end);
+                      if(pos >= minPos && pos > best) best = pos;
+                  }
+                  if(best < 0) return -1;
+                  return best + 1;
+              }
+
+              void setDetectedSourceSide(boolean sourceIsTop) {
+                  topActive = sourceIsTop;
+                  manualTopSource = sourceIsTop;
+                  updateButtons();
+              }
+
+              boolean detectSourceIsTop(String text) {
+                  int topScore = languageScore(text, topLang);
+                  int bottomScore = languageScore(text, bottomLang);
+                  if(topScore > bottomScore + 1) return true;
+                  if(bottomScore > topScore + 1) return false;
+                  return topActive;
+              }
+
+              int languageScore(String text, String lang) {
+                  if(text == null || lang == null) return 0;
+                  String t = " " + text.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}]+", " ") + " ";
+                  int score = 0;
+                  if(lang.equals("hu")) {
+                      score += countAny(t, new String[]{" a "," az "," és "," hogy "," nem "," igen "," neked "," van "," vagy "," akkor "," ezt "," azt "," utcán "," hölgy "," uram "," kérem "," köszönöm "," szeretné "," találok "," név "," cím "});
+                      score += accentScore(text, "áéíóöőúüű");
+                  } else if(lang.equals("fr")) {
+                      score += countAny(t, new String[]{" le "," la "," les "," un "," une "," des "," de "," du "," je "," tu "," vous "," il "," elle "," nous "," ce "," ça "," est "," pas "," pour "," avec "," monsieur "," madame "," oui "," merci "});
+                      score += accentScore(text, "àâçéèêëîïôùûüÿœ");
+                  } else if(lang.equals("en")) {
+                      score += countAny(t, new String[]{" the "," a "," an "," and "," or "," if "," you "," i "," it "," is "," are "," was "," this "," that "," have "," has "," sir "," madam "," please "," thank "," sorry "});
+                  } else if(lang.equals("de")) {
+                      score += countAny(t, new String[]{" der "," die "," das "," ein "," eine "," und "," oder "," ich "," sie "," du "," ist "," nicht "," bitte "," danke "," herr "," frau "});
+                      score += accentScore(text, "äöüß");
+                  } else if(lang.equals("it")) {
+                      score += countAny(t, new String[]{" il "," lo "," la "," un "," una "," e "," che "," non "," per "," con "," sono "," signore "," signora "," grazie "," prego "});
+                      score += accentScore(text, "àèéìòù");
+                  } else if(lang.equals("es")) {
+                      score += countAny(t, new String[]{" el "," la "," los "," las "," un "," una "," y "," que "," no "," por "," con "," usted "," señor "," señora "," gracias "," por favor "});
+                      score += accentScore(text, "áéíñóúü");
+                  }
+                  return score;
+              }
+
+              int countAny(String text, String[] words) {
+                  int score = 0;
+                  for(String w: words) if(text.contains(w)) score += 2;
+                  return score;
+              }
+
+              int accentScore(String text, String chars) {
+                  int score = 0;
+                  String lower = text.toLowerCase(Locale.ROOT);
+                  for(int i=0;i<lower.length();i++) if(chars.indexOf(lower.charAt(i)) >= 0) score++;
+                  return Math.min(score, 6);
               }
 
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
@@ -1334,16 +1412,16 @@ jobs:
               }
 
               void menu() {
-                  String[] items = {
-                      "OpenAI API kulcs",
-                      "AI modell: " + modelLabel(),
-                      "Beszélgetési profil: " + profileLabel(),
-                      "Fordítási mód: " + modeLabel(),
-                      "Semantic VAD: " + vadLabel(),
-                      "Ablakkezelés / másolás-törlés"
+                  CharSequence[] items = {
+                      menuItem("OpenAI API kulcs", "", false),
+                      menuItem("AI modell", modelLabel(), false),
+                      menuItem("Beszélgetési profil", profileLabel(), false),
+                      menuItem("Fordítási mód", modeLabel(), false),
+                      menuItem("Semantic VAD", vadLabel(), false),
+                      menuItem("Ablakkezelés", "másolás / törlés", false)
                   };
 
-                  new AlertDialog.Builder(this).setTitle("Menü").setItems(items, (d,w) -> {
+                  showCenteredMenu("Menü", items, (d,w) -> {
                       if(w==0) showApi();
                       if(w==1) chooseModel();
                       if(w==2) chooseProfile();
@@ -1351,26 +1429,26 @@ jobs:
                       if(w==4) chooseVad();
                       if(w==5) windowMenu();
                       updateButtons();
-                  }).show();
+                  });
               }
 
               void windowMenu() {
-                  String[] items = {
-                      "Felső ablak másolása — felső nyelvgomb hosszú",
-                      "Alsó ablak másolása — alsó nyelvgomb hosszú",
-                      "Felső ablak törlése",
-                      "Alsó ablak törlése",
-                      "Mindkét ablak törlése — MENÜ hosszú"
+                  CharSequence[] items = {
+                      menuItem("Felső ablak másolása", "felső nyelvgomb hosszú", false),
+                      menuItem("Alsó ablak másolása", "alsó nyelvgomb hosszú", false),
+                      menuItem("Felső ablak törlése", "", false),
+                      menuItem("Alsó ablak törlése", "", false),
+                      menuItem("Mindkét ablak törlése", "MENÜ hosszú", false)
                   };
 
-                  new AlertDialog.Builder(this).setTitle("Ablakkezelés").setItems(items, (d,w) -> {
+                  showCenteredMenu("Ablakkezelés", items, (d,w) -> {
                       if(w==0) copyBox(true);
                       if(w==1) copyBox(false);
                       if(w==2) clearTopBox();
                       if(w==3) clearBottomBox();
                       if(w==4) clearBothBoxes();
                       updateButtons();
-                  }).show();
+                  });
               }
 
               void clearTopBox() {
@@ -1416,6 +1494,26 @@ jobs:
                   }
               }
 
+              CharSequence menuItem(String title, String subtitle, boolean selected) {
+                  String main = title == null ? "" : title;
+                  String sub = subtitle == null ? "" : subtitle;
+                  if(selected && sub.length() == 0) sub = "kiválasztva";
+                  String full = sub.length() == 0 ? main : main + "\n" + sub;
+                  SpannableString spn = new SpannableString(full);
+                  spn.setSpan(new AlignmentSpan.Standard(Layout.Alignment.ALIGN_CENTER), 0, full.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                  spn.setSpan(new RelativeSizeSpan(1.0f), 0, main.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                  if(sub.length() > 0) {
+                      int st = main.length() + 1;
+                      spn.setSpan(new RelativeSizeSpan(0.72f), st, full.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                      spn.setSpan(new ForegroundColorSpan(Color.LTGRAY), st, full.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                  }
+                  return spn;
+              }
+
+              void showCenteredMenu(String title, CharSequence[] items, DialogInterface.OnClickListener listener) {
+                  new AlertDialog.Builder(this).setTitle(title).setItems(items, listener).show();
+              }
+
               void showApi() {
                   EditText input = new EditText(this);
                   input.setSingleLine(true);
@@ -1437,25 +1535,29 @@ jobs:
               interface Setter { void set(String v); }
 
               void chooseFrom(String title, String[][] data, String current, Setter setter) {
-                  String[] labels = new String[data.length];
-                  for(int i=0;i<data.length;i++) labels[i] = data[i][0] + (data[i][1].equals(current) ? " ✓" : "");
-                  new AlertDialog.Builder(this).setTitle(title).setItems(labels, (d,w) -> {
+                  CharSequence[] labels = new CharSequence[data.length];
+                  for(int i=0;i<data.length;i++) labels[i] = menuItem(data[i][0], data[i][1].equals(current) ? "kiválasztva" : "", data[i][1].equals(current));
+                  showCenteredMenu(title, labels, (d,w) -> {
                       setter.set(data[w][1]);
                       updateButtons();
-                  }).show();
+                  });
               }
 
               void chooseLang(boolean top) {
                   String current = top ? topLang : bottomLang;
-                  String[] labels = new String[langs.length];
-                  for(int i=0;i<langs.length;i++) labels[i] = langs[i][0] + " (" + langs[i][1] + ")" + (langs[i][2].equals(current) ? " ✓" : "");
-                  new AlertDialog.Builder(this).setTitle(top ? "Felső nyelv" : "Alsó nyelv").setItems(labels, (d,w) -> {
-                      if(top) { topLang = langs[w][2]; topActive = true; manualTopSource = true; }
-                      else { bottomLang = langs[w][2]; topActive = false; manualTopSource = false; }
+                  CharSequence[] labels = new CharSequence[langs.length];
+                  for(int i=0;i<langs.length;i++) labels[i] = menuItem(langs[i][0], langs[i][1] + (langs[i][2].equals(current) ? " • kiválasztva" : ""), langs[i][2].equals(current));
+                  showCenteredMenu(top ? "Felső nyelv" : "Alsó nyelv", labels, (d,w) -> {
+                      if(top) topLang = langs[w][2];
+                      else bottomLang = langs[w][2];
+                      // V56: nyelvválasztás nem jelent forrásablak-választást.
+                      // A beszéd következő transcript blokkjánál automatikusan döntünk a felismert nyelv alapján.
+                      topBox.clearFocus();
+                      bottomBox.clearFocus();
                       save();
                       sessionUpdateIfConnected();
                       updateButtons();
-                  }).show();
+                  });
               }
 
               void restartIfNeeded() {
@@ -1572,14 +1674,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V55.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V55.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V56.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V56.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V55
+          name: Fordito_V56
           path: |
             artifact/*.apk
             artifact/*.aab
