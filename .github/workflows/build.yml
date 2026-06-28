@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 85; versionName = "8.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 86; versionName = "8.6" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V85" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V86" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -130,6 +130,8 @@ jobs:
               boolean streaming = false;
               boolean topActive = true;
               boolean manualEditMode = false;
+              boolean uiLockedForLive = false;
+              boolean finalizingStop = false;
               boolean manualTopSource = true;
               boolean responseInProgress = false;
               long sessionStart = 0L;
@@ -266,7 +268,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V85");
+                  TextView title = label("Fordito_V86");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -306,15 +308,21 @@ jobs:
                   bottomBox.setOnFocusChangeListener((v, hasFocus) -> { if(hasFocus) enterManualEditMode(false); });
                   topBox.addTextChangedListener(manualWatcher(true));
                   bottomBox.addTextChangedListener(manualWatcher(false));
-                  manualBtn.setOnClickListener(v -> toggleManualEditMode());
-                  topLangBtn.setOnClickListener(v -> chooseLang(true));
-                  bottomLangBtn.setOnClickListener(v -> chooseLang(false));
-                  topLangBtn.setOnLongClickListener(v -> { copyBox(true); return true; });
-                  bottomLangBtn.setOnLongClickListener(v -> { copyBox(false); return true; });
-                  micBtn.setOnClickListener(v -> { if(streaming) stop(); else start(true); });
-                  translateBtn.setOnClickListener(v -> manualTranslate());
-                  menuBtn.setOnClickListener(v -> menu());
-                  menuBtn.setOnLongClickListener(v -> { clearBothBoxes(); return true; });
+                  manualBtn.setOnClickListener(v -> { if(!uiLockedForLive && !finalizingStop) toggleManualEditMode(); });
+                  topLangBtn.setOnClickListener(v -> { if(!uiLockedForLive && !finalizingStop) chooseLang(true); });
+                  bottomLangBtn.setOnClickListener(v -> { if(!uiLockedForLive && !finalizingStop) chooseLang(false); });
+                  topLangBtn.setOnLongClickListener(v -> { if(!uiLockedForLive && !finalizingStop) copyBox(true); return true; });
+                  bottomLangBtn.setOnLongClickListener(v -> { if(!uiLockedForLive && !finalizingStop) copyBox(false); return true; });
+                  micBtn.setOnClickListener(v -> {
+                      if(streaming || finalizingStop) {
+                          stopWithFinalizeDelay();
+                      } else if(!uiLockedForLive) {
+                          start(true);
+                      }
+                  });
+                  translateBtn.setOnClickListener(v -> { if(!uiLockedForLive && !finalizingStop) manualTranslate(); });
+                  menuBtn.setOnClickListener(v -> { if(!uiLockedForLive && !finalizingStop) menu(); });
+                  menuBtn.setOnLongClickListener(v -> { if(!uiLockedForLive && !finalizingStop) clearBothBoxes(); return true; });
 
                   updateButtons();
               }
@@ -431,11 +439,11 @@ jobs:
               }
 
               void enterManualEditMode(boolean top) {
-                  if(!manualEditMode) return;
+                  if(!manualEditMode || uiLockedForLive || finalizingStop) return;
                   manualTopSource = top;
                   topActive = top;
 
-                  // V85: kézi szerkesztés és live mikrofon nem futhat egyszerre.
+                  // V86: kézi szerkesztés és live mikrofon nem futhat egyszerre.
                   // Ha a felhasználó bármelyik ablakba kattint vagy írni kezd,
                   // a mikrofon és minden függő live fordítás leáll. Így a kézi
                   // teljes ablakos fordításba nem írhat vissza későn érkező live válasz.
@@ -684,7 +692,7 @@ jobs:
                       input.put("format", format);
                       input.put("turn_detection", vad);
 
-                      // V85: OpenAI Realtime oldali zajszűrés.
+                      // V86: OpenAI Realtime oldali zajszűrés.
                       // Telefon közeli beszédhez near_field való; ez a VAD és a modell előtt szűr.
                       JSONObject nr = new JSONObject();
                       nr.put("type", "near_field");
@@ -842,11 +850,12 @@ jobs:
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4096);
 
-                  // V85: zajos kabin / ventilátor mellett VOICE_COMMUNICATION jobb,
+                  // V86: zajos kabin / ventilátor mellett VOICE_COMMUNICATION jobb,
                   // mert Android oldalon használhat AEC/AGC/NS előfeldolgozást, ha a készülék támogatja.
                   rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
                   enableAndroidAudioEffects();
                   streaming = true;
+                      setLiveUiLocked(true);
                   rec.startRecording();
                   updateButtons();
 
@@ -984,6 +993,7 @@ jobs:
               }
 
               void manualTranslate() {
+                  if(uiLockedForLive || finalizingStop) return;
                   EditText source = manualTopSource ? topBox : bottomBox;
                   source.clearFocus();
                   try {
@@ -1618,6 +1628,7 @@ jobs:
               }
 
               void menu() {
+                  if(uiLockedForLive || finalizingStop) return;
                   CharSequence[] items = {
                       menuItem("OpenAI API kulcs", "", false),
                       menuItem("AI modell", modelLabel(), false),
@@ -1641,6 +1652,7 @@ jobs:
               }
 
               void windowMenu() {
+                  if(uiLockedForLive || finalizingStop) return;
                   CharSequence[] items = {
                       menuItem("Felső ablak másolása", "felső nyelvgomb hosszú", false),
                       menuItem("Alsó ablak másolása", "alsó nyelvgomb hosszú", false),
@@ -1678,6 +1690,7 @@ jobs:
               }
 
               void clearBothBoxes() {
+                  if(uiLockedForLive || finalizingStop) return;
                   programmaticChange=true;
                   topBox.setText("");
                   bottomBox.setText("");
@@ -1752,6 +1765,7 @@ jobs:
               }
 
               void chooseLang(boolean top) {
+                  if(uiLockedForLive || finalizingStop) return;
                   String current = top ? topLang : bottomLang;
                   CharSequence[] labels = new CharSequence[langs.length];
                   for(int i=0;i<langs.length;i++) labels[i] = menuItem(langs[i][0], langs[i][1] + (langs[i][2].equals(current) ? " • kiválasztva" : ""), langs[i][2].equals(current));
@@ -1822,6 +1836,66 @@ jobs:
                   return code.toLowerCase(Locale.ROOT);
               }
 
+              void setLiveUiLocked(boolean locked) {
+                  uiLockedForLive = locked;
+                  try {
+                      if(topLangBtn != null) topLangBtn.setEnabled(!locked && !finalizingStop);
+                      if(bottomLangBtn != null) bottomLangBtn.setEnabled(!locked && !finalizingStop);
+                      if(manualBtn != null) manualBtn.setEnabled(!locked && !finalizingStop);
+                      if(translateBtn != null) translateBtn.setEnabled(!locked && !finalizingStop);
+                      if(menuBtn != null) menuBtn.setEnabled(!locked && !finalizingStop);
+
+                      if(topBox != null) topBox.setEnabled(!locked && !finalizingStop);
+                      if(bottomBox != null) bottomBox.setEnabled(!locked && !finalizingStop);
+
+                      styleUiState();
+                  } catch(Exception ignored) {}
+              }
+
+              void styleUiState() {
+                  try {
+                      int active = Color.rgb(65,100,155);
+                      int inactive = Color.rgb(75,80,90);
+                      int disabled = Color.rgb(55,58,65);
+                      int green = Color.rgb(30,140,70);
+                      int red = Color.rgb(150,55,50);
+                      int orange = Color.rgb(170,105,30);
+
+                      if(topLangBtn != null) topLangBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : active);
+                      if(bottomLangBtn != null) bottomLangBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : active);
+                      if(manualBtn != null) manualBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : (manualEditMode ? green : inactive));
+                      if(translateBtn != null) translateBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : inactive);
+                      if(menuBtn != null) menuBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : inactive);
+
+                      if(micBtn != null) {
+                          micBtn.setEnabled(true);
+                          if(finalizingStop) {
+                              micBtn.setText("VÁRJ");
+                              micBtn.setBackgroundColor(orange);
+                          } else if(streaming) {
+                              micBtn.setText("STOP");
+                              micBtn.setBackgroundColor(green);
+                          } else {
+                              micBtn.setText("MIKROFON");
+                              micBtn.setBackgroundColor(red);
+                          }
+                      }
+                  } catch(Exception ignored) {}
+              }
+
+              void stopWithFinalizeDelay() {
+                  if(finalizingStop) return;
+                  finalizingStop = true;
+                  try { stop(); } catch(Exception ignored) {}
+                  state.setText("lezárás...");
+                  setLiveUiLocked(true);
+                  new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                      finalizingStop = false;
+                      setLiveUiLocked(false);
+                      updateButtons();
+                  }, 1800);
+              }
+
               void updateButtons() {
                   micBtn.setText(streaming ? "STOP" : "MIKROFON");
                   micBtn.setBackgroundColor(streaming ? Color.rgb(30,130,70) : Color.rgb(90,50,50));
@@ -1862,7 +1936,8 @@ jobs:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }
+                  styleUiState();}
         run: |
           test -n "$ANDROID_KEYSTORE_BASE64" || (echo "Missing ANDROID_KEYSTORE_BASE64" && exit 1)
           test -n "$ANDROID_KEYSTORE_PASSWORD" || (echo "Missing ANDROID_KEYSTORE_PASSWORD" && exit 1)
@@ -1882,14 +1957,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V85.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V85.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V86.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V86.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V85
+          name: Fordito_V86
           path: |
             artifact/*.apk
             artifact/*.aab
