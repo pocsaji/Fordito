@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 75; versionName = "7.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 78; versionName = "7.8" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V77" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V78" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -259,7 +259,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V77");
+                  TextView title = label("Fordito_V78");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -290,8 +290,10 @@ jobs:
                   controls.addView(menuBtn, new LinearLayout.LayoutParams(0,74,1));
                   root.addView(controls);
 
-                  topBox.setOnClickListener(v -> { manualTopSource = true; updateButtons(); });
-                  bottomBox.setOnClickListener(v -> { manualTopSource = false; updateButtons(); });
+                  topBox.setOnClickListener(v -> enterManualEditMode(true));
+                  bottomBox.setOnClickListener(v -> enterManualEditMode(false));
+                  topBox.setOnFocusChangeListener((v, hasFocus) -> { if(hasFocus) enterManualEditMode(true); });
+                  bottomBox.setOnFocusChangeListener((v, hasFocus) -> { if(hasFocus) enterManualEditMode(false); });
                   topBox.addTextChangedListener(manualWatcher(true));
                   bottomBox.addTextChangedListener(manualWatcher(false));
                   topLangBtn.setOnClickListener(v -> chooseLang(true));
@@ -353,8 +355,7 @@ jobs:
                       public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
                       public void onTextChanged(CharSequence s, int start, int before, int count) {
                           if(programmaticChange) return;
-                          if(top) manualTopSource = true;
-                          else manualTopSource = false;
+                          enterManualEditMode(top);
                       }
                       public void afterTextChanged(Editable e) {
                           if(programmaticChange) return;
@@ -364,6 +365,35 @@ jobs:
                           updateButtons();
                       }
                   };
+              }
+
+              void enterManualEditMode(boolean top) {
+                  manualTopSource = top;
+                  topActive = top;
+
+                  // V78: kézi szerkesztés és live mikrofon nem futhat egyszerre.
+                  // Ha a felhasználó bármelyik ablakba kattint vagy írni kezd,
+                  // a mikrofon és minden függő live fordítás leáll. Így a kézi
+                  // teljes ablakos fordításba nem írhat vissza későn érkező live válasz.
+                  if(streaming) {
+                      stop();
+                      return;
+                  }
+
+                  try {
+                      if(ws != null && responseInProgress) {
+                          JSONObject cancel = new JSONObject();
+                          cancel.put("type", "response.cancel");
+                          ws.send(cancel.toString());
+                      }
+                  } catch(Exception ignored) {}
+
+                  responseInProgress = false;
+                  liveTranslateMode = false;
+                  pendingLiveBlockId = -1;
+                  pendingOutput = "";
+                  liveTranslateQueue.clear();
+                  updateButtons();
               }
 
               ArrayList<String> splitTextToBlocks(String text) {
@@ -830,12 +860,9 @@ jobs:
 
                   String srcCode = manualTopSource ? code(topLang) : code(bottomLang);
                   String tgtCode = manualTopSource ? code(bottomLang) : code(topLang);
-                  String payload = "SOURCE_LANG: " + srcCode + "
-"
-                       + "TARGET_LANG: " + tgtCode + "
-"
-                       + "TEXT:
-" + sourceText;
+                  String payload = "SOURCE_LANG: " + srcCode + "\n"
+                       + "TARGET_LANG: " + tgtCode + "\n"
+                       + "TEXT:\n" + sourceText;
 
                   if(ws == null || !connected) {
                       pendingManualText = payload;
@@ -847,6 +874,10 @@ jobs:
 
               void sendManualText(String text) {
                   topActive = manualTopSource;
+                  liveTranslateMode = false;
+                  pendingLiveBlockId = -1;
+                  liveTranslateQueue.clear();
+                  pendingOutput = "";
                   updateButtons();
                   if(responseInProgress && ws != null) {
                       try {
@@ -866,10 +897,7 @@ jobs:
                       JSONObject c = new JSONObject();
                       c.put("type", "input_text");
                       manualResponseMode = true;
-                      c.put("text", "MANUAL_FULL_WINDOW_TRANSLATION
-" + text + "
-
-Return ONLY the translated full text. Preserve paragraphs and line breaks where reasonable. Do not write SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT, TRANSLATION, markdown, quotes or explanation.");
+                      c.put("text", "MANUAL_FULL_WINDOW_TRANSLATION\n" + text + "\n\nReturn ONLY the translated full text. Preserve paragraphs and line breaks where reasonable. Do not write SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT, TRANSLATION, markdown, quotes or explanation.");
                       content.put(c);
                       item.put("content", content);
                       msg.put("item", item);
@@ -1342,19 +1370,14 @@ Return ONLY the translated full text. Preserve paragraphs and line breaks where 
               }
 
               void rebuildBlocksFromCurrentBoxes() {
-                  ArrayList<String> topParts = splitTextToBlocks(topBox.getText().toString());
-                  ArrayList<String> bottomParts = splitTextToBlocks(bottomBox.getText().toString());
-                  int count = Math.max(topParts.size(), bottomParts.size());
+                  TextBlock b = new TextBlock();
+                  b.topText = topBox.getText().toString().trim();
+                  b.bottomText = bottomBox.getText().toString().trim();
+                  b.sourceTop = manualTopSource;
+                  b.translatedOk = true;
+                  b.retryCount = 0;
                   textBlocks.clear();
-                  for(int i=0;i<count;i++) {
-                      TextBlock b = new TextBlock();
-                      b.topText = i < topParts.size() ? topParts.get(i) : "";
-                      b.bottomText = i < bottomParts.size() ? bottomParts.get(i) : "";
-                      b.translatedOk = true;
-                      b.sourceTop = manualTopSource;
-                      b.retryCount = 0;
-                      textBlocks.add(b);
-                  }
+                  textBlocks.add(b);
               }
 
               String cleanOneBlockTranslation(String out) {
@@ -1716,14 +1739,14 @@ Return ONLY the translated full text. Preserve paragraphs and line breaks where 
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V77.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V77.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V78.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V78.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V77
+          name: Fordito_V78
           path: |
             artifact/*.apk
             artifact/*.aab
