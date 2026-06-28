@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 71; versionName = "7.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 72; versionName = "7.2" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V71" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V74" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -132,6 +132,8 @@ jobs:
               String liveTranscriptBuffer = "";
               boolean liveTranslateMode = false;
               boolean liveHadTranscriptDelta = false;
+              long firstSpeechHeardAt = 0L;
+              boolean firstSpeechBlockReleased = false;
               int pendingLiveBlockId = -1;
               final ArrayDeque<Integer> liveTranslateQueue = new ArrayDeque<>();
               final HashSet<String> recentLiveBlockHashes = new HashSet<>();
@@ -151,6 +153,7 @@ jobs:
                   String bottomText = "";
                   boolean dirty = false;
                   boolean dirtyTopSource = true;
+                  boolean translatedOk = false;
                   int retryCount = 0;
               }
 
@@ -258,7 +261,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V71");
+                  TextView title = label("Fordito_V74");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -475,6 +478,11 @@ jobs:
                           b.topText = t;
                           b.bottomText = o;
                       }
+                      String srcSide = sourceIsTop ? b.topText : b.bottomText;
+                      String tgtSide = sourceIsTop ? b.bottomText : b.topText;
+                      b.dirtyTopSource = sourceIsTop;
+                      b.translatedOk = srcSide != null && srcSide.trim().length() > 0 && tgtSide != null && tgtSide.trim().length() > 0;
+                      b.dirty = !b.translatedOk;
                       textBlocks.add(b);
                   }
                   renderBlocks();
@@ -648,7 +656,9 @@ jobs:
                   String top = code(topLang);
                   String bottom = code(bottomLang);
                   return "Selected language pair is locked to exactly these two languages: TOP=" + top + ", BOTTOM=" + bottom + ". " +
-                    "Never classify, output, or translate as any third language. If the rough transcript looks like German, Arabic, Japanese, Turkish or any other language, treat it as a recognition error and resolve it only as " + top + " or " + bottom + ". " +
+                    "Only these two languages exist for this session. Never classify, output, or translate as any third language. " +
+                    "If the rough transcript looks like any language other than the selected TOP or BOTTOM language, treat it as a recognition error or background noise. " +
+                    "Resolve meaningful speech only as " + top + " or " + bottom + ". If it cannot be reasonably repaired as one of those two selected languages, output nothing for that block. " +
                     "If unsure between the two selected languages, choose the closer of " + top + " and " + bottom + "; do not invent a third option. ";
               }
 
@@ -687,6 +697,7 @@ jobs:
                     "Decide whether TEXT is TOP=" + top + " or BOTTOM=" + bottom + ". " +
                     "Return EXACTLY three lines and nothing else: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <cleaned original text> then TRANSLATION: <natural translation into the other selected language>. " +
                     "If TEXT contains third-language-looking fragments or foreign-script junk, do not preserve them; repair or ignore them using only the selected pair. " +
+                    "If TEXT is mostly not one of the two selected languages, return empty ORIGINAL and empty TRANSLATION rather than hallucinating. " +
                     "Do not merge this block with earlier or later speech. Do not invent information. " + modePrompt();
               }
 
@@ -765,6 +776,8 @@ jobs:
                   rec = null;
                   liveTranscriptBuffer = "";
                   liveHadTranscriptDelta = false;
+                  firstSpeechHeardAt = 0L;
+                  firstSpeechBlockReleased = false;
                   liveTranslateMode = false;
                   pendingLiveBlockId = -1;
                   liveTranslateQueue.clear();
@@ -789,6 +802,15 @@ jobs:
 
                       if(type.equals("response.done")) {
                           responseInProgress = false;
+                          // V74: ha egy live fordítás válasz nélkül zárult, a blokk nem számít lefordítottnak.
+                          // Megmarad pótolható/dirty állapotban, és a sor nem ragad be.
+                          if(liveTranslateMode && pendingLiveBlockId >= 0 && pendingOutput.trim().length() == 0) {
+                              int missId = pendingLiveBlockId;
+                              if(missId >= 0 && missId < textBlocks.size()) { textBlocks.get(missId).dirty = true; textBlocks.get(missId).translatedOk = false; }
+                              pendingLiveBlockId = -1;
+                              liveTranslateMode = false;
+                              runOnUiThread(() -> renderBlocksKeepView());
+                          }
                           // V55: élő fordítási sor csak akkor induljon tovább,
                           // amikor az előző response ténylegesen lezárult a szerver szerint.
                           // Különben a következő response.create könnyen "response in progress" hibára fut,
@@ -848,7 +870,7 @@ jobs:
               void manualTranslate() {
                   ArrayList<TextBlock> dirty = dirtyBlocks();
                   if(dirty.isEmpty()) {
-                      Toast.makeText(this, "Nincs módosított blokk. Javíts bele egy blokkba, utána FORDÍT.", Toast.LENGTH_LONG).show();
+                      Toast.makeText(this, "Nincs módosított vagy hiányzó fordítású blokk.", Toast.LENGTH_LONG).show();
                       return;
                   }
 
@@ -877,18 +899,29 @@ jobs:
 
               ArrayList<TextBlock> dirtyBlocks() {
                   ArrayList<TextBlock> out = new ArrayList<>();
-                  for(TextBlock b: textBlocks) if(b.dirty) out.add(b);
+                  for(TextBlock b: textBlocks) if(b.dirty || needsTranslation(b)) out.add(b);
                   return out;
               }
 
               int firstDirtyBlockId() {
                   for(int i=0;i<textBlocks.size();i++) {
                       TextBlock b = textBlocks.get(i);
-                      if(!b.dirty) continue;
+                      if(!b.dirty && !needsTranslation(b)) continue;
                       String src = b.dirtyTopSource ? b.topText : b.bottomText;
                       if(src != null && src.trim().length() > 0) return i;
                   }
                   return -1;
+              }
+
+              boolean needsTranslation(TextBlock b) {
+                  if(b == null) return false;
+                  String src = b.dirtyTopSource ? b.topText : b.bottomText;
+                  String tgt = b.dirtyTopSource ? b.bottomText : b.topText;
+                  if(src == null || src.trim().length() == 0) return false;
+                  if(tgt == null || tgt.trim().length() == 0) return true;
+                  // Egy blokk csak akkor kész, ha sikeres fordítási válasz is lezárta.
+                  // Így a FORDÍT gomb pótolja a félbemaradt vagy üres válaszú blokkokat.
+                  return !b.translatedOk;
               }
 
               String dirtyPayload(int blockId) {
@@ -948,6 +981,7 @@ jobs:
               void handleTranscriptDelta(String delta) {
                   if(delta == null || delta.length() == 0) return;
                   liveHadTranscriptDelta = true;
+                  if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = System.currentTimeMillis();
                   liveTranscriptBuffer += delta;
                   flushReadyTranscriptBlocks(false);
               }
@@ -966,6 +1000,10 @@ jobs:
               }
 
               void flushReadyTranscriptBlocks(boolean flushAll) {
+                  // V74: az első élő blokkot nem engedjük ki azonnal 1-2 bizonytalan szóból.
+                  // Ez szűri a kezdő "Microfoonprobe / Kazakhstan / UFO" jellegű félrehallást,
+                  // de nem nyúl az audiohoz és nem épít új nyelvfelismerőt.
+                  if(!firstSpeechBlockReleased && !initialSpeechGateOpen()) return;
                   while(true) {
                       String b = popReadySpeechBlock(flushAll);
                       if(b == null || b.trim().length() == 0) break;
@@ -978,9 +1016,27 @@ jobs:
                       // a kiválasztott két nyelv közül címkézi a valódi SOURCE_LANG-et,
                       // és applyLiveTranslation() a blokkot a megfelelő ablakba rendezi.
                       int id = addSourceOnlyBlock(topActive, b);
+                      firstSpeechBlockReleased = true;
                       liveTranslateQueue.add(id);
                   }
                   processNextLiveTranslation();
+              }
+
+              boolean initialSpeechGateOpen() {
+                  String s = liveTranscriptBuffer == null ? "" : liveTranscriptBuffer.trim();
+                  if(s.length() == 0) return false;
+                  int words = s.split("\\s+").length;
+                  long age = firstSpeechHeardAt > 0L ? System.currentTimeMillis() - firstSpeechHeardAt : 0L;
+
+                  // V74: az első blokkot nem engedjük át pusztán azért, mert a bizonytalan STT
+                  // tett a végére pontot. Ez fogta meg a Microfoonprobe/Kazakhstan jellegű kezdést.
+                  // Ugyanakkor ha a felhasználó tényleg csak 2-3 szót mond és utána hosszú csend van,
+                  // 5 mp után fordítjuk, nem nyeljük el.
+                  if(age >= 5000 && words >= 2) return true;
+                  if(looksLikeObviousThirdLanguageNoise(s) && words < 5) return false;
+                  if(firstHardSentenceEnd(s) >= 0 && words >= 4) return true;
+                  if(s.length() >= 55 && words >= 5) return true;
+                  return false;
               }
 
               String finalizeSpeechBlockText(String raw) {
@@ -1129,11 +1185,43 @@ jobs:
 
               String cleanTranscriptForSelectedPair(String text) {
                   if(text == null) return "";
-                  // V71 Core: only a safety text cleaner, not a language detector.
-                  // The selected app languages are Latin-script languages, so foreign-script fragments
-                  // from uncertain STT are removed before display/translation.
+                  // V74: ez továbbra sem saját nagy nyelvfelismerő. Csak biztonsági tisztítás:
+                  // idegen írásrendszeres STT-szemét nem kerülhet ki az ablakokba vagy fordításba.
                   String x = text.replaceAll("[^A-Za-z0-9\\u00C0-\\u024F\\p{Punct}\\s]", " ");
                   return x.replaceAll("\\s+", " ").trim();
+              }
+
+              boolean selectedContains(String langCode) {
+                  String lc = langCode == null ? "" : langCode.toLowerCase(Locale.ROOT);
+                  return code(topLang).equalsIgnoreCase(lc) || code(bottomLang).equalsIgnoreCase(lc);
+              }
+
+              boolean looksLikeObviousThirdLanguageNoise(String text) {
+                  if(text == null) return false;
+                  String x = text.toLowerCase(Locale.ROOT).replaceAll("[^a-záéíóöőúüűàâçèéêëîïôùûüÿñæœß\\s]", " ");
+                  x = " " + x.replaceAll("\\s+", " ").trim() + " ";
+                  // Csak nagyon tipikus, korábbi tesztekben is látott hamis kezdéseket fogunk meg.
+                  // Nem általános szótárazás, nem új nyelvdetektor.
+                  if(!selectedContains("nl") && (x.contains(" microfoon") || x.contains(" microfoonprobe") || x.contains(" foneprover"))) return true;
+                  if(!selectedContains("en") && (x.contains(" that s ") || x.contains(" that's "))) return true;
+                  if(!selectedContains("de") && (x.contains(" danke ") || x.contains(" bitte ") || x.contains(" nicht "))) return true;
+                  return false;
+              }
+
+              boolean isSelectedSourceLang(String sourceLang) {
+                  if(sourceLang == null) return false;
+                  String s = sourceLang.trim().toLowerCase(Locale.ROOT);
+                  String top = code(topLang).toLowerCase(Locale.ROOT);
+                  String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
+                  return s.equals(top) || s.equals(bottom);
+              }
+
+              boolean isStrictValidTriple(String[] trp) {
+                  if(trp == null || trp.length < 3) return false;
+                  if(!isSelectedSourceLang(trp[0])) return false;
+                  String original = trp[1] == null ? "" : cleanTranscriptForSelectedPair(trp[1]).trim();
+                  String translation = trp[2] == null ? "" : cleanTranscriptForSelectedPair(cleanOneBlockTranslation(trp[2])).trim();
+                  return original.length() > 0 && translation.length() > 0;
               }
 
               boolean sourceIsTopFromAi(String sourceLang, boolean fallback) {
@@ -1148,8 +1236,9 @@ jobs:
 
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
                   TextBlock b = new TextBlock();
-                  b.dirty = false;
+                  b.dirty = true;
                   b.dirtyTopSource = sourceIsTop;
+                  b.translatedOk = false;
                   if(sourceIsTop) b.topText = original;
                   else b.bottomText = original;
                   textBlocks.add(b);
@@ -1211,27 +1300,34 @@ jobs:
                   if(id >= 0 && id < textBlocks.size()) {
                       TextBlock b = textBlocks.get(id);
                       ArrayList<String[]> triples = parseTriples(out);
-                      if(!triples.isEmpty()) {
-                          String[] trp = triples.get(0);
-                          String sourceLang = trp[0].toUpperCase(Locale.ROOT);
-                          String original = trp[1] == null ? "" : cleanTranscriptForSelectedPair(trp[1].trim());
-                          String translation = trp[2] == null ? "" : cleanTranscriptForSelectedPair(cleanOneBlockTranslation(trp[2]));
+                      String[] trp = null;
+                      for(String[] cand: triples) {
+                          if(isStrictValidTriple(cand)) { trp = cand; break; }
+                      }
+                      if(trp != null) {
+                          String sourceLang = trp[0].trim().toUpperCase(Locale.ROOT);
+                          String original = cleanTranscriptForSelectedPair(trp[1].trim());
+                          String translation = cleanTranscriptForSelectedPair(cleanOneBlockTranslation(trp[2]));
                           boolean sourceIsTop = sourceIsTopFromAi(sourceLang, b.dirtyTopSource);
 
                           b.dirtyTopSource = sourceIsTop;
                           if(sourceIsTop) {
-                              b.topText = original.length() > 0 ? original : (b.topText != null && b.topText.length() > 0 ? b.topText : b.bottomText);
+                              b.topText = original;
                               b.bottomText = translation;
                           } else {
-                              b.bottomText = original.length() > 0 ? original : (b.bottomText != null && b.bottomText.length() > 0 ? b.bottomText : b.topText);
+                              b.bottomText = original;
                               b.topText = translation;
                           }
+                          b.translatedOk = true;
+                          b.dirty = false;
+                          b.retryCount = 0;
                           setDetectedSourceSide(sourceIsTop);
                       } else {
-                          boolean sourceIsTop = b.dirtyTopSource;
-                          String clean = cleanOneBlockTranslation(out);
-                          if(sourceIsTop) b.bottomText = clean;
-                          else b.topText = clean;
+                          // V74: live módban nincs laza fallback. Ha a modell nem ad szabályos,
+                          // kiválasztott nyelvpárba illeszkedő választ, a blokk marad újrafordítható.
+                          b.translatedOk = false;
+                          b.dirty = true;
+                          b.retryCount++;
                       }
                       renderBlocksKeepView();
                   }
@@ -1264,18 +1360,22 @@ jobs:
 
                   ArrayList<String[]> triples = parseTriples(out);
                   if(!triples.isEmpty()) {
+                      boolean any = false;
                       for(String[] trp: triples) {
-                          String sourceLang = trp[0].toUpperCase(Locale.ROOT);
+                          if(!isStrictValidTriple(trp)) continue;
+                          String sourceLang = trp[0].trim().toUpperCase(Locale.ROOT);
                           String original = cleanTranscriptForSelectedPair(trp[1]);
                           String translation = cleanTranscriptForSelectedPair(trp[2]);
                           boolean sourceIsTop = sourceIsTopFromAi(sourceLang, manualTopSource);
-                          if(original.length() > 0 || translation.length() > 0) addBlock(sourceIsTop, original, translation);
+                          addBlock(sourceIsTop, original, translation);
+                          any = true;
                       }
-                      return;
+                      if(any) return;
                   }
 
-                  // Tartalék: ha a modell mégsem címkézett formátumot ad, ne dobjuk el.
-                  if(out.trim().length() > 0) addBlock(manualTopSource, "", cleanTranscriptForSelectedPair(out.trim()));
+                  // V74: nincs laza fallback új blokkra. Címke nélküli vagy rossz nyelvű válasz
+                  // nem kerülhet be, mert ez hozta vissza korábban a káoszt.
+                  Toast.makeText(this, "Nem szabályos AI-válasz érkezett, a blokk újrafordítható.", Toast.LENGTH_SHORT).show();
               }
 
               void applyDirtyTranslation(String out) {
@@ -1294,6 +1394,7 @@ jobs:
                       TextBlock b = textBlocks.get(id);
                       if(b.dirtyTopSource) b.bottomText = tr;
                       else b.topText = tr;
+                      b.translatedOk = true;
                       b.dirty = false;
                       b.retryCount = 0;
                       renderBlocksKeepView();
@@ -1667,14 +1768,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V71.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V71.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V74.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V74.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V71
+          name: Fordito_V74
           path: |
             artifact/*.apk
             artifact/*.aab
