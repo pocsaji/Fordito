@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V68" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V70" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -92,7 +92,7 @@ jobs:
 
           cat > app/src/main/java/com/attila/forditokonzol/MainActivity.java <<'EOF'
           package com.attila.forditokonzol;
-
+          
           import android.Manifest;
           import android.app.*;
           import android.content.*;
@@ -111,7 +111,7 @@ jobs:
           import java.util.*;
           import java.util.concurrent.*;
           import okhttp3.*;
-
+          
           public class MainActivity extends Activity {
               TextView state;
               EditText topBox, bottomBox;
@@ -121,7 +121,7 @@ jobs:
               WebSocket ws;
               AudioRecord rec;
               ExecutorService audioExec = Executors.newSingleThreadExecutor();
-
+          
               boolean connected = false;
               boolean streaming = false;
               boolean topActive = true;
@@ -141,25 +141,26 @@ jobs:
               boolean programmaticChange = false;
               int topManualStart = -1;
               int bottomManualStart = -1;
-
+          
               static final int MAX_BLOCK_SENTENCES = 3;
               static final int MAX_BLOCK_CHARS = 260;
               static final int MAX_DIRTY_BLOCKS_PER_REQUEST = 1;
-
+          
               static class TextBlock {
                   String topText = "";
                   String bottomText = "";
+                  String pendingRaw = "";
                   boolean dirty = false;
                   boolean dirtyTopSource = true;
                   int retryCount = 0;
               }
-
+          
               final ArrayList<TextBlock> textBlocks = new ArrayList<>();
               final ArrayList<int[]> topRanges = new ArrayList<>();
               final ArrayList<int[]> bottomRanges = new ArrayList<>();
               boolean dirtyResponseMode = false;
               int pendingDirtyBlockId = -1;
-
+          
               String apiKey = "";
               String model = "gpt-realtime-2";
               String profile = "truck_bulk";
@@ -167,7 +168,7 @@ jobs:
               String vadMode = "high";
               String topLang = "hu";
               String bottomLang = "fr";
-
+          
               final String[][] langs = {
                   {"Automatikus","AUTO",""},
                   {"Magyar","HU","hu"},
@@ -181,12 +182,12 @@ jobs:
                   {"Szlovák","SK","sk"},
                   {"Szlovén","SL","sl"}
               };
-
+          
               final String[][] models = {
                   {"Ajánlott: GPT-Realtime-2","gpt-realtime-2"},
                   {"Fordításra: GPT-Realtime-Translate","gpt-realtime-translate"}
               };
-
+          
               final String[][] profiles = {
                   {"Általános beszélgetés","general"},
                   {"Turizmus / utazás","tourism"},
@@ -205,20 +206,20 @@ jobs:
                   {"Rendőrség","police"},
                   {"Autószerviz / gépjavítás","service"}
               };
-
+          
               final String[][] modes = {
                   {"Pontos","precise"},
                   {"Természetes","natural"},
                   {"Tolmács","interpreter"}
               };
-
+          
               final String[][] vadModes = {
                   {"Gyors","high"},
                   {"Normál","medium"},
                   {"Türelmes","low"},
                   {"Automatikus","auto"}
               };
-
+          
               @Override public void onCreate(Bundle b) {
                   super.onCreate(b);
                   sp = getSharedPreferences("settings", MODE_PRIVATE);
@@ -226,7 +227,7 @@ jobs:
                   ui();
                   reqMic();
               }
-
+          
               void load() {
                   apiKey = sp.getString("apiKey", "");
                   model = sp.getString("model", "gpt-realtime-2");
@@ -237,7 +238,7 @@ jobs:
                   bottomLang = sp.getString("bottomLang", "fr");
                   if("normal".equals(vadMode)) vadMode = "high";
               }
-
+          
               void save() {
                   sp.edit()
                     .putString("apiKey", apiKey)
@@ -249,29 +250,29 @@ jobs:
                     .putString("bottomLang", bottomLang)
                     .apply();
               }
-
+          
               void ui() {
                   LinearLayout root = new LinearLayout(this);
                   root.setOrientation(LinearLayout.VERTICAL);
                   root.setPadding(8,62,8,170);
                   root.setBackgroundColor(Color.rgb(16,19,24));
                   setContentView(root);
-
+          
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V68");
+                  TextView title = label("Fordito_V70");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
                   bar.addView(state, new LinearLayout.LayoutParams(0,42,1));
                   root.addView(bar);
-
+          
                   LinearLayout langRow = row();
                   topLangBtn = btn("FELSŐ");
                   bottomLangBtn = btn("ALSÓ");
                   langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,64,1));
                   langRow.addView(bottomLangBtn, new LinearLayout.LayoutParams(0,64,1));
                   root.addView(langRow);
-
+          
                   topBox = box("FELSŐ ABLAK — átirat / fordítás / kézi bevitel");
                   bottomBox = box("ALSÓ ABLAK — átirat / fordítás / kézi bevitel");
                   root.addView(topBox, new LinearLayout.LayoutParams(-1,0,1));
@@ -279,7 +280,7 @@ jobs:
                   divider.setBackgroundColor(Color.rgb(95,100,108));
                   root.addView(divider, new LinearLayout.LayoutParams(-1,8));
                   root.addView(bottomBox, new LinearLayout.LayoutParams(-1,0,1));
-
+          
                   LinearLayout controls = row();
                   micBtn = btn("MIKROFON");
                   translateBtn = btn("FORDÍT");
@@ -288,7 +289,7 @@ jobs:
                   controls.addView(translateBtn, new LinearLayout.LayoutParams(0,74,1));
                   controls.addView(menuBtn, new LinearLayout.LayoutParams(0,74,1));
                   root.addView(controls);
-
+          
                   topBox.setOnClickListener(v -> { manualTopSource = true; updateButtons(); });
                   bottomBox.setOnClickListener(v -> { manualTopSource = false; updateButtons(); });
                   topBox.addTextChangedListener(manualWatcher(true));
@@ -301,16 +302,16 @@ jobs:
                   translateBtn.setOnClickListener(v -> manualTranslate());
                   menuBtn.setOnClickListener(v -> menu());
                   menuBtn.setOnLongClickListener(v -> { clearBothBoxes(); return true; });
-
+          
                   updateButtons();
               }
-
+          
               LinearLayout row() {
                   LinearLayout l = new LinearLayout(this);
                   l.setOrientation(LinearLayout.HORIZONTAL);
                   return l;
               }
-
+          
               TextView label(String s) {
                   TextView t = new TextView(this);
                   t.setText(s);
@@ -318,7 +319,7 @@ jobs:
                   t.setTextSize(12);
                   return t;
               }
-
+          
               Button btn(String s) {
                   Button b = new Button(this);
                   b.setText(s);
@@ -329,7 +330,7 @@ jobs:
                   b.setPadding(4,2,4,2);
                   return b;
               }
-
+          
               EditText box(String hint) {
                   EditText e = new EditText(this);
                   e.setHint(hint);
@@ -346,7 +347,7 @@ jobs:
                   e.setPadding(14,14,14,14);
                   return e;
               }
-
+          
               TextWatcher manualWatcher(final boolean top) {
                   return new TextWatcher() {
                       public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
@@ -364,10 +365,10 @@ jobs:
                       }
                   };
               }
-
+          
               void syncEditedBoxToBlocks(boolean top, String text) {
                   ArrayList<String> parts = splitTextToBlocks(text);
-
+          
                   // A teljes ablak csak megjelenítés. A valós adat a textBlocks lista.
                   // Beillesztéskor / hosszú kézi bevitelkor újraépítjük a forrásoldali blokkokat,
                   // de az azonos helyen lévő meglévő fordításokat megtartjuk.
@@ -393,11 +394,11 @@ jobs:
                       }
                       rebuilt.add(b);
                   }
-
+          
                   textBlocks.clear();
                   textBlocks.addAll(rebuilt);
               }
-
+          
               ArrayList<String> splitTextToBlocks(String text) {
                   ArrayList<String> out = new ArrayList<>();
                   if(text == null) return out;
@@ -424,13 +425,13 @@ jobs:
                   }
                   return out;
               }
-
+          
               void addCleanBlock(ArrayList<String> out, String s) {
                   if(s == null) return;
                   String clean = s.trim();
                   if(clean.length() > 0) out.add(clean);
               }
-
+          
               void renderPeerWindow(boolean editedTop) {
                   // A szerkesztett ablakban a felhasználó éppen gépel: ahhoz nem nyúlunk,
                   // hogy ne ugorjon a kurzor. A másik ablakot viszont azonnal a blokklistából
@@ -439,7 +440,7 @@ jobs:
                   int peerScroll = peer.getScrollY();
                   int peerSel = Math.max(0, peer.getSelectionStart());
                   boolean peerHadFocus = peer.hasFocus();
-
+          
                   StringBuilder sb = new StringBuilder();
                   for(int i=0;i<textBlocks.size();i++) {
                       TextBlock b = textBlocks.get(i);
@@ -447,7 +448,7 @@ jobs:
                       sb.append(part == null ? "" : part);
                       if(i < textBlocks.size()-1) sb.append("\n\n");
                   }
-
+          
                   programmaticChange = true;
                   try {
                       peer.setText(sb.toString());
@@ -458,7 +459,7 @@ jobs:
                       programmaticChange = false;
                   }
               }
-
+          
               void addBlock(boolean sourceIsTop, String original, String translation) {
                   ArrayList<String> originals = splitTextToBlocks(original);
                   ArrayList<String> translations = splitTextToBlocks(translation);
@@ -479,15 +480,15 @@ jobs:
                   }
                   renderBlocks();
               }
-
+          
               void renderBlocks() {
                   renderBlocks(false);
               }
-
+          
               void renderBlocksKeepView() {
                   renderBlocks(true);
               }
-
+          
               void renderBlocks(boolean keepView) {
                   int topScroll = topBox.getScrollY();
                   int bottomScroll = bottomBox.getScrollY();
@@ -495,28 +496,28 @@ jobs:
                   int bottomSel = Math.max(0, bottomBox.getSelectionStart());
                   boolean topHadFocus = topBox.hasFocus();
                   boolean bottomHadFocus = bottomBox.hasFocus();
-
+          
                   StringBuilder top = new StringBuilder();
                   StringBuilder bottom = new StringBuilder();
                   topRanges.clear();
                   bottomRanges.clear();
-
+          
                   for(int i=0;i<textBlocks.size();i++) {
                       TextBlock b = textBlocks.get(i);
-
+          
                       int ts = top.length();
                       top.append(b.topText == null ? "" : b.topText);
                       int te = top.length();
                       topRanges.add(new int[]{ts, te});
                       if(i < textBlocks.size()-1) top.append("\n");
-
+          
                       int bs = bottom.length();
                       bottom.append(b.bottomText == null ? "" : b.bottomText);
                       int be = bottom.length();
                       bottomRanges.add(new int[]{bs, be});
                       if(i < textBlocks.size()-1) bottom.append("\n");
                   }
-
+          
                   programmaticChange = true;
                   try {
                       topBox.setText(top.toString());
@@ -536,29 +537,29 @@ jobs:
                       programmaticChange = false;
                   }
               }
-
+          
               void reqMic() {
                   if(Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
                       requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1001);
               }
-
+          
               boolean hasKey() {
                   return apiKey != null && apiKey.trim().startsWith("sk-");
               }
-
+          
               void start(boolean withAudio) {
                   if(!hasKey()) { showApi(); return; }
                   if(withAudio && Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reqMic(); return; }
                   if(withAudio && sessionStart == 0L) sessionStart = System.currentTimeMillis();
                   if(withAudio && System.currentTimeMillis() - sessionStart > 20L*60L*1000L) { confirm(); return; }
-
+          
                   state.setText("kapcsolódás");
                   client = new OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build();
                   Request req = new Request.Builder()
                     .url("wss://api.openai.com/v1/realtime?model=" + model)
                     .addHeader("Authorization", "Bearer " + apiKey.trim())
                     .build();
-
+          
                   ws = client.newWebSocket(req, new WebSocketListener() {
                       @Override public void onOpen(WebSocket w, Response r) {
                           connected = true;
@@ -575,15 +576,15 @@ jobs:
                               }
                           });
                       }
-
+          
                       @Override public void onMessage(WebSocket w, String s) {
                           event(s);
                       }
-
+          
                       @Override public void onFailure(WebSocket w, Throwable t, Response r) {
                           runOnUiThread(() -> handleConnectionFailure(t));
                       }
-
+          
                       @Override public void onClosed(WebSocket w, int c, String reason) {
                           connected = false;
                           runOnUiThread(() -> {
@@ -593,7 +594,7 @@ jobs:
                       }
                   });
               }
-
+          
               void sessionUpdate() {
                   try {
                       JSONObject session = new JSONObject();
@@ -601,7 +602,7 @@ jobs:
                       session.put("model", model);
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
-
+          
                       // Speech recognition: use Realtime semantic VAD, not a fixed silence timer.
                       // The client only streams PCM16 audio; the API decides semantic speech boundaries.
                       JSONObject vad = new JSONObject();
@@ -611,14 +612,14 @@ jobs:
                       // de NEM kérünk automatikus nagy válaszblokkot az audio végén.
                       // A fordítás a beérkező transcript-delta szövegblokkokból indul.
                       vad.put("create_response", false);
-
+          
                       JSONObject input = new JSONObject();
                       JSONObject format = new JSONObject();
                       format.put("type", "audio/pcm");
                       format.put("rate", 24000);
                       input.put("format", format);
                       input.put("turn_detection", vad);
-
+          
                       JSONObject tr = new JSONObject();
                       tr.put("model", "gpt-realtime-whisper");
                       // V60: Realtime transcription nem támogat prompt paramétert ezen az endpointon.
@@ -629,12 +630,12 @@ jobs:
                       // döntjük el, hogy a két kiválasztott nyelv közül melyik oldal a forrás.
                       tr.put("delay", "low");
                       input.put("transcription", tr);
-
+          
                       JSONObject audio = new JSONObject();
                       audio.put("input", input);
-
+          
                       session.put("audio", audio);
-
+          
                       JSONObject evt = new JSONObject();
                       evt.put("type", "session.update");
                       evt.put("session", session);
@@ -643,80 +644,62 @@ jobs:
                       append("\n[session hiba] " + e.getMessage());
                   }
               }
-
-              String sttPairPrompt() {
+          
+              String pairRule() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
-                  return "The spoken audio is only in one of these two selected languages: " + top + " or " + bottom + ". " +
-                    "Do not detect or transcribe any third language. If a word is unclear, choose the closest plausible word from " + top + " or " + bottom + ". " +
-                    "The speaker may switch between the two selected languages during the same session. Preserve the actual selected-language words; do not force " + bottom + " speech into " + top + " or force " + top + " speech into " + bottom + ".";
+                  return "Selected language pair: TOP=" + top + ", BOTTOM=" + bottom + ". " +
+                    "Only these two selected languages are valid. Never choose, transcribe, translate or label any third language. " +
+                    "If the audio/text is unclear, interpret it as the closest plausible speech in TOP or BOTTOM only, or output nothing if it is not meaningful human speech. ";
               }
-
+          
               String instructions() {
-                  String top = code(topLang);
-                  String bottom = code(bottomLang);
-                  return "You are a live interpreter. Output text only. No explanations. " +
-                    "Work ONLY with these two selected languages: " + top + " and " + bottom + ". " +
-                    "The input is raw live speech audio. It may be fragmented, noisy, badly punctuated or contain obvious recognition mistakes. " +
-                    "Translate only what was very likely spoken by a human. Do not turn background noise, engine hum, wind, radio, clicks, breathing or uncertain sound into words. " +
-                    "If you are not confident that meaningful human speech is present, output nothing and wait for the next audio window. " +
-                    "Never narrate the situation, never comment on noise, and never write phrases such as 'noise is heard' unless those words were actually spoken. " +
-                    "You decide the natural thought boundaries and clean only clear recognition errors without inventing facts. " +
-                    "Detect whether the current input is " + top + " or " + bottom + ". " +
-                    "If the input is " + top + ", translate to " + bottom + ". If the input is " + bottom + ", translate to " + top + ". " +
-                    "If the current audio window is not meaningful enough yet, output nothing. " +
-                    "Do not wait for a long monologue. Treat every semantically complete sentence, short clause, numbered item, or list item as a finished thought. " +
-                    "Examples: 'microphone test one' is one complete item; 'microphone test two' is the next complete item. A long counting/list sequence must be returned as many separate items, not as one paragraph. " +
-                    "Keep each ORIGINAL item short: preferably 1 sentence or one list item, maximum about 12 to 18 words. If the speaker continues for a long time, split the speech into multiple SOURCE_LANG / ORIGINAL / TRANSLATION items instead of one large paragraph. " +
-                    "For every completed thought, output exactly three lines in this format: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <clean source transcript> then TRANSLATION: <natural translation into the other selected language>. " +
+                  return "You are a live two-way interpreter. Output text only. No explanations. " +
+                    pairRule() +
+                    "For each short completed thought, decide whether the source is TOP or BOTTOM, clean only obvious recognition noise, and translate to the other selected language. " +
+                    "Do not turn background noise, engine hum, wind, radio, clicks or breathing into words. " +
+                    "Do not wait for a long monologue: handle short sentences, clauses, numbers and list items as separate blocks. " +
+                    "Use exactly this format for each block: SOURCE_LANG: <TOP or BOTTOM code> then ORIGINAL: <clean source text> then TRANSLATION: <translation>. " +
                     "Conversation profile: " + profilePrompt() + " " +
                     "Translation mode: " + modePrompt() + " " +
-                    "Do not invent missing information. Do not add details that were not said. " +
-                    "The translation must be grammatically natural in the target language. Keep the output readable on a phone screen.";
+                    "Do not invent missing information.";
               }
-
+          
               String manualBlockInstructions() {
-                  String top = code(topLang);
-                  String bottom = code(bottomLang);
                   return "You are a translation engine for one edited text block. " +
-                    "The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. " +
-                    "Translate TEXT from SOURCE_LANG to TARGET_LANG. " +
-                    "The selected languages are " + top + " and " + bottom + ". " +
-                    "Return ONLY the translated text. " +
-                    "Never include labels such as SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT or TRANSLATION. " +
-                    "No markdown, no quotes, no explanation. " +
-                    "Keep meaning, context and tone. " + modePrompt();
+                    pairRule() +
+                    "The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. Translate TEXT from SOURCE_LANG to TARGET_LANG. " +
+                    "Return ONLY the translated text. No labels, no markdown, no quotes, no explanation. " +
+                    modePrompt();
               }
-
-              String liveBlockInstructions(boolean sourceIsTop) {
-                  String top = code(topLang);
-                  String bottom = code(bottomLang);
-                  return "You are a live interpreter for one already-transcribed speech block. " +
-                    "Only these two languages are allowed: " + top + " and " + bottom + ". " +
-                    "First decide whether TEXT is mostly " + top + " or mostly " + bottom + ". " +
-                    "If it is " + top + ", translate to " + bottom + ". If it is " + bottom + ", translate to " + top + ". " +
-                    "Do not classify TEXT as any third language. Do not force " + bottom + " speech into " + top + ", and do not force " + top + " speech into " + bottom + ". " +
-                    "Return EXACTLY three lines and nothing else: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <cleaned original text in the detected selected language> then TRANSLATION: <natural translation into the other selected language>. " +
-                    "Keep the wording natural and concise. Do not merge this block with earlier or later speech. Do not invent missing information. " + modePrompt();
+          
+              String liveBlockInstructions(boolean ignoredSourceIsTop) {
+                  return "You are the single source of truth for live block classification and translation. " +
+                    pairRule() +
+                    "The user message contains a raw transcript block. It may have recognition mistakes. " +
+                    "First decide if it is TOP or BOTTOM. You must choose only TOP or BOTTOM, never a third language. " +
+                    "Clean obvious recognition errors only when the intended selected-language word is clear. Do not invent. " +
+                    "If the text is mostly noise or impossible to understand, return exactly: SOURCE_LANG: NONE then ORIGINAL: then TRANSLATION: " +
+                    "Otherwise return EXACTLY three lines and nothing else: SOURCE_LANG: <TOP or BOTTOM code> then ORIGINAL: <cleaned original> then TRANSLATION: <natural translation into the other selected language>. " +
+                    "Keep the block short and do not merge it with earlier or later speech. " + modePrompt();
               }
-
-
+          
               String modePrompt() {
                   if(mode.equals("precise")) return "Precise mode: stay close to the meaning, do not expand, but always use correct natural grammar.";
                   if(mode.equals("interpreter")) return "Interpreter mode: use context strongly, make the translation sound like a human interpreter, but do not invent facts.";
                   return "Natural mode: translate meaning naturally and fluently, with light correction only.";
               }
-
+          
               void audioLoop() {
                   int sr = 24000;
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4096);
-
+          
                   rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
                   streaming = true;
                   rec.startRecording();
                   updateButtons();
-
+          
                   audioExec.submit(() -> {
                       byte[] buf = new byte[bs];
                       while(streaming && connected && ws != null && rec != null) {
@@ -733,10 +716,10 @@ jobs:
                       }
                   });
               }
-
+          
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
-
+          
                   // Dirty blokk fordításnál a hiba nem kerülhet az ablakba.
                   // A blokk dirty marad, így később is újrafordítható.
                   if(dirtyResponseMode || pendingDirtyBlockId >= 0) {
@@ -763,12 +746,12 @@ jobs:
                           }
                       }
                   }
-
+          
                   // Normál beszéd/élő fordításnál se írjunk hibaüzenetet a fordítási ablakba.
                   Toast.makeText(this, "Kapcsolat hiba: " + msg, Toast.LENGTH_LONG).show();
                   stop();
               }
-
+          
               void stop() {
                   streaming = false;
                   connected = false;
@@ -788,16 +771,16 @@ jobs:
                       updateButtons();
                   });
               }
-
+          
               void event(String s) {
                   try {
                       JSONObject o = new JSONObject(s);
                       String type = o.optString("type", "");
-
+          
                       if(type.equals("response.created")) {
                           responseInProgress = true;
                       }
-
+          
                       if(type.equals("response.done")) {
                           responseInProgress = false;
                           // V55: élő fordítási sor csak akkor induljon tovább,
@@ -808,28 +791,28 @@ jobs:
                               runOnUiThread(() -> processNextLiveTranslation());
                           }
                       }
-
+          
                       if(type.equals("conversation.item.input_audio_transcription.delta")) {
                           String d = o.optString("delta", "");
                           if(!d.isEmpty()) runOnUiThread(() -> handleTranscriptDelta(d));
                       }
-
+          
                       if(type.equals("conversation.item.input_audio_transcription.completed")) {
                           String tr = o.optString("transcript", "");
                           if(!tr.isEmpty()) runOnUiThread(() -> handleTranscriptCompleted(tr));
                       }
-
+          
                       if(type.equals("response.text.delta") || type.equals("response.output_text.delta")) {
                           String d = o.optString("delta", "");
                           if(!d.isEmpty()) pendingOutput += d;
                       }
-
+          
                       if(type.equals("response.output_text.done") || type.equals("response.text.done") || type.equals("response.done")) {
                           String out = pendingOutput.trim();
                           pendingOutput = "";
                           if(!out.isEmpty()) runOnUiThread(() -> routeAiOutput(out));
                       }
-
+          
                       if(type.equals("error")) {
                           JSONObject er = o.optJSONObject("error");
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
@@ -855,28 +838,28 @@ jobs:
                       runOnUiThread(() -> append("\n[event hiba] " + e.getMessage()));
                   }
               }
-
+          
               void manualTranslate() {
                   ArrayList<TextBlock> dirty = dirtyBlocks();
                   if(dirty.isEmpty()) {
                       Toast.makeText(this, "Nincs módosított blokk. Javíts bele egy blokkba, utána FORDÍT.", Toast.LENGTH_LONG).show();
                       return;
                   }
-
+          
                   EditText source = manualTopSource ? topBox : bottomBox;
                   source.clearFocus();
                   try {
                       InputMethodManager imm = (InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
                       imm.hideSoftInputFromWindow(source.getWindowToken(), 0);
                   } catch(Exception ignored) {}
-
+          
                   if(!hasKey()) { showApi(); return; }
-
+          
                   int blockId = firstDirtyBlockId();
                   if(blockId < 0) return;
                   String payload = dirtyPayload(blockId);
                   if(payload.trim().isEmpty()) return;
-
+          
                   if(ws == null || !connected) {
                       pendingDirtyBlockId = blockId;
                       pendingManualText = payload;
@@ -885,13 +868,13 @@ jobs:
                       sendManualText(payload, blockId);
                   }
               }
-
+          
               ArrayList<TextBlock> dirtyBlocks() {
                   ArrayList<TextBlock> out = new ArrayList<>();
                   for(TextBlock b: textBlocks) if(b.dirty) out.add(b);
                   return out;
               }
-
+          
               int firstDirtyBlockId() {
                   for(int i=0;i<textBlocks.size();i++) {
                       TextBlock b = textBlocks.get(i);
@@ -901,7 +884,7 @@ jobs:
                   }
                   return -1;
               }
-
+          
               String dirtyPayload(int blockId) {
                   if(blockId < 0 || blockId >= textBlocks.size()) return "";
                   TextBlock b = textBlocks.get(blockId);
@@ -913,7 +896,7 @@ jobs:
                        + "TARGET_LANG: " + tgtCode + "\n"
                        + "TEXT:\n" + src.trim();
               }
-
+          
               void sendManualText(String text, int blockId) {
                   topActive = manualTopSource;
                   updateButtons();
@@ -942,7 +925,7 @@ jobs:
                       item.put("content", content);
                       msg.put("item", item);
                       ws.send(msg.toString());
-
+          
                       JSONObject resp = new JSONObject();
                       resp.put("type", "response.create");
                       JSONObject response = new JSONObject();
@@ -954,15 +937,15 @@ jobs:
                       Toast.makeText(this, "Kézi fordítás hiba, blokk később újrafordítható.", Toast.LENGTH_LONG).show();
                   }
               }
-
-
+          
+          
               void handleTranscriptDelta(String delta) {
                   if(delta == null || delta.length() == 0) return;
                   liveHadTranscriptDelta = true;
                   liveTranscriptBuffer += delta;
                   flushReadyTranscriptBlocks(false);
               }
-
+          
               void handleTranscriptCompleted(String transcript) {
                   // V51 duplázás-javítás:
                   // A completed esemény sokszor ugyanazt a teljes mondatot küldi újra,
@@ -975,7 +958,7 @@ jobs:
                   flushReadyTranscriptBlocks(true);
                   liveHadTranscriptDelta = false;
               }
-
+          
               void flushReadyTranscriptBlocks(boolean flushAll) {
                   while(true) {
                       String b = popReadySpeechBlock(flushAll);
@@ -984,16 +967,17 @@ jobs:
                       b = finalizeSpeechBlockText(b);
                       if(b.length() == 0) continue;
                       if(!markLiveBlockQueued(b)) continue;
-                      // V68: nem a helyi/fókusz heurisztika dönti el véglegesen a forrásoldalt.
-                      // A blokk ideiglenesen az utolsó aktív oldalra kerül, majd a fordító AI
-                      // a kiválasztott két nyelv közül címkézi a valódi SOURCE_LANG-et,
-                      // és applyLiveTranslation() a blokkot a megfelelő ablakba rendezi.
-                      int id = addSourceOnlyBlock(topActive, b);
+          
+                      // V70 Core: a nyers STT-t nem tekintjük végleges igazságnak, ezért nem írjuk ki azonnal.
+                      // Az AI egyetlen központi live-block válaszban dönti el a forrásoldalt és adja vissza
+                      // a tisztított eredetit + fordítást. Így nem kerül ki a képernyőre japán/arab/egyéb
+                      // félrefelismerés addig, amíg a kiválasztott nyelvpár szerinti ellenőrzés meg nem történt.
+                      int id = addPendingLiveBlock(b);
                       liveTranslateQueue.add(id);
                   }
                   processNextLiveTranslation();
               }
-
+          
               String finalizeSpeechBlockText(String raw) {
                   if(raw == null) return "";
                   String t = raw.trim().replaceAll("\\s+", " ");
@@ -1003,7 +987,7 @@ jobs:
                   if(last == ',' || last == ';' || last == ':') t = t.substring(0, t.length() - 1).trim() + ".";
                   return t;
               }
-
+          
               boolean markLiveBlockQueued(String block) {
                   String h = normalizeLiveBlockHash(block);
                   if(h.length() < 3) return false;
@@ -1016,33 +1000,33 @@ jobs:
                   }
                   return true;
               }
-
+          
               String normalizeLiveBlockHash(String block) {
                   if(block == null) return "";
                   return block.toLowerCase(Locale.ROOT)
                           .replaceAll("[\\p{Punct}\\s]+", " ")
                           .trim();
               }
-
+          
               String popReadySpeechBlock(boolean flushAll) {
                   String s = liveTranscriptBuffer == null ? "" : liveTranscriptBuffer;
                   if(s.trim().length() == 0) { liveTranscriptBuffer = ""; return null; }
-
+          
                   int cut = firstHardSentenceEnd(s);
-
+          
                   // V52: kizárólag szöveg-alapú, nyelvi blokkzárás.
                   // Nem időalapú, nem hangerőalapú, nem saját VAD.
                   // Ha nincs végleges írásjel, hosszú élő beszédnél természetes gondolathatárt keresünk.
                   if(cut < 0) cut = smartLinguisticCut(s);
-
+          
                   if(cut < 0 && flushAll) cut = s.length();
                   if(cut < 0) return null;
-
+          
                   String out = s.substring(0, cut).trim();
                   liveTranscriptBuffer = s.substring(cut).trim();
                   return out;
               }
-
+          
               int firstHardSentenceEnd(String s) {
                   for(int i=0;i<s.length();i++) {
                       char ch = s.charAt(i);
@@ -1050,26 +1034,26 @@ jobs:
                   }
                   return -1;
               }
-
+          
               int smartLinguisticCut(String s) {
                   int len = s.length();
                   if(len < 105) return -1;
-
+          
                   String lower = s.toLowerCase(Locale.ROOT);
                   int preferredEnd = Math.min(len, 220);
                   int preferredStart = Math.min(len, 95);
-
+          
                   // V56: V55 alap, de kevésbé engedékeny hosszú blokkoknál.
                   // Nem audio, nem VAD, nem időzítő. Csak a már beérkezett szöveg stabil elejét vágjuk le,
                   // hogy hosszú folyamatos beszédnél se legyen egyetlen óriás blokk.
-
+          
                   // 1) Erős gondolatváltók. Itt az előző rész általában önállóan is érthető.
                   int cut = lastConnectorCut(lower, preferredStart, preferredEnd, new String[]{
                           ", de ", ", viszont ", ", hanem ", ", tehát ", ", ezért ",
                           ", aztán ", ", majd ", ", utána ", "; ", ": ", " - "
                   });
                   if(cut > 0) return cut;
-
+          
                   // 2) Feltételes / következő gondolat kezdete. V52-höz képest kicsit bátrabb,
                   // mert a beszélt nyelvben sokszor nincs pont, csak új gondolat kezdődik.
                   cut = lastConnectorCut(lower, 115, preferredEnd, new String[]{
@@ -1077,12 +1061,12 @@ jobs:
                           ", ahol ", ", amíg ", ", miközben ", ", vagy ", ", illetve "
                   });
                   if(cut > 0) return cut;
-
+          
                   // 3) Felsorolás vagy hosszú mellékmondat. Vágás vessző után, de csak akkor,
                   // ha már van érdemi hosszúságú, önmagában is olvasható blokk.
                   cut = lastCommaCut(s, 115, Math.min(len, 205));
                   if(cut > 0) return cut;
-
+          
                   // 4) Ha nincs vessző, de már hosszú a blokk, természetes kötőszavaknál is vágunk.
                   // Ez javítja a hosszú folyamatos monológokat, de továbbra sem időalapú.
                   cut = lastSoftWordCut(lower, 145, Math.min(len, 220), new String[]{
@@ -1091,7 +1075,7 @@ jobs:
                           " mindenhol ", " szinte ", " na most ", " pedig "
                   });
                   if(cut > 0) return cut;
-
+          
                   // 5) Stabil prefix vágás: ha a beszéd hosszúra nő és nincs biztos írásjel,
                   // a puffer elejét lezárjuk szóhatáron. A maradék a pufferben marad tovább épülni.
                   // Ez szöveg-alapú biztonsági szelep, nem másodperc- vagy szünetalapú döntés.
@@ -1099,10 +1083,10 @@ jobs:
                       int spc = s.lastIndexOf(' ', Math.min(len, 200));
                       if(spc >= 145) return spc + 1;
                   }
-
+          
                   return -1;
               }
-
+          
               int lastConnectorCut(String lower, int minPos, int maxPos, String[] connectors) {
                   int best = -1;
                   int end = Math.min(lower.length(), maxPos);
@@ -1113,14 +1097,14 @@ jobs:
                   if(best < 0) return -1;
                   return best + 1; // a vessző/írásjel az előző blokk végén marad
               }
-
+          
               int lastCommaCut(String s, int minPos, int maxPos) {
                   int end = Math.min(s.length(), maxPos);
                   int pos = s.lastIndexOf(',', end);
                   if(pos >= minPos) return pos + 1;
                   return -1;
               }
-
+          
               int lastSoftWordCut(String lower, int minPos, int maxPos, String[] words) {
                   int best = -1;
                   int end = Math.min(lower.length(), maxPos);
@@ -1131,13 +1115,13 @@ jobs:
                   if(best < 0) return -1;
                   return best + 1;
               }
-
+          
               void setDetectedSourceSide(boolean sourceIsTop) {
                   topActive = sourceIsTop;
                   manualTopSource = sourceIsTop;
                   updateButtons();
               }
-
+          
               String cleanTranscriptForSelectedPair(String text) {
                   if(text == null) return "";
                   // V60: ha az automatikus STT mégis harmadik írásrendszert szúr be,
@@ -1146,88 +1130,16 @@ jobs:
                   String x = text.replaceAll("[^A-Za-z0-9\\u00C0-\\u024F\\p{Punct}\\s]", " ");
                   return x.replaceAll("\\s+", " ").trim();
               }
-
-              boolean detectSourceIsTop(String text) {
-                  int topScore = languageScore(text, topLang);
-                  int bottomScore = languageScore(text, bottomLang);
-
-                  // V60: nem a fókusz dönt. A fókusz csak tartalék, ha tényleg nincs nyelvi jel.
-                  // Különösen fontos mikrofon közbeni nyelvváltásnál.
-                  if(topScore >= bottomScore + 2) return true;
-                  if(bottomScore >= topScore + 2) return false;
-
-                  boolean topStrong = strongLanguageSignal(text, topLang);
-                  boolean bottomStrong = strongLanguageSignal(text, bottomLang);
-                  if(topStrong && !bottomStrong) return true;
-                  if(bottomStrong && !topStrong) return false;
-
-                  return topActive;
+          
+              int addPendingLiveBlock(String raw) {
+                  TextBlock b = new TextBlock();
+                  b.pendingRaw = raw == null ? "" : raw.trim();
+                  b.dirty = false;
+                  b.dirtyTopSource = topActive;
+                  textBlocks.add(b);
+                  return textBlocks.size() - 1;
               }
-
-              boolean strongLanguageSignal(String text, String lang) {
-                  if(text == null || lang == null) return false;
-                  String l = text.toLowerCase(Locale.ROOT);
-                  if(lang.equals("hu")) return l.matches(".*[áéíóöőúüű].*") || containsAnyLoose(l, new String[]{"hogy", "magyar", "kérem", "köszönöm", "szeretnék", "jó napot", "nem", "igen", "akkor"});
-                  if(lang.equals("fr")) return l.matches(".*[àâçéèêëîïôùûüÿœ].*") || containsAnyLoose(l, new String[]{"bonjour", "monsieur", "messieur", "messieurs", "madame", "merci", "pardon", "voudrais", "voudrai", "s'il", "sil vous", "sivou", "plait", "plaît", "cafe", "café", "baguette", "croissant"});
-                  if(lang.equals("en")) return containsAnyLoose(l, new String[]{"hello", "please", "thank", "sorry", "good morning", "i would", "you", "the"});
-                  if(lang.equals("de")) return l.matches(".*[äöüß].*") || containsAnyLoose(l, new String[]{"guten", "bitte", "danke", "herr", "frau", "nicht", "ich"});
-                  if(lang.equals("it")) return containsAnyLoose(l, new String[]{"buongiorno", "grazie", "prego", "signore", "signora", "vorrei", "per favore"});
-                  if(lang.equals("es")) return l.matches(".*[áéíñóúü].*") || containsAnyLoose(l, new String[]{"buenos", "gracias", "señor", "señora", "por favor", "quisiera"});
-                  return false;
-              }
-
-              int languageScore(String text, String lang) {
-                  if(text == null || lang == null) return 0;
-                  String raw = text.toLowerCase(Locale.ROOT);
-                  String t = " " + raw.replaceAll("[^\\p{L}]+", " ") + " ";
-                  int score = 0;
-                  if(lang.equals("hu")) {
-                      score += countAny(t, new String[]{" a "," az "," és "," hogy "," nem "," igen "," neked "," van "," vagy "," akkor "," ezt "," azt "," utcán "," hölgy "," uram "," kérem "," köszönöm "," szeretné "," szeretnék "," találok "," név "," cím "," magyar "," nyelv "," próba "});
-                      score += countLoose(raw, new String[]{"jó napot", "mikrofon próba", "ezt elejtette"}) * 3;
-                      score += accentScore(text, "áéíóöőúüű");
-                  } else if(lang.equals("fr")) {
-                      score += countAny(t, new String[]{" le "," la "," les "," un "," une "," des "," de "," du "," je "," tu "," vous "," il "," elle "," nous "," ce "," ça "," est "," pas "," pour "," avec "," monsieur "," messieur "," messieurs "," madame "," oui "," merci "," bonjour "," bonsoir "," pardon "," voudrais "," voudrai "," sil "," plaît "," plait "," café "," baguette "," croissant "});
-                      score += countLoose(raw, new String[]{"bonjour", "monsieur", "messieur", "s il vous", "s'il vous", "sivou", "sivous", "je voud", "jevoud", "voudrais", "voudrai"}) * 4;
-                      score += accentScore(text, "àâçéèêëîïôùûüÿœ");
-                  } else if(lang.equals("en")) {
-                      score += countAny(t, new String[]{" the "," a "," an "," and "," or "," if "," you "," i "," it "," is "," are "," was "," this "," that "," have "," has "," sir "," madam "," please "," thank "," sorry "," hello "});
-                  } else if(lang.equals("de")) {
-                      score += countAny(t, new String[]{" der "," die "," das "," ein "," eine "," und "," oder "," ich "," sie "," du "," ist "," nicht "," bitte "," danke "," herr "," frau "," guten "});
-                      score += accentScore(text, "äöüß");
-                  } else if(lang.equals("it")) {
-                      score += countAny(t, new String[]{" il "," lo "," la "," un "," una "," e "," che "," non "," per "," con "," sono "," signore "," signora "," grazie "," prego "," buongiorno "});
-                      score += accentScore(text, "àèéìòù");
-                  } else if(lang.equals("es")) {
-                      score += countAny(t, new String[]{" el "," la "," los "," las "," un "," una "," y "," que "," no "," por "," con "," usted "," señor "," señora "," gracias "," por favor "});
-                      score += accentScore(text, "áéíñóúü");
-                  }
-                  return score;
-              }
-
-              int countLoose(String text, String[] parts) {
-                  int score = 0;
-                  for(String p: parts) if(text.contains(p)) score++;
-                  return score;
-              }
-
-              boolean containsAnyLoose(String text, String[] parts) {
-                  for(String p: parts) if(text.contains(p)) return true;
-                  return false;
-              }
-
-              int countAny(String text, String[] words) {
-                  int score = 0;
-                  for(String w: words) if(text.contains(w)) score += 2;
-                  return score;
-              }
-
-              int accentScore(String text, String chars) {
-                  int score = 0;
-                  String lower = text.toLowerCase(Locale.ROOT);
-                  for(int i=0;i<lower.length();i++) if(chars.indexOf(lower.charAt(i)) >= 0) score++;
-                  return Math.min(score, 6);
-              }
-
+          
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
                   TextBlock b = new TextBlock();
                   b.dirty = false;
@@ -1238,7 +1150,7 @@ jobs:
                   renderBlocksKeepView();
                   return textBlocks.size() - 1;
               }
-
+          
               void processNextLiveTranslation() {
                   // V49: a live fordítást nem szabad a globális responseInProgress flag miatt megállítani.
                   // A Realtime transcription közben nem fordítási válasz, ezért ez a flag itt könnyen beragadhat.
@@ -1252,13 +1164,13 @@ jobs:
                   if(id < 0 || id >= textBlocks.size()) { processNextLiveTranslation(); return; }
                   TextBlock b = textBlocks.get(id);
                   boolean sourceIsTop = b.dirtyTopSource;
-                  String src = sourceIsTop ? b.topText : b.bottomText;
+                  String src = (b.pendingRaw != null && b.pendingRaw.trim().length() > 0) ? b.pendingRaw : (sourceIsTop ? b.topText : b.bottomText);
                   if(src == null || src.trim().length() == 0) { processNextLiveTranslation(); return; }
-
+          
                   try {
                       pendingLiveBlockId = id;
                       liveTranslateMode = true;
-
+          
                       JSONObject msg = new JSONObject();
                       msg.put("type", "conversation.item.create");
                       JSONObject item = new JSONObject();
@@ -1274,7 +1186,7 @@ jobs:
                       item.put("content", content);
                       msg.put("item", item);
                       ws.send(msg.toString());
-
+          
                       JSONObject resp = new JSONObject();
                       resp.put("type", "response.create");
                       JSONObject response = new JSONObject();
@@ -1287,7 +1199,7 @@ jobs:
                       pendingLiveBlockId = -1;
                   }
               }
-
+          
               void applyLiveTranslation(String out) {
                   int id = pendingLiveBlockId;
                   if(id >= 0 && id < textBlocks.size()) {
@@ -1300,8 +1212,16 @@ jobs:
                           String translation = trp[2] == null ? "" : cleanTranscriptForSelectedPair(cleanOneBlockTranslation(trp[2]));
                           boolean sourceIsTop = sourceLang.contains(code(topLang));
                           boolean sourceIsBottom = sourceLang.contains(code(bottomLang));
+                          if(sourceLang.contains("NONE")) {
+                              textBlocks.remove(id);
+                              pendingLiveBlockId = -1;
+                              liveTranslateMode = false;
+                              renderBlocksKeepView();
+                              return;
+                          }
                           if(!sourceIsTop && !sourceIsBottom) sourceIsTop = b.dirtyTopSource;
-
+          
+                          b.pendingRaw = "";
                           b.dirtyTopSource = sourceIsTop;
                           if(sourceIsTop) {
                               b.topText = original.length() > 0 ? original : (b.topText != null && b.topText.length() > 0 ? b.topText : b.bottomText);
@@ -1314,6 +1234,7 @@ jobs:
                       } else {
                           boolean sourceIsTop = b.dirtyTopSource;
                           String clean = cleanOneBlockTranslation(out);
+                          b.pendingRaw = "";
                           if(sourceIsTop) b.bottomText = clean;
                           else b.topText = clean;
                       }
@@ -1326,7 +1247,7 @@ jobs:
                   // a szerver oldalon még lehet aktív válasz, és a következő
                   // response.create különben megakaszthatja a sort.
               }
-
+          
               void routeAiOutput(String out) {
                   // Dirty/blokk újrafordítás válasza SOHA nem lehet új blokk.
                   // Akkor is a meglévő blokkba írjuk vissza, ha a manualResponseMode valamiért közben elveszne.
@@ -1336,16 +1257,16 @@ jobs:
                       applyDirtyTranslation(out);
                       return;
                   }
-
+          
                   if(liveTranslateMode || pendingLiveBlockId >= 0) {
                       applyLiveTranslation(out);
                       return;
                   }
-
+          
                   if(manualResponseMode) {
                       manualResponseMode = false;
                   }
-
+          
                   ArrayList<String[]> triples = parseTriples(out);
                   if(!triples.isEmpty()) {
                       for(String[] trp: triples) {
@@ -1359,11 +1280,11 @@ jobs:
                       }
                       return;
                   }
-
+          
                   // Tartalék: ha a modell mégsem címkézett formátumot ad, ne dobjuk el.
                   if(out.trim().length() > 0) addBlock(manualTopSource, "", cleanTranscriptForSelectedPair(out.trim()));
               }
-
+          
               void applyDirtyTranslation(String out) {
                   try {
                       int id = pendingDirtyBlockId;
@@ -1393,19 +1314,19 @@ jobs:
                       Toast.makeText(this, "Dirty fordítás hiba, blokk később újrafordítható.", Toast.LENGTH_LONG).show();
                   }
               }
-
+          
               String cleanOneBlockTranslation(String out) {
                   if(out == null) return "";
                   String s = out.trim();
                   if(s.startsWith("```")) s = s.replace("```", "").trim();
-
+          
                   String upper = s.toUpperCase(Locale.ROOT);
                   int trPos = upper.lastIndexOf("TRANSLATION:");
                   if(trPos >= 0) {
                       s = s.substring(trPos + "TRANSLATION:".length()).trim();
                   }
                   if(s.toUpperCase(Locale.ROOT).startsWith("FORDÍTÁS:")) s = s.substring("FORDÍTÁS:".length()).trim();
-
+          
                   // Biztonsági tisztítás: ha a modell mégis címkéket adott vissza,
                   // ne írjuk be őket a fordítási ablakba.
                   StringBuilder clean = new StringBuilder();
@@ -1422,7 +1343,7 @@ jobs:
                   }
                   return cleanTranscriptForSelectedPair(clean.toString().trim());
               }
-
+          
               ArrayList<String[]> parseTriples(String out) {
                   ArrayList<String[]> list = new ArrayList<>();
                   if(out == null) return list;
@@ -1444,7 +1365,7 @@ jobs:
                   }
                   return list;
               }
-
+          
               String extractAfter(String out, String key) {
                   int i = out.indexOf(key);
                   if(i < 0) return "";
@@ -1457,7 +1378,7 @@ jobs:
                   }
                   return out.substring(start, end).trim();
               }
-
+          
               void appendTo(EditText target, String s) {
                   if(s == null || s.length() == 0) return;
                   programmaticChange = true;
@@ -1470,17 +1391,17 @@ jobs:
                       programmaticChange = false;
                   }
               }
-
+          
               void appendDelta(String s) {
                   EditText target = topActive ? bottomBox : topBox;
                   appendTo(target, s);
               }
-
+          
               void append(String s) {
                   EditText target = topActive ? bottomBox : topBox;
                   appendTo(target, s);
               }
-
+          
               void confirm() {
                   new AlertDialog.Builder(this)
                     .setTitle("Folyik még a beszélgetés?")
@@ -1489,7 +1410,7 @@ jobs:
                     .setNegativeButton("Leállítás", (d,w) -> { sessionStart = 0L; stop(); })
                     .show();
               }
-
+          
               void menu() {
                   CharSequence[] items = {
                       menuItem("OpenAI API kulcs", "", false),
@@ -1499,7 +1420,7 @@ jobs:
                       menuItem("Semantic VAD", vadLabel(), false),
                       menuItem("Ablakkezelés", "másolás / törlés", false)
                   };
-
+          
                   showCenteredMenu("Menü", items, (d,w) -> {
                       if(w==0) showApi();
                       if(w==1) chooseModel();
@@ -1510,7 +1431,7 @@ jobs:
                       updateButtons();
                   });
               }
-
+          
               void windowMenu() {
                   CharSequence[] items = {
                       menuItem("Felső ablak másolása", "felső nyelvgomb hosszú", false),
@@ -1519,7 +1440,7 @@ jobs:
                       menuItem("Alsó ablak törlése", "", false),
                       menuItem("Mindkét ablak törlése", "MENÜ hosszú", false)
                   };
-
+          
                   showCenteredMenu("Ablakkezelés", items, (d,w) -> {
                       if(w==0) copyBox(true);
                       if(w==1) copyBox(false);
@@ -1529,7 +1450,7 @@ jobs:
                       updateButtons();
                   });
               }
-
+          
               void clearTopBox() {
                   programmaticChange=true;
                   topBox.setText("");
@@ -1538,7 +1459,7 @@ jobs:
                   textBlocks.clear();
                   Toast.makeText(this, "Felső ablak törölve.", Toast.LENGTH_SHORT).show();
               }
-
+          
               void clearBottomBox() {
                   programmaticChange=true;
                   bottomBox.setText("");
@@ -1547,7 +1468,7 @@ jobs:
                   textBlocks.clear();
                   Toast.makeText(this, "Alsó ablak törölve.", Toast.LENGTH_SHORT).show();
               }
-
+          
               void clearBothBoxes() {
                   programmaticChange=true;
                   topBox.setText("");
@@ -1558,7 +1479,7 @@ jobs:
                   textBlocks.clear();
                   Toast.makeText(this, "Mindkét ablak törölve.", Toast.LENGTH_SHORT).show();
               }
-
+          
               void copyBox(boolean top) {
                   EditText source = top ? topBox : bottomBox;
                   String text = source.getText().toString();
@@ -1572,7 +1493,7 @@ jobs:
                       Toast.makeText(this, top ? "Felső ablak másolva." : "Alsó ablak másolva.", Toast.LENGTH_SHORT).show();
                   }
               }
-
+          
               CharSequence menuItem(String title, String subtitle, boolean selected) {
                   String main = title == null ? "" : title;
                   String sub = subtitle == null ? "" : subtitle;
@@ -1588,11 +1509,11 @@ jobs:
                   }
                   return spn;
               }
-
+          
               void showCenteredMenu(String title, CharSequence[] items, DialogInterface.OnClickListener listener) {
                   new AlertDialog.Builder(this).setTitle(title).setItems(items, listener).show();
               }
-
+          
               void showApi() {
                   EditText input = new EditText(this);
                   input.setSingleLine(true);
@@ -1605,14 +1526,14 @@ jobs:
                     .setNegativeButton("Mégse", null)
                     .show();
               }
-
+          
               void chooseModel() { chooseFrom("AI modell", models, model, v -> { model = v; save(); restartIfNeeded(); }); }
               void chooseProfile() { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save(); sessionUpdateIfConnected(); }); }
               void chooseMode() { chooseFrom("Fordítási mód", modes, mode, v -> { mode = v; save(); sessionUpdateIfConnected(); }); }
               void chooseVad() { chooseFrom("Semantic VAD", vadModes, vadMode, v -> { vadMode = v; save(); sessionUpdateIfConnected(); }); }
-
+          
               interface Setter { void set(String v); }
-
+          
               void chooseFrom(String title, String[][] data, String current, Setter setter) {
                   CharSequence[] labels = new CharSequence[data.length];
                   for(int i=0;i<data.length;i++) labels[i] = menuItem(data[i][0], data[i][1].equals(current) ? "kiválasztva" : "", data[i][1].equals(current));
@@ -1621,7 +1542,7 @@ jobs:
                       updateButtons();
                   });
               }
-
+          
               void chooseLang(boolean top) {
                   String current = top ? topLang : bottomLang;
                   CharSequence[] labels = new CharSequence[langs.length];
@@ -1638,18 +1559,18 @@ jobs:
                       updateButtons();
                   });
               }
-
+          
               void restartIfNeeded() {
                   if(streaming) {
                       stop();
                       new Handler().postDelayed(() -> start(true), 700);
                   }
               }
-
+          
               void sessionUpdateIfConnected() {
                   if(ws != null && connected) sessionUpdate();
               }
-
+          
               String profilePrompt() {
                   String base = "Default to natural everyday meaning. The profile is only a light terminology hint, not a forced interpretation. ";
                   if(profile.equals("truck_bulk")) return base + "If clearly relevant, prefer logistics/bulk transport terms such as loaded, unloaded, silo, weighing, site, freight, trailer, loading point and delivery point. Do not force truck meaning onto normal conversation.";
@@ -1667,23 +1588,23 @@ jobs:
                   if(profile.equals("pharmacy")) return base + "Use pharmacy, medicine, dosage and symptom terminology only when relevant.";
                   return base + "General conversation.";
               }
-
+          
               String modelLabel() { return labelOf(models, model); }
               String profileLabel() { return labelOf(profiles, profile); }
               String modeLabel() { return labelOf(modes, mode); }
               String vadLabel() { return labelOf(vadModes, vadMode); }
-
+          
               String labelOf(String[][] arr, String key) {
                   for(String[] x: arr) if(x[1].equals(key)) return x[0];
                   return key;
               }
-
+          
               String code(String code) {
                   if(code == null || code.isEmpty()) return "AUTO";
                   for(String[] l: langs) if(l[2].equals(code)) return l[1];
                   return code.toUpperCase(Locale.ROOT);
               }
-
+          
               String apiCode(String code) {
                   if(code == null || code.isEmpty() || code.equals("AUTO")) return "";
                   for(String[] l: langs) {
@@ -1692,7 +1613,7 @@ jobs:
                   }
                   return code.toLowerCase(Locale.ROOT);
               }
-
+          
               void updateButtons() {
                   micBtn.setText(streaming ? "STOP" : "MIKROFON");
                   micBtn.setBackgroundColor(streaming ? Color.rgb(30,130,70) : Color.rgb(90,50,50));
@@ -1703,12 +1624,12 @@ jobs:
                   topLangBtn.setBackgroundColor(topActive ? Color.rgb(60,95,150) : Color.rgb(55,60,70));
                   bottomLangBtn.setBackgroundColor(!topActive ? Color.rgb(60,95,150) : Color.rgb(55,60,70));
               }
-
+          
               @Override public void onPause() {
                   super.onPause();
                   if(streaming) stop();
               }
-
+          
               @Override public void onDestroy() {
                   if(streaming) stop();
                   audioExec.shutdownNow();
@@ -1753,14 +1674,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V68.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V68.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V70.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V70.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V68
+          name: Fordito_V70
           path: |
             artifact/*.apk
             artifact/*.aab
