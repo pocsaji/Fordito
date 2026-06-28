@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V61" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V62" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -258,7 +258,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V61");
+                  TextView title = label("Fordito_V62");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -691,13 +691,14 @@ jobs:
               String liveBlockInstructions(boolean sourceIsTop) {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
+                  String src = sourceIsTop ? top : bottom;
+                  String tgt = sourceIsTop ? bottom : top;
                   return "You are a live interpreter for one already-transcribed speech block. " +
-                    "Only these two languages are allowed: " + top + " and " + bottom + ". " +
-                    "First decide whether TEXT is mostly " + top + " or mostly " + bottom + ". " +
-                    "If it is " + top + ", translate to " + bottom + ". If it is " + bottom + ", translate to " + top + ". " +
-                    "Do not classify TEXT as any third language. Do not force " + bottom + " speech into " + top + ", and do not force " + top + " speech into " + bottom + ". " +
-                    "Return EXACTLY three lines and nothing else: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <cleaned original text in the detected selected language> then TRANSLATION: <natural translation into the other selected language>. " +
-                    "Keep the wording natural and concise. Do not merge this block with earlier or later speech. Do not invent missing information. " + modePrompt();
+                    "The selected language pair is " + top + " and " + bottom + ". Do not use or infer any third language. " +
+                    "SOURCE_LANG is " + src + " and TARGET_LANG is " + tgt + ". " +
+                    "Translate TEXT from SOURCE_LANG to TARGET_LANG. " +
+                    "Return ONLY the translated text. No SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT, TRANSLATION labels, no markdown, no quotes, no explanation. " +
+                    "Do not merge this block with earlier or later speech. Do not invent missing information. " + modePrompt();
               }
 
 
@@ -984,11 +985,13 @@ jobs:
                       b = finalizeSpeechBlockText(b);
                       if(b.length() == 0) continue;
                       if(!markLiveBlockQueued(b)) continue;
-                      // V61: nem a helyi/fókusz heurisztika dönti el véglegesen a forrásoldalt.
-                      // A blokk ideiglenesen az utolsó aktív oldalra kerül, majd a fordító AI
-                      // a kiválasztott két nyelv közül címkézi a valódi SOURCE_LANG-et,
-                      // és applyLiveTranslation() a blokkot a megfelelő ablakba rendezi.
-                      int id = addSourceOnlyBlock(topActive, b);
+                      // V62: a fókusz nem ragadhat az előző ablakon.
+                      // Minden lezárt transcript-blokknál újra eldöntjük, hogy a kiválasztott
+                      // KÉT nyelv közül melyik a forrás, és azonnal abba az ablakba írjuk.
+                      // Nem STT prompt, nem fix HU/FR, nem teljes új logika: csak a forrásoldal kijelölése.
+                      boolean sourceIsTopNow = detectSourceIsTop(b);
+                      setDetectedSourceSide(sourceIsTopNow);
+                      int id = addSourceOnlyBlock(sourceIsTopNow, b);
                       liveTranslateQueue.add(id);
                   }
                   processNextLiveTranslation();
@@ -1269,7 +1272,9 @@ jobs:
                       c.put("type", "input_text");
                       String topCode = code(topLang);
                       String bottomCode = code(bottomLang);
-                      c.put("text", "LIVE_PAIR_CLASSIFY_AND_TRANSLATE\nSELECTED_TOP_LANG: " + topCode + "\nSELECTED_BOTTOM_LANG: " + bottomCode + "\nTEXT:\n" + src.trim());
+                      String srcCode = sourceIsTop ? topCode : bottomCode;
+                      String tgtCode = sourceIsTop ? bottomCode : topCode;
+                      c.put("text", "LIVE_BLOCK_TRANSLATION\nSOURCE_LANG: " + srcCode + "\nTARGET_LANG: " + tgtCode + "\nTEXT:\n" + src.trim());
                       content.put(c);
                       item.put("content", content);
                       msg.put("item", item);
@@ -1292,31 +1297,15 @@ jobs:
                   int id = pendingLiveBlockId;
                   if(id >= 0 && id < textBlocks.size()) {
                       TextBlock b = textBlocks.get(id);
-                      ArrayList<String[]> triples = parseTriples(out);
-                      if(!triples.isEmpty()) {
-                          String[] trp = triples.get(0);
-                          String sourceLang = trp[0].toUpperCase(Locale.ROOT);
-                          String original = trp[1] == null ? "" : trp[1].trim();
-                          String translation = trp[2] == null ? "" : cleanOneBlockTranslation(trp[2]);
-                          boolean sourceIsTop = sourceLang.contains(code(topLang));
-                          boolean sourceIsBottom = sourceLang.contains(code(bottomLang));
-                          if(!sourceIsTop && !sourceIsBottom) sourceIsTop = b.dirtyTopSource;
+                      boolean sourceIsTop = b.dirtyTopSource;
+                      String clean = cleanOneBlockTranslation(out);
 
-                          b.dirtyTopSource = sourceIsTop;
-                          if(sourceIsTop) {
-                              b.topText = original.length() > 0 ? original : (b.topText != null && b.topText.length() > 0 ? b.topText : b.bottomText);
-                              b.bottomText = translation;
-                          } else {
-                              b.bottomText = original.length() > 0 ? original : (b.bottomText != null && b.bottomText.length() > 0 ? b.bottomText : b.topText);
-                              b.topText = translation;
-                          }
-                          setDetectedSourceSide(sourceIsTop);
-                      } else {
-                          boolean sourceIsTop = b.dirtyTopSource;
-                          String clean = cleanOneBlockTranslation(out);
-                          if(sourceIsTop) b.bottomText = clean;
-                          else b.topText = clean;
-                      }
+                      // V62: a forrásoldalt nem a régi fókusz és nem egy harmadik nyelvet kereső AI-válasz dönti el.
+                      // A blokk már a beérkező átiratnál a kiválasztott két nyelv közül lett besorolva.
+                      // Itt csak a fordítást írjuk a másik ablakba, ezért nem kerülhet vissza a francia szöveg a magyar ablakba.
+                      if(sourceIsTop) b.bottomText = clean;
+                      else b.topText = clean;
+                      setDetectedSourceSide(sourceIsTop);
                       renderBlocksKeepView();
                   }
                   pendingLiveBlockId = -1;
@@ -1326,6 +1315,7 @@ jobs:
                   // a szerver oldalon még lehet aktív válasz, és a következő
                   // response.create különben megakaszthatja a sort.
               }
+
 
               void routeAiOutput(String out) {
                   // Dirty/blokk újrafordítás válasza SOHA nem lehet új blokk.
@@ -1753,14 +1743,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V61.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V61.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V62.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V62.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V61
+          name: Fordito_V62
           path: |
             artifact/*.apk
             artifact/*.aab
