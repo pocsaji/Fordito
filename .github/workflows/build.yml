@@ -150,7 +150,6 @@ jobs:
               String pendingManualText = "";
               boolean manualResponseMode = false;
               boolean programmaticChange = false;
-                      scrollBothToBottom();
               int topManualStart = -1;
               int bottomManualStart = -1;
 
@@ -527,7 +526,6 @@ jobs:
                       peer.post(() -> peer.scrollTo(0, peerScroll));
                   } finally {
                       programmaticChange = false;
-                      scrollBothToBottom();
                   }
               }
 
@@ -605,12 +603,10 @@ jobs:
                           topBox.post(() -> topBox.scrollTo(0, topScroll));
                           bottomBox.post(() -> bottomBox.scrollTo(0, bottomScroll));
                       } else {
-                          topBox.setSelection(topBox.getText().length());
-                          bottomBox.setSelection(bottomBox.getText().length());
+                          scrollBothToBottom();
                       }
                   } finally {
                       programmaticChange = false;
-                      scrollBothToBottom();
                   }
               }
 
@@ -1513,7 +1509,6 @@ jobs:
                           else topBox.setText(tr);
                       } finally {
                           programmaticChange = false;
-                      scrollBothToBottom();
                       }
 
                       rebuildBlocksFromCurrentBoxes();
@@ -1609,7 +1604,7 @@ jobs:
                       target.setSelection(target.getText().length());
                   } finally {
                       programmaticChange = false;
-                      scrollBothToBottom();
+                      scrollBoxToBottom(target);
                   }
               }
 
@@ -1844,15 +1839,14 @@ jobs:
               void scrollBoxToBottom(final EditText box) {
                   try {
                       if(box == null) return;
-                      box.postDelayed(() -> {
+                      box.post(() -> {
                           try {
                               android.text.Layout layout = box.getLayout();
                               if(layout == null) return;
-                              int lineCount = box.getLineCount();
-                              int y = Math.max(0, layout.getLineTop(lineCount) - box.getHeight() + box.getPaddingTop() + box.getPaddingBottom());
+                              int y = Math.max(0, layout.getLineTop(box.getLineCount()) - box.getHeight() + box.getPaddingTop() + box.getPaddingBottom());
                               box.scrollTo(0, y);
                           } catch(Exception ignored) {}
-                      }, 60);
+                      });
                   } catch(Exception ignored) {}
               }
 
@@ -1871,18 +1865,25 @@ jobs:
                       if(menuBtn != null) menuBtn.setEnabled(!locked && !finalizingStop);
 
                       // V88: az ablakok élő fordítás közben is maradjanak görgethetők.
-                      // Nem tiltjuk le őket teljesen, csak szerkesztést/fókuszt nem engedünk.
+                      // A View aktív marad, csak a szerkesztést/fókuszt tiltjuk.
+                      boolean editable = !locked && !finalizingStop && manualEditMode;
+
                       if(topBox != null) {
                           topBox.setEnabled(true);
-                          topBox.setFocusable(!locked && !finalizingStop && manualEditMode);
-                          topBox.setFocusableInTouchMode(!locked && !finalizingStop && manualEditMode);
-                          topBox.setCursorVisible(!locked && !finalizingStop && manualEditMode);
+                          topBox.setFocusable(editable);
+                          topBox.setFocusableInTouchMode(editable);
+                          topBox.setCursorVisible(editable);
+                          topBox.setLongClickable(editable);
+                          topBox.setTextIsSelectable(editable);
                       }
+
                       if(bottomBox != null) {
                           bottomBox.setEnabled(true);
-                          bottomBox.setFocusable(!locked && !finalizingStop && manualEditMode);
-                          bottomBox.setFocusableInTouchMode(!locked && !finalizingStop && manualEditMode);
-                          bottomBox.setCursorVisible(!locked && !finalizingStop && manualEditMode);
+                          bottomBox.setFocusable(editable);
+                          bottomBox.setFocusableInTouchMode(editable);
+                          bottomBox.setCursorVisible(editable);
+                          bottomBox.setLongClickable(editable);
+                          bottomBox.setTextIsSelectable(editable);
                       }
 
                       styleUiState();
