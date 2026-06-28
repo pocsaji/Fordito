@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 78; versionName = "7.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 79; versionName = "7.9" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V78" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V79" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -165,7 +165,7 @@ jobs:
               String model = "gpt-realtime-2";
               String profile = "truck_bulk";
               String mode = "natural";
-              String vadMode = "high";
+              String vadMode = "low";
               String topLang = "hu";
               String bottomLang = "fr";
 
@@ -233,7 +233,7 @@ jobs:
                   model = sp.getString("model", "gpt-realtime-2");
                   profile = sp.getString("profile", "truck_bulk");
                   mode = sp.getString("mode", "natural");
-                  vadMode = sp.getString("vadMode", "high");
+                  vadMode = sp.getString("vadMode", "low");
                   topLang = sp.getString("topLang", "hu");
                   bottomLang = sp.getString("bottomLang", "fr");
                   if("normal".equals(vadMode)) vadMode = "high";
@@ -259,7 +259,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V78");
+                  TextView title = label("Fordito_V79");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -371,7 +371,7 @@ jobs:
                   manualTopSource = top;
                   topActive = top;
 
-                  // V78: kézi szerkesztés és live mikrofon nem futhat egyszerre.
+                  // V79: kézi szerkesztés és live mikrofon nem futhat egyszerre.
                   // Ha a felhasználó bármelyik ablakba kattint vagy írni kezd,
                   // a mikrofon és minden függő live fordítás leáll. Így a kézi
                   // teljes ablakos fordításba nem írhat vissza későn érkező live válasz.
@@ -1739,14 +1739,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V78.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V78.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V79.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V79.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V78
+          name: Fordito_V79
           path: |
             artifact/*.apk
             artifact/*.aab
