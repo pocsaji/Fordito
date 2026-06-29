@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 97; versionName = "9.7" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 98; versionName = "9.8" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V97" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V98" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -192,7 +192,7 @@ jobs:
               String profile = "truck_bulk";
               String mode = "natural";
               String vadMode = "low";
-              String delayMode = "low";
+              String delayMode = "high";
               String topLang = "hu";
               String bottomLang = "fr";
 
@@ -262,11 +262,11 @@ jobs:
                   profile = sp.getString("profile", "truck_bulk");
                   mode = sp.getString("mode", "natural");
                   vadMode = sp.getString("vadMode", "low");
-                  delayMode = sp.getString("delayMode", "low");
+                  delayMode = sp.getString("delayMode", "high");
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   mirrorBottomMode = sp.getBoolean("mirrorBottomMode", false);
-                  topLang = sp.getString("topLang", "hu");
-                  bottomLang = sp.getString("bottomLang", "fr");
+                  topLang = sp.getString("topLang", "fr");
+                  bottomLang = sp.getString("bottomLang", "hu");
                   if("normal".equals(vadMode)) vadMode = "high";
               }
 
@@ -277,7 +277,6 @@ jobs:
                     .putString("profile", profile)
                     .putString("mode", mode)
                     .putString("vadMode", vadMode)
-                    .putString("delayMode", delayMode)
                     .putBoolean("interpreterMode", interpreterMode)
                     .putBoolean("mirrorBottomMode", mirrorBottomMode)
                     .putString("topLang", topLang)
@@ -293,7 +292,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V97");
+                  TextView title = label("Fordito_V98");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -469,7 +468,7 @@ jobs:
                   manualTopSource = top;
                   topActive = top;
 
-                  // V97: kézi szerkesztés és live mikrofon nem futhat egyszerre.
+                  // V98: kézi szerkesztés és live mikrofon nem futhat egyszerre.
                   // Ha a felhasználó bármelyik ablakba kattint vagy írni kezd,
                   // a mikrofon és minden függő live fordítás leáll. Így a kézi
                   // teljes ablakos fordításba nem írhat vissza későn érkező live válasz.
@@ -585,7 +584,7 @@ jobs:
               }
 
               void renderBlocksKeepView() {
-                  // V97: élő fordítás alatt ne őrizze meg a régi scroll pozíciót,
+                  // V98: élő fordítás alatt ne őrizze meg a régi scroll pozíciót,
                   // mert ettől nem megy le az ablak az új sorokra.
                   // Kézi/készenléti módban marad a régi nézetmegőrzés.
                   renderBlocks(!(streaming || uiLockedForLive || finalizingStop));
@@ -645,7 +644,7 @@ jobs:
                       tts = new TextToSpeech(this, status -> {
                           ttsReady = status == TextToSpeech.SUCCESS;
                           if(ttsReady && tts != null) {
-                              tts.setSpeechRate(1.15f);
+                              tts.setSpeechRate(1.0f);
                               tts.setPitch(1.0f);
                               tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                                   @Override public void onStart(String utteranceId) {}
@@ -808,7 +807,7 @@ jobs:
                       input.put("format", format);
                       input.put("turn_detection", vad);
 
-                      // V97: OpenAI Realtime oldali zajszűrés.
+                      // V98: OpenAI Realtime oldali zajszűrés.
                       // Telefon közeli beszédhez near_field való; ez a VAD és a modell előtt szűr.
                       JSONObject nr = new JSONObject();
                       nr.put("type", "near_field");
@@ -904,7 +903,7 @@ jobs:
               void showDelayDialog() {
                   final String[] names = {"Gyors", "Kiegyensúlyozott", "Pontos"};
                   final String[] vals = {"low", "medium", "high"};
-                  int checked = 0;
+                  int checked = 1;
                   if("low".equals(delayMode)) checked = 0;
                   else if("high".equals(delayMode)) checked = 2;
 
@@ -912,10 +911,10 @@ jobs:
                       .setTitle("Beszédfelismerés pontossága")
                       .setSingleChoiceItems(names, checked, (d, which) -> {
                           delayMode = vals[which];
-                          sp.edit()
+                          getSharedPreferences("fordito", MODE_PRIVATE)
+                              .edit()
                               .putString("delayMode", delayMode)
                               .apply();
-                          sessionUpdateIfConnected();
                           d.dismiss();
                           Toast.makeText(this, "Új kapcsolatnál érvényesül: " + names[which], Toast.LENGTH_SHORT).show();
                       })
@@ -966,7 +965,7 @@ jobs:
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4096);
 
-                  // V97: zajos kabin / ventilátor mellett VOICE_COMMUNICATION jobb,
+                  // V98: zajos kabin / ventilátor mellett VOICE_COMMUNICATION jobb,
                   // mert Android oldalon használhat AEC/AGC/NS előfeldolgozást, ha a készülék támogatja.
                   rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
                   enableAndroidAudioEffects();
@@ -2021,7 +2020,7 @@ jobs:
               void setLiveUiLocked(boolean locked) {
                   uiLockedForLive = locked;
                   try {
-                      // V97: élő mikrofon alatt csak a két veszélyes alsó gomb záródik:
+                      // V98: élő mikrofon alatt csak a két veszélyes alsó gomb záródik:
                       // FORDÍT és MENÜ. Az ablakokhoz, scrollhoz, nyelvgombokhoz nem nyúlunk.
                       boolean blocked = locked || finalizingStop;
 
@@ -2091,7 +2090,7 @@ jobs:
               @Override public void onPause() {
                   super.onPause();
                   if(streaming) stop();
-                  // V97: ha háttérbe kerül az app, a mikrofon leáll,
+                  // V98: ha háttérbe kerül az app, a mikrofon leáll,
                   // de a FORDÍT és MENÜ gombokat is vissza kell engedni.
                   finalizingStop = false;
                   setLiveUiLocked(false);
@@ -2161,14 +2160,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V97.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V97.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V98.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V98.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V97
+          name: Fordito_V98
           path: |
             artifact/*.apk
             artifact/*.aab
