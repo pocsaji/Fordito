@@ -1906,7 +1906,7 @@ jobs:
               }
 
               String displayModeLabel() {
-                  return mirrorBottomMode ? "tükör mód – alsó ablak fejjel lefelé" : "normál mód – mindkét ablak egy irányba";
+                  return mirrorBottomMode ? "tükör mód – felső ablak fejjel lefelé" : "normál mód – mindkét ablak egy irányba";
               }
 
               void chooseDisplayMode() {
@@ -1917,7 +1917,7 @@ jobs:
                   CharSequence[] labels = new CharSequence[data.length];
                   for(int i=0;i<data.length;i++) {
                       boolean selected = mirrorBottomMode ? "mirror".equals(data[i][1]) : "normal".equals(data[i][1]);
-                      String sub = "mirror".equals(data[i][1]) ? "az alsó ablak 180 fokkal elfordítva" : "mindkét ablak fentről lefelé olvasható";
+                      String sub = "mirror".equals(data[i][1]) ? "a felső ablak 180 fokkal elfordítva" : "mindkét ablak fentről lefelé olvasható";
                       labels[i] = menuItem(data[i][0], sub + (selected ? " • kiválasztva" : ""), selected);
                   }
                   showCenteredMenu("Kijelző elrendezés", labels, (d,w) -> {
@@ -1930,7 +1930,8 @@ jobs:
 
               void applyDisplayMode() {
                   try {
-                      if(bottomBox != null) bottomBox.setRotation(mirrorBottomMode ? 180f : 0f);
+                      if(topBox != null) topBox.setRotation(mirrorBottomMode ? 180f : 0f);
+                      if(bottomBox != null) bottomBox.setRotation(0f);
                   } catch(Exception ignored) {}
               }
 
