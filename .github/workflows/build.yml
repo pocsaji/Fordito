@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 96; versionName = "9.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 97; versionName = "9.7" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V96" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V97" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -100,6 +100,8 @@ jobs:
           import android.graphics.Color;
           import android.media.*;
           import android.media.audiofx.*;
+          import android.speech.tts.TextToSpeech;
+          import android.speech.tts.UtteranceProgressListener;
           import android.os.*;
           import android.text.*;
           import android.text.style.*;
@@ -125,6 +127,21 @@ jobs:
               AutomaticGainControl automaticGainControl;
               AcousticEchoCanceler acousticEchoCanceler;
               ExecutorService audioExec = Executors.newSingleThreadExecutor();
+
+              TextToSpeech tts;
+              boolean ttsReady = false;
+              boolean ttsSpeaking = false;
+              int ttsSeq = 0;
+              final ArrayDeque<SpeakItem> speakQueue = new ArrayDeque<>();
+
+              static class SpeakItem {
+                  String text;
+                  String lang;
+                  SpeakItem(String text, String lang) {
+                      this.text = text;
+                      this.lang = lang;
+                  }
+              }
 
               boolean connected = false;
               boolean streaming = false;
@@ -236,6 +253,7 @@ jobs:
                   load();
                   ui();
                   reqMic();
+                  initTts();
               }
 
               void load() {
@@ -274,7 +292,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V96");
+                  TextView title = label("Fordito_V97");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -450,7 +468,7 @@ jobs:
                   manualTopSource = top;
                   topActive = top;
 
-                  // V96: kézi szerkesztés és live mikrofon nem futhat egyszerre.
+                  // V97: kézi szerkesztés és live mikrofon nem futhat egyszerre.
                   // Ha a felhasználó bármelyik ablakba kattint vagy írni kezd,
                   // a mikrofon és minden függő live fordítás leáll. Így a kézi
                   // teljes ablakos fordításba nem írhat vissza későn érkező live válasz.
@@ -566,7 +584,7 @@ jobs:
               }
 
               void renderBlocksKeepView() {
-                  // V96: élő fordítás alatt ne őrizze meg a régi scroll pozíciót,
+                  // V97: élő fordítás alatt ne őrizze meg a régi scroll pozíciót,
                   // mert ettől nem megy le az ablak az új sorokra.
                   // Kézi/készenléti módban marad a régi nézetmegőrzés.
                   renderBlocks(!(streaming || uiLockedForLive || finalizingStop));
@@ -618,6 +636,93 @@ jobs:
                       }
                   } finally {
                       programmaticChange = false;
+                  }
+              }
+
+              void initTts() {
+                  try {
+                      tts = new TextToSpeech(this, status -> {
+                          ttsReady = status == TextToSpeech.SUCCESS;
+                          if(ttsReady && tts != null) {
+                              tts.setSpeechRate(1.0f);
+                              tts.setPitch(1.0f);
+                              tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                                  @Override public void onStart(String utteranceId) {}
+                                  @Override public void onDone(String utteranceId) {
+                                      runOnUiThread(() -> {
+                                          ttsSpeaking = false;
+                                          drainSpeakQueue();
+                                      });
+                                  }
+                                  @Override public void onError(String utteranceId) {
+                                      runOnUiThread(() -> {
+                                          ttsSpeaking = false;
+                                          drainSpeakQueue();
+                                      });
+                                  }
+                                  @Override public void onError(String utteranceId, int errorCode) {
+                                      runOnUiThread(() -> {
+                                          ttsSpeaking = false;
+                                          drainSpeakQueue();
+                                      });
+                                  }
+                              });
+                              drainSpeakQueue();
+                          }
+                      });
+                  } catch(Exception ignored) {}
+              }
+
+              Locale localeForTts(String lang) {
+                  String l = lang == null ? "" : lang.toLowerCase(Locale.ROOT);
+                  if(l.equals("hu")) return new Locale("hu", "HU");
+                  if(l.equals("fr")) return Locale.FRANCE;
+                  if(l.equals("en")) return Locale.ENGLISH;
+                  if(l.equals("de")) return Locale.GERMAN;
+                  if(l.equals("it")) return Locale.ITALIAN;
+                  if(l.equals("es")) return new Locale("es", "ES");
+                  if(l.equals("ro")) return new Locale("ro", "RO");
+                  if(l.equals("hr")) return new Locale("hr", "HR");
+                  if(l.equals("sk")) return new Locale("sk", "SK");
+                  if(l.equals("sl")) return new Locale("sl", "SI");
+                  return Locale.getDefault();
+              }
+
+              void enqueueSpeak(String translatedText, String targetLang) {
+                  try {
+                      if(!interpreterMode) return;
+                      if(translatedText == null) return;
+                      String s = translatedText.trim();
+                      if(s.isEmpty()) return;
+                      speakQueue.add(new SpeakItem(s, targetLang));
+                      drainSpeakQueue();
+                  } catch(Exception ignored) {}
+              }
+
+              void drainSpeakQueue() {
+                  try {
+                      if(!interpreterMode) {
+                          speakQueue.clear();
+                          ttsSpeaking = false;
+                          return;
+                      }
+                      if(tts == null || !ttsReady || ttsSpeaking || speakQueue.isEmpty()) return;
+                      SpeakItem item = speakQueue.poll();
+                      if(item == null || item.text == null || item.text.trim().isEmpty()) {
+                          drainSpeakQueue();
+                          return;
+                      }
+                      try { tts.setLanguage(localeForTts(item.lang)); } catch(Exception ignored) {}
+                      ttsSpeaking = true;
+                      Bundle params = new Bundle();
+                      String id = "fordito_tts_" + (++ttsSeq);
+                      int r = tts.speak(item.text, TextToSpeech.QUEUE_FLUSH, params, id);
+                      if(r == TextToSpeech.ERROR) {
+                          ttsSpeaking = false;
+                          drainSpeakQueue();
+                      }
+                  } catch(Exception ignored) {
+                      ttsSpeaking = false;
                   }
               }
 
@@ -702,7 +807,7 @@ jobs:
                       input.put("format", format);
                       input.put("turn_detection", vad);
 
-                      // V96: OpenAI Realtime oldali zajszűrés.
+                      // V97: OpenAI Realtime oldali zajszűrés.
                       // Telefon közeli beszédhez near_field való; ez a VAD és a modell előtt szűr.
                       JSONObject nr = new JSONObject();
                       nr.put("type", "near_field");
@@ -860,7 +965,7 @@ jobs:
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4096);
 
-                  // V96: zajos kabin / ventilátor mellett VOICE_COMMUNICATION jobb,
+                  // V97: zajos kabin / ventilátor mellett VOICE_COMMUNICATION jobb,
                   // mert Android oldalon használhat AEC/AGC/NS előfeldolgozást, ha a készülék támogatja.
                   rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
                   enableAndroidAudioEffects();
@@ -1423,6 +1528,8 @@ jobs:
 
               void applyLiveTranslation(String out) {
                   int id = pendingLiveBlockId;
+                  String speakText = null;
+                  String speakLang = null;
                   if(id >= 0 && id < textBlocks.size()) {
                       TextBlock b = textBlocks.get(id);
                       ArrayList<String[]> triples = parseTriples(out);
@@ -1440,9 +1547,13 @@ jobs:
                           if(sourceIsTop) {
                               b.topText = original;
                               b.bottomText = translation;
+                              speakText = translation;
+                              speakLang = bottomLang;
                           } else {
                               b.bottomText = original;
                               b.topText = translation;
+                              speakText = translation;
+                              speakLang = topLang;
                           }
                           b.translatedOk = true;
                           b.retryCount = 0;
@@ -1454,6 +1565,7 @@ jobs:
                           b.retryCount++;
                       }
                       renderBlocksKeepView();
+                      enqueueSpeak(speakText, speakLang);
                   }
                   pendingLiveBlockId = -1;
                   liveTranslateMode = false;
@@ -1485,6 +1597,7 @@ jobs:
                           String translation = cleanTranscriptForSelectedPair(trp[2]);
                           boolean sourceIsTop = sourceIsTopFromAi(sourceLang, manualTopSource);
                           addBlock(sourceIsTop, original, translation);
+                          enqueueSpeak(translation, sourceIsTop ? bottomLang : topLang);
                           any = true;
                       }
                       if(any) return;
@@ -1524,6 +1637,7 @@ jobs:
 
                       rebuildBlocksFromCurrentBoxes();
                       renderBlocksKeepView();
+                      enqueueSpeak(tr, manualTopSource ? bottomLang : topLang);
                       Toast.makeText(this, "Teljes ablak újrafordítva.", Toast.LENGTH_SHORT).show();
                   } catch(Exception e) {
                       Toast.makeText(this, "Kézi fordítás feldolgozási hiba. Próbáld újra.", Toast.LENGTH_LONG).show();
@@ -1780,6 +1894,11 @@ jobs:
                   }
                   showCenteredMenu("Tolmács mód", labels, (d,w) -> {
                       interpreterMode = "on".equals(data[w][1]);
+                      if(!interpreterMode) {
+                          speakQueue.clear();
+                          ttsSpeaking = false;
+                          try { if(tts != null) tts.stop(); } catch(Exception ignored) {}
+                      }
                       save();
                       updateButtons();
                   });
@@ -1900,7 +2019,7 @@ jobs:
               void setLiveUiLocked(boolean locked) {
                   uiLockedForLive = locked;
                   try {
-                      // V96: élő mikrofon alatt csak a két veszélyes alsó gomb záródik:
+                      // V97: élő mikrofon alatt csak a két veszélyes alsó gomb záródik:
                       // FORDÍT és MENÜ. Az ablakokhoz, scrollhoz, nyelvgombokhoz nem nyúlunk.
                       boolean blocked = locked || finalizingStop;
 
@@ -1970,10 +2089,14 @@ jobs:
               @Override public void onPause() {
                   super.onPause();
                   if(streaming) stop();
-                  // V96: ha háttérbe kerül az app, a mikrofon leáll,
+                  // V97: ha háttérbe kerül az app, a mikrofon leáll,
                   // de a FORDÍT és MENÜ gombokat is vissza kell engedni.
                   finalizingStop = false;
                   setLiveUiLocked(false);
+                  try {
+                      if(tts != null) tts.stop();
+                      ttsSpeaking = false;
+                  } catch(Exception ignored) {}
                   updateButtons();
               }
 
@@ -1988,6 +2111,12 @@ jobs:
 
               @Override public void onDestroy() {
                   if(streaming) stop();
+                  try {
+                      if(tts != null) {
+                          tts.stop();
+                          tts.shutdown();
+                      }
+                  } catch(Exception ignored) {}
                   audioExec.shutdownNow();
                   super.onDestroy();
               }
@@ -2030,14 +2159,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V96.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V96.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V97.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V97.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V96
+          name: Fordito_V97
           path: |
             artifact/*.apk
             artifact/*.aab
