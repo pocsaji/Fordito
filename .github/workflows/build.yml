@@ -192,7 +192,7 @@ jobs:
               String profile = "truck_bulk";
               String mode = "natural";
               String vadMode = "low";
-              String delayMode = "high";
+              String delayMode = "low";
               String topLang = "hu";
               String bottomLang = "fr";
 
@@ -262,7 +262,7 @@ jobs:
                   profile = sp.getString("profile", "truck_bulk");
                   mode = sp.getString("mode", "natural");
                   vadMode = sp.getString("vadMode", "low");
-                  delayMode = sp.getString("delayMode", "high");
+                  delayMode = sp.getString("delayMode", "low");
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   mirrorBottomMode = sp.getBoolean("mirrorBottomMode", false);
                   topLang = sp.getString("topLang", "hu");
@@ -277,6 +277,7 @@ jobs:
                     .putString("profile", profile)
                     .putString("mode", mode)
                     .putString("vadMode", vadMode)
+                    .putString("delayMode", delayMode)
                     .putBoolean("interpreterMode", interpreterMode)
                     .putBoolean("mirrorBottomMode", mirrorBottomMode)
                     .putString("topLang", topLang)
@@ -644,7 +645,7 @@ jobs:
                       tts = new TextToSpeech(this, status -> {
                           ttsReady = status == TextToSpeech.SUCCESS;
                           if(ttsReady && tts != null) {
-                              tts.setSpeechRate(1.0f);
+                              tts.setSpeechRate(1.15f);
                               tts.setPitch(1.0f);
                               tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                                   @Override public void onStart(String utteranceId) {}
@@ -903,7 +904,7 @@ jobs:
               void showDelayDialog() {
                   final String[] names = {"Gyors", "Kiegyensúlyozott", "Pontos"};
                   final String[] vals = {"low", "medium", "high"};
-                  int checked = 1;
+                  int checked = 0;
                   if("low".equals(delayMode)) checked = 0;
                   else if("high".equals(delayMode)) checked = 2;
 
@@ -911,10 +912,10 @@ jobs:
                       .setTitle("Beszédfelismerés pontossága")
                       .setSingleChoiceItems(names, checked, (d, which) -> {
                           delayMode = vals[which];
-                          getSharedPreferences("fordito", MODE_PRIVATE)
-                              .edit()
+                          sp.edit()
                               .putString("delayMode", delayMode)
                               .apply();
+                          sessionUpdateIfConnected();
                           d.dismiss();
                           Toast.makeText(this, "Új kapcsolatnál érvényesül: " + names[which], Toast.LENGTH_SHORT).show();
                       })
