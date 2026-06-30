@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 101; versionName = "10.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 103; versionName = "10.3" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V102" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V103" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -193,7 +193,7 @@ jobs:
               String mode = "natural";
               String vadMode = "low";
               String delayMode = "xhigh";
-              String micGateMode = "precise";
+              String micGateMode = "sensitive";
               String topLang = "hu";
               String bottomLang = "fr";
 
@@ -242,16 +242,16 @@ jobs:
               };
 
               final String[][] vadModes = {
-                  {"Zajos kabin – szigorú felismerés","low"},
+                  {"Várakozó – hosszabb szünetet is kivár","low"},
                   {"Normál – ajánlott","medium"},
                   {"Gyors – csendes helyre","high"},
                   {"Automatikus","auto"}
               };
 
               final String[][] micGateModes = {
-                  {"Pontos / zajos kabin","precise"},
+                  {"Érzékeny / halk beszéd","sensitive"},
                   {"Normál","normal"},
-                  {"Érzékeny / halk beszéd","sensitive"}
+                  {"Szigorúbb kapu","precise"}
               };
 
               @Override public void onCreate(Bundle b) {
@@ -270,7 +270,7 @@ jobs:
                   mode = sp.getString("mode", "natural");
                   vadMode = sp.getString("vadMode", "low");
                   delayMode = sp.getString("delayMode", "xhigh");
-                  micGateMode = sp.getString("micGateMode", "precise");
+                  micGateMode = sp.getString("micGateMode", "sensitive");
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   mirrorBottomMode = sp.getBoolean("mirrorBottomMode", false);
                   topLang = sp.getString("topLang", "fr");
@@ -302,7 +302,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V102");
+                  TextView title = label("Fordito_V103");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -800,9 +800,9 @@ jobs:
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
 
-                      // V102: zajos kabinra a dokumentált server_vad való.
-                      // Dokumentált mezők: threshold, prefix_padding_ms, silence_duration_ms.
-                      // Magasabb threshold = zajos környezetben kevesebb téves beszédindítás.
+                      // V103: csak dokumentált Realtime VAD mezők.
+                      // Tapasztalat: kamionfülkében a túl szigorú helyi kapu levágta a beszéd elejét.
+                      // Ezért az alapérték érzékenyebb: a beszéd sértetlenül menjen át, az OpenAI VAD dönt.
                       JSONObject vad = new JSONObject();
                       vad.put("type", "server_vad");
                       vad.put("threshold", vadThreshold());
@@ -823,6 +823,7 @@ jobs:
                       JSONObject nr = new JSONObject();
                       nr.put("type", "near_field");
                       input.put("noise_reduction", nr);
+                      Log.d("ForditoAudio", "Realtime input: vadMode=" + vadMode + ", vadThreshold=" + vadThreshold() + ", silenceMs=" + vadSilenceMs() + ", noise_reduction=near_field, micGateMode=" + micGateMode + ", localGate=" + micGateThreshold());
 
                       JSONObject tr = new JSONObject();
                       tr.put("model", "gpt-realtime-whisper");
@@ -908,10 +909,10 @@ jobs:
               String micGateLabel() { return labelOf(micGateModes, micGateMode); }
 
               double vadThreshold() {
-                  if("high".equals(vadMode)) return 0.75;     // csendes helyen gyorsabb
-                  if("medium".equals(vadMode)) return 0.82;   // normál
-                  if("auto".equals(vadMode)) return 0.85;     // automatikushoz zajosabb indulóérték
-                  return 0.88;                                // zajos kabin: csak erősebb emberi beszéd induljon el
+                  if("high".equals(vadMode)) return 0.72;     // gyorsabb, könnyebben indul
+                  if("medium".equals(vadMode)) return 0.78;   // normál
+                  if("auto".equals(vadMode)) return 0.76;     // biztonságos indulóérték
+                  return 0.74;                                // várakozó: ne vágja le a halkabb beszédet
               }
 
               int vadSilenceMs() {
@@ -954,12 +955,12 @@ jobs:
                   if("low".equals(delayMode)) return "Gyors – kisebb késleltetés";
                   if("medium".equals(delayMode)) return "Kiegyensúlyozott – ajánlott";
                   if("high".equals(delayMode)) return "Pontos – precízebb hangbevitel";
-                  if("xhigh".equals(delayMode)) return "Nagyon pontos – zajos környezet";
-                  return "Nagyon pontos – zajos környezet";
+                  if("xhigh".equals(delayMode)) return "Nagyon pontos – hosszabb bevitel";
+                  return "Nagyon pontos – hosszabb bevitel";
               }
 
               void showDelayDialog() {
-                  final String[] names = {"Gyors", "Kiegyensúlyozott", "Pontos", "Nagyon pontos / zajos környezet"};
+                  final String[] names = {"Gyors", "Kiegyensúlyozott", "Pontos", "Nagyon pontos / hosszabb bevitel"};
                   final String[] vals = {"low", "medium", "high", "xhigh"};
                   int checked = 3;
                   if("low".equals(delayMode)) checked = 0;
@@ -997,7 +998,8 @@ jobs:
                           acousticEchoCanceler = AcousticEchoCanceler.create(sid);
                           if(acousticEchoCanceler != null) acousticEchoCanceler.setEnabled(true);
                       }
-                  } catch(Exception ignored) {}
+                      Log.d("ForditoAudio", "Android effects: NS=" + (noiseSuppressor != null && noiseSuppressor.getEnabled()) + ", AGC=" + (automaticGainControl != null && automaticGainControl.getEnabled()) + ", AEC=" + (acousticEchoCanceler != null && acousticEchoCanceler.getEnabled()));
+                  } catch(Exception e) { Log.d("ForditoAudio", "Android effects error: " + e.getMessage()); }
               }
 
               void releaseAndroidAudioEffects() {
@@ -1021,8 +1023,9 @@ jobs:
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4096);
 
-                  // V98: zajos kabin / ventilátor mellett VOICE_COMMUNICATION jobb,
-                  // mert Android oldalon használhat AEC/AGC/NS előfeldolgozást, ha a készülék támogatja.
+                  // V103: Android VOICE_COMMUNICATION marad, mert beszédre optimalizált bemenetet ad.
+                  // A saját helyi kapu alapból érzékeny, hogy ne vágja le a beszédet.
+                  Log.d("ForditoAudio", "AudioRecord: source=VOICE_COMMUNICATION, sampleRate=" + sr + ", encoding=PCM_16BIT, bufferSize=" + bs + ", micGateMode=" + micGateMode + ", localGate=" + micGateThreshold());
                   rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
                   enableAndroidAudioEffects();
                   streaming = true;
@@ -1976,7 +1979,7 @@ jobs:
                         mode = "natural";
                         vadMode = "low";
                         delayMode = "xhigh";
-                        micGateMode = "precise";
+                        micGateMode = "sensitive";
                         interpreterMode = false;
                         mirrorBottomMode = false;
                         save();
@@ -2272,14 +2275,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V102.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V102.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V103.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V103.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V102
+          name: Fordito_V103
           path: |
             artifact/*.apk
             artifact/*.aab
