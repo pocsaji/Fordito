@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 99; versionName = "9.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 100; versionName = "10.0" }
 
               signingConfigs {
                   create("release") {
@@ -1305,7 +1305,34 @@ jobs:
                   return t;
               }
 
-              boolean markLiveBlockQueued(String block) {
+              boolean isLikelyNoisyTranscriptBlock(String block) {
+        if(block == null) return true;
+        String t = block.trim();
+        if(t.length() == 0) return true;
+        String lower = " " + t.toLowerCase(Locale.ROOT).replaceAll("[^a-záéíóöőúüűàâçèéêëîïôùûüÿñæœß\s]", " ").replaceAll("\s+", " ").trim() + " ";
+        int words = lower.trim().length() == 0 ? 0 : lower.trim().split("\s+").length;
+        if(words <= 1) return true;
+
+        int foreignHits = 0;
+        if(!selectedContains("nl")) {
+            String[] nl = {" het ", " een ", " wel ", " geen ", " niet ", " maar ", " jullie ", " reserver ", " gereserveerd ", "wasergadas"};
+            for(String w: nl) if(lower.contains(w)) foreignHits++;
+        }
+        if(!selectedContains("de")) {
+            String[] de = {" ich ", " nicht ", " und ", " oder ", " danke ", " bitte ", " aber ", " wasser "};
+            for(String w: de) if(lower.contains(w)) foreignHits++;
+        }
+        if(!selectedContains("en")) {
+            String[] en = {" allò ", " hello ", " that ", " this ", " would ", " reserved ", " microphone "};
+            for(String w: en) if(lower.contains(w)) foreignHits++;
+        }
+        // HU/FR párnál tipikus STT-halandzsa: több holland/német/angol darab keveredik magyar szavakkal.
+        if(foreignHits >= 3) return true;
+        if(words < 6 && foreignHits >= 1) return true;
+        return false;
+    }
+
+    boolean markLiveBlockQueued(String block) {
                   String h = normalizeLiveBlockHash(block);
                   if(h.length() < 3) return false;
                   if(recentLiveBlockHashes.contains(h)) return false;
