@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 98; versionName = "9.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 99; versionName = "9.9" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V98" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V99" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -193,6 +193,7 @@ jobs:
               String mode = "natural";
               String vadMode = "low";
               String delayMode = "high";
+              String micGateMode = "precise";
               String topLang = "hu";
               String bottomLang = "fr";
 
@@ -216,7 +217,7 @@ jobs:
               };
 
               final String[][] profiles = {
-                  {"stílus és szövegkörnyezet","general"},
+                  {"Általános beszélgetés","general"},
                   {"Turizmus / utazás","tourism"},
                   {"Étterem","restaurant"},
                   {"Szállás","hotel"},
@@ -247,6 +248,12 @@ jobs:
                   {"Automatikus","auto"}
               };
 
+              final String[][] micGateModes = {
+                  {"Pontos / zajos kabin","precise"},
+                  {"Normál","normal"},
+                  {"Érzékeny / halk beszéd","sensitive"}
+              };
+
               @Override public void onCreate(Bundle b) {
                   super.onCreate(b);
                   sp = getSharedPreferences("settings", MODE_PRIVATE);
@@ -263,6 +270,7 @@ jobs:
                   mode = sp.getString("mode", "natural");
                   vadMode = sp.getString("vadMode", "low");
                   delayMode = sp.getString("delayMode", "high");
+                  micGateMode = sp.getString("micGateMode", "precise");
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   mirrorBottomMode = sp.getBoolean("mirrorBottomMode", false);
                   topLang = sp.getString("topLang", "fr");
@@ -277,6 +285,8 @@ jobs:
                     .putString("profile", profile)
                     .putString("mode", mode)
                     .putString("vadMode", vadMode)
+                    .putString("delayMode", delayMode)
+                    .putString("micGateMode", micGateMode)
                     .putBoolean("interpreterMode", interpreterMode)
                     .putBoolean("mirrorBottomMode", mirrorBottomMode)
                     .putString("topLang", topLang)
@@ -292,7 +302,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V98");
+                  TextView title = label("Fordito_V99");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -894,6 +904,37 @@ jobs:
               }
 
 
+              String micGateLabel() { return labelOf(micGateModes, micGateMode); }
+
+              int micGateThreshold() {
+                  if("sensitive".equals(micGateMode)) return 0;
+                  if("normal".equals(micGateMode)) return 180;
+                  return 320;
+              }
+
+              int avgAbsPcm16(byte[] data, int len) {
+                  if(data == null || len < 2) return 0;
+                  long sum = 0;
+                  int samples = 0;
+                  for(int i=0; i+1<len; i+=2) {
+                      int lo = data[i] & 0xff;
+                      int hi = data[i+1];
+                      int v = (hi << 8) | lo;
+                      sum += Math.abs(v);
+                      samples++;
+                  }
+                  if(samples == 0) return 0;
+                  return (int)(sum / samples);
+              }
+
+              byte[] prepareAudioChunk(byte[] data, int len) {
+                  int threshold = micGateThreshold();
+                  if(threshold <= 0 || avgAbsPcm16(data, len) >= threshold) return Arrays.copyOf(data, len);
+                  // Nem eldobjuk a csendes/zajos részt, hanem nullára húzzuk.
+                  // Így a Realtime VAD továbbra is érzékeli a szünetet, de kevesebb kabinzaj jut át.
+                  return new byte[len];
+              }
+
               String delayLabel() {
                   if("low".equals(delayMode)) return "Gyors – kisebb késleltetés";
                   if("high".equals(delayMode)) return "Pontos – precízebb hangbevitel";
@@ -911,10 +952,7 @@ jobs:
                       .setTitle("Beszédfelismerés pontossága")
                       .setSingleChoiceItems(names, checked, (d, which) -> {
                           delayMode = vals[which];
-                          getSharedPreferences("fordito", MODE_PRIVATE)
-                              .edit()
-                              .putString("delayMode", delayMode)
-                              .apply();
+                          save();
                           d.dismiss();
                           Toast.makeText(this, "Új kapcsolatnál érvényesül: " + names[which], Toast.LENGTH_SHORT).show();
                       })
@@ -980,7 +1018,7 @@ jobs:
                           int read = rec.read(buf, 0, buf.length);
                           if(read > 0) {
                               try {
-                                  byte[] chunk = Arrays.copyOf(buf, read);
+                                  byte[] chunk = prepareAudioChunk(buf, read);
                                   JSONObject evt = new JSONObject();
                                   evt.put("type", "input_audio_buffer.append");
                                   evt.put("audio", Base64.encodeToString(chunk, Base64.NO_WRAP));
@@ -1760,8 +1798,10 @@ jobs:
                       menuItem("Fordítás stílusa", modeLabel(), false),
                       menuItem("Beszéd felismerése", vadLabel(), false),
                       menuItem("Beszédfelismerés pontossága", delayLabel(), false),
+                      menuItem("Mikrofon érzékenysége", micGateLabel(), false),
                       menuItem("Tolmács mód", interpreterLabel(), interpreterMode),
-                      menuItem("Ablakkezelés", "másolás, teljes törlés, tükör mód", false)
+                      menuItem("Ablakkezelés", "másolás, teljes törlés, tükör mód", false),
+                      menuItem("Alapbeállítások", "nyelvpár marad, fordítás/bevitel visszaáll", false)
                   };
 
                   showCenteredMenu("Menü", items, (d,w) -> {
@@ -1771,8 +1811,10 @@ jobs:
                       if(w==3) chooseMode();
                       if(w==4) chooseVad();
                       if(w==5) showDelayDialog();
-                      if(w==6) chooseInterpreterMode();
-                      if(w==7) windowMenu();
+                      if(w==6) chooseMicGate();
+                      if(w==7) chooseInterpreterMode();
+                      if(w==8) windowMenu();
+                      if(w==9) resetCoreSettings();
                       updateButtons();
                   });
               }
@@ -1876,6 +1918,30 @@ jobs:
               void chooseProfile() { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save(); sessionUpdateIfConnected(); }); }
               void chooseMode() { chooseFrom("Fordítás stílusa", modes, mode, v -> { mode = v; save(); sessionUpdateIfConnected(); }); }
               void chooseVad() { chooseFrom("Beszéd felismerése", vadModes, vadMode, v -> { vadMode = v; save(); sessionUpdateIfConnected(); }); }
+              void chooseMicGate() { chooseFrom("Mikrofon érzékenysége", micGateModes, micGateMode, v -> { micGateMode = v; save(); }); }
+
+              void resetCoreSettings() {
+                  new AlertDialog.Builder(this)
+                    .setTitle("Alapbeállítások")
+                    .setMessage("Visszaállítsam az ajánlott fordítási és beszédfelismerési alapértékeket? Az API kulcs és a nyelvpár nem törlődik.")
+                    .setPositiveButton("Igen", (d,w) -> {
+                        model = "gpt-realtime-2";
+                        profile = "truck_bulk";
+                        mode = "natural";
+                        vadMode = "low";
+                        delayMode = "high";
+                        micGateMode = "precise";
+                        interpreterMode = false;
+                        mirrorBottomMode = false;
+                        save();
+                        sessionUpdateIfConnected();
+                        applyDisplayMode();
+                        Toast.makeText(this, "Alapbeállítások visszaállítva.", Toast.LENGTH_SHORT).show();
+                        updateButtons();
+                    })
+                    .setNegativeButton("Mégse", null)
+                    .show();
+              }
 
               String interpreterLabel() {
                   return interpreterMode ? "aktív – a kész fordítást felolvassa" : "inaktív – csak szöveges fordítás";
