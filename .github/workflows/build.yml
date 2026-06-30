@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 103; versionName = "10.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 105; versionName = "10.5" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V103" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V105" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -302,7 +302,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V103");
+                  TextView title = label("Fordito_V105");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -800,7 +800,7 @@ jobs:
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
 
-                      // V103: csak dokumentált Realtime VAD mezők.
+                      // V105: csak dokumentált Realtime VAD mezők.
                       // Tapasztalat: kamionfülkében a túl szigorú helyi kapu levágta a beszéd elejét.
                       // Ezért az alapérték érzékenyebb: a beszéd sértetlenül menjen át, az OpenAI VAD dönt.
                       JSONObject vad = new JSONObject();
@@ -823,7 +823,6 @@ jobs:
                       JSONObject nr = new JSONObject();
                       nr.put("type", "near_field");
                       input.put("noise_reduction", nr);
-                      Log.d("ForditoAudio", "Realtime input: vadMode=" + vadMode + ", vadThreshold=" + vadThreshold() + ", silenceMs=" + vadSilenceMs() + ", noise_reduction=near_field, micGateMode=" + micGateMode + ", localGate=" + micGateThreshold());
 
                       JSONObject tr = new JSONObject();
                       tr.put("model", "gpt-realtime-whisper");
@@ -998,8 +997,7 @@ jobs:
                           acousticEchoCanceler = AcousticEchoCanceler.create(sid);
                           if(acousticEchoCanceler != null) acousticEchoCanceler.setEnabled(true);
                       }
-                      Log.d("ForditoAudio", "Android effects: NS=" + (noiseSuppressor != null && noiseSuppressor.getEnabled()) + ", AGC=" + (automaticGainControl != null && automaticGainControl.getEnabled()) + ", AEC=" + (acousticEchoCanceler != null && acousticEchoCanceler.getEnabled()));
-                  } catch(Exception e) { Log.d("ForditoAudio", "Android effects error: " + e.getMessage()); }
+                  } catch(Exception ignored) {}
               }
 
               void releaseAndroidAudioEffects() {
@@ -1023,9 +1021,8 @@ jobs:
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4096);
 
-                  // V103: Android VOICE_COMMUNICATION marad, mert beszédre optimalizált bemenetet ad.
+                  // V105: Android VOICE_COMMUNICATION marad, mert beszédre optimalizált bemenetet ad.
                   // A saját helyi kapu alapból érzékeny, hogy ne vágja le a beszédet.
-                  Log.d("ForditoAudio", "AudioRecord: source=VOICE_COMMUNICATION, sampleRate=" + sr + ", encoding=PCM_16BIT, bufferSize=" + bs + ", micGateMode=" + micGateMode + ", localGate=" + micGateThreshold());
                   rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
                   enableAndroidAudioEffects();
                   streaming = true;
@@ -2275,14 +2272,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V103.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V103.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V105.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V105.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V103
+          name: Fordito_V105
           path: |
             artifact/*.apk
             artifact/*.aab
