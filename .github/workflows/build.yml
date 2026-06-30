@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 106; versionName = "10.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 108; versionName = "10.8" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V107" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V108" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -194,6 +194,9 @@ jobs:
               String vadMode = "medium";
               String delayMode = "medium";
               String micGateMode = "sensitive";
+              String audioSourceMode = "recognition";
+              String androidEffectsMode = "recommended";
+              String openAiNoiseMode = "near_field";
               String topLang = "hu";
               String bottomLang = "fr";
 
@@ -255,6 +258,26 @@ jobs:
                   {"Erősebb kapu","gate_high"}
               };
 
+              final String[][] audioSourceModes = {
+                  {"Beszédfelismerés / ajánlott","recognition"},
+                  {"Kommunikáció / régi","communication"},
+                  {"Nyers mikrofon / próba","unprocessed"},
+                  {"Alap mikrofon","mic"}
+              };
+
+              final String[][] androidEffectsModes = {
+                  {"Ajánlott: NS+AGC, AEC ki","recommended"},
+                  {"Teljes: NS+AGC+AEC","full"},
+                  {"Csak zajszűrés","ns_only"},
+                  {"Android effektek ki","off"}
+              };
+
+              final String[][] openAiNoiseModes = {
+                  {"OpenAI near_field / telefon közeli","near_field"},
+                  {"OpenAI far_field / távolabbi mikrofon","far_field"},
+                  {"OpenAI zajszűrés ki","off"}
+              };
+
               @Override public void onCreate(Bundle b) {
                   super.onCreate(b);
                   sp = getSharedPreferences("settings", MODE_PRIVATE);
@@ -272,6 +295,9 @@ jobs:
                   vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "medium");
                   micGateMode = sp.getString("micGateMode", "sensitive");
+                  audioSourceMode = sp.getString("audioSourceMode", "recognition");
+                  androidEffectsMode = sp.getString("androidEffectsMode", "recommended");
+                  openAiNoiseMode = sp.getString("openAiNoiseMode", "near_field");
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   mirrorBottomMode = sp.getBoolean("mirrorBottomMode", false);
                   topLang = sp.getString("topLang", "fr");
@@ -288,6 +314,9 @@ jobs:
                     .putString("vadMode", vadMode)
                     .putString("delayMode", delayMode)
                     .putString("micGateMode", micGateMode)
+                    .putString("audioSourceMode", audioSourceMode)
+                    .putString("androidEffectsMode", androidEffectsMode)
+                    .putString("openAiNoiseMode", openAiNoiseMode)
                     .putBoolean("interpreterMode", interpreterMode)
                     .putBoolean("mirrorBottomMode", mirrorBottomMode)
                     .putString("topLang", topLang)
@@ -303,7 +332,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V107");
+                  TextView title = label("Fordito_V108");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -801,7 +830,7 @@ jobs:
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
 
-                      // V107: a bevált valós beállítás az alap: Normál VAD + kiegyensúlyozott transzkripció + érzékeny helyi kapu.
+                      // V108: hanglánc-próba: Android hangforrás + Android effektek + OpenAI zajszűrés menüből állítható.
                       // Tapasztalat: kamionfülkében a túl szigorú helyi kapu levágta a beszéd elejét.
                       // Ezért az alapérték érzékenyebb: a beszéd sértetlenül menjen át, az OpenAI VAD dönt.
                       JSONObject vad = new JSONObject();
@@ -819,11 +848,13 @@ jobs:
                       input.put("format", format);
                       input.put("turn_detection", vad);
 
-                      // V98: OpenAI Realtime oldali zajszűrés.
-                      // Telefon közeli beszédhez near_field való; ez a VAD és a modell előtt szűr.
-                      JSONObject nr = new JSONObject();
-                      nr.put("type", "near_field");
-                      input.put("noise_reduction", nr);
+                      // V108: OpenAI Realtime oldali zajszűrés menüből.
+                      // near_field: telefon/headset közeli beszéd. far_field: távolabb lévő mikrofon.
+                      if(!"off".equals(openAiNoiseMode)) {
+                          JSONObject nr = new JSONObject();
+                          nr.put("type", openAiNoiseMode);
+                          input.put("noise_reduction", nr);
+                      }
 
                       JSONObject tr = new JSONObject();
                       tr.put("model", "gpt-realtime-whisper");
@@ -907,6 +938,9 @@ jobs:
 
 
               String micGateLabel() { return labelOf(micGateModes, micGateMode); }
+              String audioSourceLabel() { return labelOf(audioSourceModes, audioSourceMode); }
+              String androidEffectsLabel() { return labelOf(androidEffectsModes, androidEffectsMode); }
+              String openAiNoiseLabel() { return labelOf(openAiNoiseModes, openAiNoiseMode); }
 
               double vadThreshold() {
                   if("high".equals(vadMode)) return 0.70;     // gyors: könnyebben indul, csendesebb helyre
@@ -984,20 +1018,24 @@ jobs:
 
               void enableAndroidAudioEffects() {
                   try {
-                      if(rec == null) return;
+                      if(rec == null || "off".equals(androidEffectsMode)) return;
                       int sid = rec.getAudioSessionId();
 
-                      if(NoiseSuppressor.isAvailable()) {
+                      boolean useNs = "recommended".equals(androidEffectsMode) || "full".equals(androidEffectsMode) || "ns_only".equals(androidEffectsMode);
+                      boolean useAgc = "recommended".equals(androidEffectsMode) || "full".equals(androidEffectsMode);
+                      boolean useAec = "full".equals(androidEffectsMode);
+
+                      if(useNs && NoiseSuppressor.isAvailable()) {
                           noiseSuppressor = NoiseSuppressor.create(sid);
                           if(noiseSuppressor != null) noiseSuppressor.setEnabled(true);
                       }
 
-                      if(AutomaticGainControl.isAvailable()) {
+                      if(useAgc && AutomaticGainControl.isAvailable()) {
                           automaticGainControl = AutomaticGainControl.create(sid);
                           if(automaticGainControl != null) automaticGainControl.setEnabled(true);
                       }
 
-                      if(AcousticEchoCanceler.isAvailable()) {
+                      if(useAec && AcousticEchoCanceler.isAvailable()) {
                           acousticEchoCanceler = AcousticEchoCanceler.create(sid);
                           if(acousticEchoCanceler != null) acousticEchoCanceler.setEnabled(true);
                       }
@@ -1020,14 +1058,41 @@ jobs:
                   acousticEchoCanceler = null;
               }
 
+              int selectedAudioSource() {
+                  if("recognition".equals(audioSourceMode)) return MediaRecorder.AudioSource.VOICE_RECOGNITION;
+                  if("communication".equals(audioSourceMode)) return MediaRecorder.AudioSource.VOICE_COMMUNICATION;
+                  if("unprocessed".equals(audioSourceMode)) return MediaRecorder.AudioSource.UNPROCESSED;
+                  return MediaRecorder.AudioSource.MIC;
+              }
+
+              AudioRecord makeAudioRecord(int source, int sr, int bs) {
+                  try {
+                      AudioRecord r = new AudioRecord(source, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
+                      if(r.getState() == AudioRecord.STATE_INITIALIZED) return r;
+                      try { r.release(); } catch(Exception ignored) {}
+                  } catch(Exception ignored) {}
+                  return null;
+              }
+
+              AudioRecord makeBestAudioRecord(int sr, int bs) {
+                  AudioRecord r = makeAudioRecord(selectedAudioSource(), sr, bs);
+                  if(r != null) return r;
+                  r = makeAudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sr, bs);
+                  if(r != null) return r;
+                  r = makeAudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sr, bs);
+                  if(r != null) return r;
+                  return makeAudioRecord(MediaRecorder.AudioSource.MIC, sr, bs);
+              }
+
               void audioLoop() {
                   int sr = 24000;
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4800);
 
-                  // V107: 24 kHz PCM16 mono marad. Buffer cél kb. 100 ms, hogy ne lassuljon a live fordítás.
-                  // A saját helyi kapu menüből több fokozatban tesztelhető.
-                  rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
+                  // V108: 24 kHz PCM16 mono marad. Buffer cél kb. 100 ms.
+                  // Hangforrás és Android/OpenAI zajszűrés menüből tesztelhető.
+                  rec = makeBestAudioRecord(sr, bs);
+                  if(rec == null) { runOnUiThread(() -> state.setText("mikrofon hiba")); return; }
                   enableAndroidAudioEffects();
                   streaming = true;
                       setLiveUiLocked(true);
@@ -1850,6 +1915,9 @@ jobs:
                       menuItem("Beszéd felismerése", vadLabel(), false),
                       menuItem("Beszédfelismerés pontossága", delayLabel(), false),
                       menuItem("Mikrofon érzékenysége", micGateLabel(), false),
+                      menuItem("Hangforrás", audioSourceLabel(), false),
+                      menuItem("Android zajszűrés", androidEffectsLabel(), false),
+                      menuItem("OpenAI zajszűrés", openAiNoiseLabel(), false),
                       menuItem("Tolmács mód", interpreterLabel(), interpreterMode),
                       menuItem("Ablakkezelés", "másolás, teljes törlés, tükör mód", false),
                       menuItem("Alapbeállítások", "nyelvpár marad, fordítás/bevitel visszaáll", false)
@@ -1863,9 +1931,12 @@ jobs:
                       if(w==4) chooseVad();
                       if(w==5) showDelayDialog();
                       if(w==6) chooseMicGate();
-                      if(w==7) chooseInterpreterMode();
-                      if(w==8) windowMenu();
-                      if(w==9) resetCoreSettings();
+                      if(w==7) chooseAudioSource();
+                      if(w==8) chooseAndroidEffects();
+                      if(w==9) chooseOpenAiNoise();
+                      if(w==10) chooseInterpreterMode();
+                      if(w==11) windowMenu();
+                      if(w==12) resetCoreSettings();
                       updateButtons();
                   });
               }
@@ -1970,6 +2041,9 @@ jobs:
               void chooseMode() { chooseFrom("Fordítás stílusa", modes, mode, v -> { mode = v; save(); sessionUpdateIfConnected(); }); }
               void chooseVad() { chooseFrom("Beszéd felismerése", vadModes, vadMode, v -> { vadMode = v; save(); sessionUpdateIfConnected(); }); }
               void chooseMicGate() { chooseFrom("Mikrofon érzékenysége", micGateModes, micGateMode, v -> { micGateMode = v; save(); }); }
+              void chooseAudioSource() { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }); }
+              void chooseAndroidEffects() { chooseFrom("Android zajszűrés", androidEffectsModes, androidEffectsMode, v -> { androidEffectsMode = v; save(); restartIfNeeded(); }); }
+              void chooseOpenAiNoise() { chooseFrom("OpenAI zajszűrés", openAiNoiseModes, openAiNoiseMode, v -> { openAiNoiseMode = v; save(); sessionUpdateIfConnected(); }); }
 
               void resetCoreSettings() {
                   new AlertDialog.Builder(this)
@@ -1982,6 +2056,9 @@ jobs:
                         vadMode = "medium";
                         delayMode = "medium";
                         micGateMode = "sensitive";
+                        audioSourceMode = "recognition";
+                        androidEffectsMode = "recommended";
+                        openAiNoiseMode = "near_field";
                         interpreterMode = false;
                         mirrorBottomMode = false;
                         save();
@@ -2277,14 +2354,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V107.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V107.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V108.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V108.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V107
+          name: Fordito_V108
           path: |
             artifact/*.apk
             artifact/*.aab
