@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 105; versionName = "10.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 106; versionName = "10.6" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V105" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V106" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -191,8 +191,8 @@ jobs:
               String model = "gpt-realtime-2";
               String profile = "truck_bulk";
               String mode = "natural";
-              String vadMode = "low";
-              String delayMode = "xhigh";
+              String vadMode = "medium";
+              String delayMode = "medium";
               String micGateMode = "sensitive";
               String topLang = "hu";
               String bottomLang = "fr";
@@ -268,14 +268,14 @@ jobs:
                   model = sp.getString("model", "gpt-realtime-2");
                   profile = sp.getString("profile", "truck_bulk");
                   mode = sp.getString("mode", "natural");
-                  vadMode = sp.getString("vadMode", "low");
-                  delayMode = sp.getString("delayMode", "xhigh");
+                  vadMode = sp.getString("vadMode", "medium");
+                  delayMode = sp.getString("delayMode", "medium");
                   micGateMode = sp.getString("micGateMode", "sensitive");
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   mirrorBottomMode = sp.getBoolean("mirrorBottomMode", false);
                   topLang = sp.getString("topLang", "fr");
                   bottomLang = sp.getString("bottomLang", "hu");
-                  if("normal".equals(vadMode)) vadMode = "high";
+                  if("normal".equals(vadMode)) vadMode = "medium";
               }
 
               void save() {
@@ -302,7 +302,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V105");
+                  TextView title = label("Fordito_V106");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -800,7 +800,7 @@ jobs:
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
 
-                      // V105: csak dokumentált Realtime VAD mezők.
+                      // V106: a bevált valós beállítás az alap: Normál VAD + kiegyensúlyozott transzkripció + érzékeny helyi kapu.
                       // Tapasztalat: kamionfülkében a túl szigorú helyi kapu levágta a beszéd elejét.
                       // Ezért az alapérték érzékenyebb: a beszéd sértetlenül menjen át, az OpenAI VAD dönt.
                       JSONObject vad = new JSONObject();
@@ -908,23 +908,23 @@ jobs:
               String micGateLabel() { return labelOf(micGateModes, micGateMode); }
 
               double vadThreshold() {
-                  if("high".equals(vadMode)) return 0.72;     // gyorsabb, könnyebben indul
-                  if("medium".equals(vadMode)) return 0.78;   // normál
-                  if("auto".equals(vadMode)) return 0.76;     // biztonságos indulóérték
-                  return 0.74;                                // várakozó: ne vágja le a halkabb beszédet
+                  if("high".equals(vadMode)) return 0.70;     // gyors: könnyebben indul, csendesebb helyre
+                  if("medium".equals(vadMode)) return 0.74;   // V106 alap: normál, nem vágja túl a beszédet
+                  if("auto".equals(vadMode)) return 0.74;
+                  return 0.76;                                // várakozó: hosszabb, óvatosabb blokkzárás
               }
 
               int vadSilenceMs() {
-                  if("high".equals(vadMode)) return 450;
-                  if("medium".equals(vadMode)) return 700;
-                  if("auto".equals(vadMode)) return 900;
-                  return 1100;
+                  if("high".equals(vadMode)) return 500;
+                  if("medium".equals(vadMode)) return 850;
+                  if("auto".equals(vadMode)) return 850;
+                  return 1200;
               }
 
               int micGateThreshold() {
-                  if("sensitive".equals(micGateMode)) return 0;
-                  if("normal".equals(micGateMode)) return 180;
-                  return 320;
+                  if("sensitive".equals(micGateMode)) return 60;   // V106: nem nulla, csak nagyon enyhe kapu
+                  if("normal".equals(micGateMode)) return 160;
+                  return 240;
               }
 
               int avgAbsPcm16(byte[] data, int len) {
@@ -1019,9 +1019,9 @@ jobs:
               void audioLoop() {
                   int sr = 24000;
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-                  int bs = Math.max(min, 4096);
+                  int bs = Math.max(min * 2, 8192);
 
-                  // V105: Android VOICE_COMMUNICATION marad, mert beszédre optimalizált bemenetet ad.
+                  // V106: Android VOICE_COMMUNICATION marad, mert beszédre optimalizált bemenetet ad.
                   // A saját helyi kapu alapból érzékeny, hogy ne vágja le a beszédet.
                   rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
                   enableAndroidAudioEffects();
@@ -1519,8 +1519,9 @@ jobs:
                   // Csak nagyon tipikus, korábbi tesztekben is látott hamis kezdéseket fogunk meg.
                   // Nem általános szótárazás, nem új nyelvdetektor.
                   if(!selectedContains("nl") && (x.contains(" microfoon") || x.contains(" microfoonprobe") || x.contains(" foneprover"))) return true;
-                  if(!selectedContains("en") && (x.contains(" that s ") || x.contains(" that's "))) return true;
+                  if(!selectedContains("en") && (x.contains(" that s ") || x.contains(" that's ") || x.contains(" like it was ") || x.contains(" like it "))) return true;
                   if(!selectedContains("de") && (x.contains(" danke ") || x.contains(" bitte ") || x.contains(" nicht "))) return true;
+                  if(!selectedContains("tr") && (x.contains(" kazan ") || x.contains(" büyük ") || x.contains(" odul ") || x.contains(" ödül ") || x.contains(" ütü ") || x.contains(" her zaman "))) return true;
                   return false;
               }
 
@@ -1974,8 +1975,8 @@ jobs:
                         model = "gpt-realtime-2";
                         profile = "truck_bulk";
                         mode = "natural";
-                        vadMode = "low";
-                        delayMode = "xhigh";
+                        vadMode = "medium";
+                        delayMode = "medium";
                         micGateMode = "sensitive";
                         interpreterMode = false;
                         mirrorBottomMode = false;
@@ -2272,14 +2273,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V105.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V105.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V106.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V106.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V105
+          name: Fordito_V106
           path: |
             artifact/*.apk
             artifact/*.aab
