@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V106" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V107" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -249,9 +249,10 @@ jobs:
               };
 
               final String[][] micGateModes = {
-                  {"Érzékeny / halk beszéd","sensitive"},
-                  {"Normál","normal"},
-                  {"Szigorúbb kapu","precise"}
+                  {"Jelenlegi / enyhe kapu","sensitive"},
+                  {"Kicsit erősebb kapu","gate_low"},
+                  {"Normál kapu","normal"},
+                  {"Erősebb kapu","gate_high"}
               };
 
               @Override public void onCreate(Bundle b) {
@@ -302,7 +303,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V106");
+                  TextView title = label("Fordito_V107");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -800,7 +801,7 @@ jobs:
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
 
-                      // V106: a bevált valós beállítás az alap: Normál VAD + kiegyensúlyozott transzkripció + érzékeny helyi kapu.
+                      // V107: a bevált valós beállítás az alap: Normál VAD + kiegyensúlyozott transzkripció + érzékeny helyi kapu.
                       // Tapasztalat: kamionfülkében a túl szigorú helyi kapu levágta a beszéd elejét.
                       // Ezért az alapérték érzékenyebb: a beszéd sértetlenül menjen át, az OpenAI VAD dönt.
                       JSONObject vad = new JSONObject();
@@ -909,7 +910,7 @@ jobs:
 
               double vadThreshold() {
                   if("high".equals(vadMode)) return 0.70;     // gyors: könnyebben indul, csendesebb helyre
-                  if("medium".equals(vadMode)) return 0.74;   // V106 alap: normál, nem vágja túl a beszédet
+                  if("medium".equals(vadMode)) return 0.74;   // V107 alap: normál, nem vágja túl a beszédet
                   if("auto".equals(vadMode)) return 0.74;
                   return 0.76;                                // várakozó: hosszabb, óvatosabb blokkzárás
               }
@@ -922,9 +923,12 @@ jobs:
               }
 
               int micGateThreshold() {
-                  if("sensitive".equals(micGateMode)) return 60;   // V106: nem nulla, csak nagyon enyhe kapu
-                  if("normal".equals(micGateMode)) return 160;
-                  return 240;
+                  // V107: négy fokozat teszteléshez. Nem dobja el a csomagot, csak nullázza a túl halk/zajos részt.
+                  if("sensitive".equals(micGateMode)) return 60;    // eddigi V106 közeli állapot
+                  if("gate_low".equals(micGateMode)) return 100;    // enyhe emelés
+                  if("normal".equals(micGateMode)) return 150;      // ajánlott próba zajosabb fülkében
+                  if("gate_high".equals(micGateMode)) return 220;   // erősebb szűrés, ha sok a szemét
+                  return 60;
               }
 
               int avgAbsPcm16(byte[] data, int len) {
@@ -1019,10 +1023,10 @@ jobs:
               void audioLoop() {
                   int sr = 24000;
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-                  int bs = Math.max(min * 2, 8192);
+                  int bs = Math.max(min, 4800);
 
-                  // V106: Android VOICE_COMMUNICATION marad, mert beszédre optimalizált bemenetet ad.
-                  // A saját helyi kapu alapból érzékeny, hogy ne vágja le a beszédet.
+                  // V107: 24 kHz PCM16 mono marad. Buffer cél kb. 100 ms, hogy ne lassuljon a live fordítás.
+                  // A saját helyi kapu menüből több fokozatban tesztelhető.
                   rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
                   enableAndroidAudioEffects();
                   streaming = true;
@@ -2273,14 +2277,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V106.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V106.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V107.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V107.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V106
+          name: Fordito_V107
           path: |
             artifact/*.apk
             artifact/*.aab
