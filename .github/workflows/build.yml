@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 100; versionName = "10.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 101; versionName = "10.1" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V99" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V101" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -192,7 +192,7 @@ jobs:
               String profile = "truck_bulk";
               String mode = "natural";
               String vadMode = "low";
-              String delayMode = "high";
+              String delayMode = "xhigh";
               String micGateMode = "precise";
               String topLang = "hu";
               String bottomLang = "fr";
@@ -242,9 +242,9 @@ jobs:
               };
 
               final String[][] vadModes = {
-                  {"Gyors – hamarabb lezárja a mondatot","high"},
+                  {"Zajos kabin – szigorú felismerés","low"},
                   {"Normál – ajánlott","medium"},
-                  {"Várakozó – hosszabb szünetet is kivár","low"},
+                  {"Gyors – csendes helyre","high"},
                   {"Automatikus","auto"}
               };
 
@@ -269,7 +269,7 @@ jobs:
                   profile = sp.getString("profile", "truck_bulk");
                   mode = sp.getString("mode", "natural");
                   vadMode = sp.getString("vadMode", "low");
-                  delayMode = sp.getString("delayMode", "high");
+                  delayMode = sp.getString("delayMode", "xhigh");
                   micGateMode = sp.getString("micGateMode", "precise");
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   mirrorBottomMode = sp.getBoolean("mirrorBottomMode", false);
@@ -302,7 +302,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V99");
+                  TextView title = label("Fordito_V101");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -800,14 +800,15 @@ jobs:
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
 
-                      // Speech recognition: use Realtime semantic VAD, not a fixed silence timer.
-                      // The client only streams PCM16 audio; the API decides semantic speech boundaries.
+                      // V101: zajos kabinra a dokumentált server_vad való.
+                      // Dokumentált mezők: threshold, prefix_padding_ms, silence_duration_ms.
+                      // Magasabb threshold = zajos környezetben kevesebb téves beszédindítás.
                       JSONObject vad = new JSONObject();
-                      vad.put("type", "semantic_vad");
-                      vad.put("eagerness", vadMode);
-                      // V47: a beszédhatárt továbbra is a Realtime dönti el,
-                      // de NEM kérünk automatikus nagy válaszblokkot az audio végén.
-                      // A fordítás a beérkező transcript-delta szövegblokkokból indul.
+                      vad.put("type", "server_vad");
+                      vad.put("threshold", vadThreshold());
+                      vad.put("prefix_padding_ms", 300);
+                      vad.put("silence_duration_ms", vadSilenceMs());
+                      // Beszédfelismerés/fordítás közben nem kérünk automatikus válaszblokkot.
                       vad.put("create_response", false);
 
                       JSONObject input = new JSONObject();
@@ -906,6 +907,20 @@ jobs:
 
               String micGateLabel() { return labelOf(micGateModes, micGateMode); }
 
+              double vadThreshold() {
+                  if("high".equals(vadMode)) return 0.75;     // csendes helyen gyorsabb
+                  if("medium".equals(vadMode)) return 0.82;   // normál
+                  if("auto".equals(vadMode)) return 0.85;     // automatikushoz zajosabb indulóérték
+                  return 0.88;                                // zajos kabin: csak erősebb emberi beszéd induljon el
+              }
+
+              int vadSilenceMs() {
+                  if("high".equals(vadMode)) return 450;
+                  if("medium".equals(vadMode)) return 700;
+                  if("auto".equals(vadMode)) return 900;
+                  return 1100;
+              }
+
               int micGateThreshold() {
                   if("sensitive".equals(micGateMode)) return 0;
                   if("normal".equals(micGateMode)) return 180;
@@ -937,15 +952,18 @@ jobs:
 
               String delayLabel() {
                   if("low".equals(delayMode)) return "Gyors – kisebb késleltetés";
+                  if("medium".equals(delayMode)) return "Kiegyensúlyozott – ajánlott";
                   if("high".equals(delayMode)) return "Pontos – precízebb hangbevitel";
-                  return "Kiegyensúlyozott – ajánlott";
+                  if("xhigh".equals(delayMode)) return "Nagyon pontos – zajos környezet";
+                  return "Nagyon pontos – zajos környezet";
               }
 
               void showDelayDialog() {
-                  final String[] names = {"Gyors", "Kiegyensúlyozott", "Pontos"};
-                  final String[] vals = {"low", "medium", "high"};
-                  int checked = 1;
+                  final String[] names = {"Gyors", "Kiegyensúlyozott", "Pontos", "Nagyon pontos / zajos környezet"};
+                  final String[] vals = {"low", "medium", "high", "xhigh"};
+                  int checked = 3;
                   if("low".equals(delayMode)) checked = 0;
+                  else if("medium".equals(delayMode)) checked = 1;
                   else if("high".equals(delayMode)) checked = 2;
 
                   new AlertDialog.Builder(this)
@@ -1956,7 +1974,7 @@ jobs:
                         profile = "truck_bulk";
                         mode = "natural";
                         vadMode = "low";
-                        delayMode = "high";
+                        delayMode = "xhigh";
                         micGateMode = "precise";
                         interpreterMode = false;
                         mirrorBottomMode = false;
@@ -2253,14 +2271,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V98.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V98.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V101.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V101.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V98
+          name: Fordito_V101
           path: |
             artifact/*.apk
             artifact/*.aab
