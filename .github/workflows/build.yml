@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V101" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V102" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -302,7 +302,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V101");
+                  TextView title = label("Fordito_V102");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -800,7 +800,7 @@ jobs:
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
 
-                      // V101: zajos kabinra a dokumentált server_vad való.
+                      // V102: zajos kabinra a dokumentált server_vad való.
                       // Dokumentált mezők: threshold, prefix_padding_ms, silence_duration_ms.
                       // Magasabb threshold = zajos környezetben kevesebb téves beszédindítás.
                       JSONObject vad = new JSONObject();
@@ -1324,33 +1324,34 @@ jobs:
               }
 
               boolean isLikelyNoisyTranscriptBlock(String block) {
-        if(block == null) return true;
-        String t = block.trim();
-        if(t.length() == 0) return true;
-        String lower = " " + t.toLowerCase(Locale.ROOT).replaceAll("[^a-záéíóöőúüűàâçèéêëîïôùûüÿñæœß\s]", " ").replaceAll("\s+", " ").trim() + " ";
-        int words = lower.trim().length() == 0 ? 0 : lower.trim().split("\s+").length;
-        if(words <= 1) return true;
+                  if(block == null) return true;
+                  String t = block.trim();
+                  if(t.length() == 0) return true;
+                  String lower = " " + t.toLowerCase(Locale.ROOT)
+                          .replaceAll("[^a-záéíóöőúüűàâçèéêëîïôùûüÿñæœß\\s]", " ")
+                          .replaceAll("\\s+", " ").trim() + " ";
+                  int words = lower.trim().length() == 0 ? 0 : lower.trim().split("\\s+").length;
+                  if(words <= 1) return true;
 
-        int foreignHits = 0;
-        if(!selectedContains("nl")) {
-            String[] nl = {" het ", " een ", " wel ", " geen ", " niet ", " maar ", " jullie ", " reserver ", " gereserveerd ", "wasergadas"};
-            for(String w: nl) if(lower.contains(w)) foreignHits++;
-        }
-        if(!selectedContains("de")) {
-            String[] de = {" ich ", " nicht ", " und ", " oder ", " danke ", " bitte ", " aber ", " wasser "};
-            for(String w: de) if(lower.contains(w)) foreignHits++;
-        }
-        if(!selectedContains("en")) {
-            String[] en = {" allò ", " hello ", " that ", " this ", " would ", " reserved ", " microphone "};
-            for(String w: en) if(lower.contains(w)) foreignHits++;
-        }
-        // HU/FR párnál tipikus STT-halandzsa: több holland/német/angol darab keveredik magyar szavakkal.
-        if(foreignHits >= 3) return true;
-        if(words < 6 && foreignHits >= 1) return true;
-        return false;
-    }
+                  int foreignHits = 0;
+                  if(!selectedContains("nl")) {
+                      String[] nl = {" het ", " een ", " wel ", " geen ", " niet ", " maar ", " jullie ", " reserver ", " gereserveerd ", "wasergadas"};
+                      for(String w: nl) if(lower.contains(w)) foreignHits++;
+                  }
+                  if(!selectedContains("de")) {
+                      String[] de = {" ich ", " nicht ", " und ", " oder ", " danke ", " bitte ", " aber ", " wasser "};
+                      for(String w: de) if(lower.contains(w)) foreignHits++;
+                  }
+                  if(!selectedContains("en")) {
+                      String[] en = {" allò ", " hello ", " that ", " this ", " would ", " reserved ", " microphone "};
+                      for(String w: en) if(lower.contains(w)) foreignHits++;
+                  }
+                  if(foreignHits >= 3) return true;
+                  if(words < 6 && foreignHits >= 1) return true;
+                  return false;
+              }
 
-    boolean markLiveBlockQueued(String block) {
+              boolean markLiveBlockQueued(String block) {
                   String h = normalizeLiveBlockHash(block);
                   if(h.length() < 3) return false;
                   if(recentLiveBlockHashes.contains(h)) return false;
@@ -2271,14 +2272,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V101.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V101.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V102.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V102.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V101
+          name: Fordito_V102
           path: |
             artifact/*.apk
             artifact/*.aab
