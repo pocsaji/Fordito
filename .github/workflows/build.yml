@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 108; versionName = "10.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 109; versionName = "10.9" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V108" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V109" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -191,12 +191,12 @@ jobs:
               String model = "gpt-realtime-2";
               String profile = "truck_bulk";
               String mode = "natural";
-              String vadMode = "medium";
+              String vadMode = "low";
               String delayMode = "medium";
-              String micGateMode = "sensitive";
+              String micGateMode = "gate_low";
               String audioSourceMode = "recognition";
-              String androidEffectsMode = "recommended";
-              String openAiNoiseMode = "near_field";
+              String androidEffectsMode = "ns_only";
+              String openAiNoiseMode = "off";
               String topLang = "hu";
               String bottomLang = "fr";
 
@@ -268,8 +268,7 @@ jobs:
               final String[][] androidEffectsModes = {
                   {"Ajánlott: NS+AGC, AEC ki","recommended"},
                   {"Teljes: NS+AGC+AEC","full"},
-                  {"Csak zajszűrés","ns_only"},
-                  {"Android effektek ki","off"}
+                  {"Csak zajszűrés","ns_only"}
               };
 
               final String[][] openAiNoiseModes = {
@@ -282,6 +281,7 @@ jobs:
                   super.onCreate(b);
                   sp = getSharedPreferences("settings", MODE_PRIVATE);
                   load();
+                  applyV109StableDefaultsOnce();
                   ui();
                   reqMic();
                   initTts();
@@ -292,17 +292,30 @@ jobs:
                   model = sp.getString("model", "gpt-realtime-2");
                   profile = sp.getString("profile", "truck_bulk");
                   mode = sp.getString("mode", "natural");
-                  vadMode = sp.getString("vadMode", "medium");
+                  vadMode = sp.getString("vadMode", "low");
                   delayMode = sp.getString("delayMode", "medium");
-                  micGateMode = sp.getString("micGateMode", "sensitive");
+                  micGateMode = sp.getString("micGateMode", "gate_low");
                   audioSourceMode = sp.getString("audioSourceMode", "recognition");
-                  androidEffectsMode = sp.getString("androidEffectsMode", "recommended");
-                  openAiNoiseMode = sp.getString("openAiNoiseMode", "near_field");
+                  androidEffectsMode = sp.getString("androidEffectsMode", "ns_only");
+                  openAiNoiseMode = sp.getString("openAiNoiseMode", "off");
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   mirrorBottomMode = sp.getBoolean("mirrorBottomMode", false);
                   topLang = sp.getString("topLang", "fr");
                   bottomLang = sp.getString("bottomLang", "hu");
                   if("normal".equals(vadMode)) vadMode = "medium";
+              }
+
+              void applyV109StableDefaultsOnce() {
+                  int last = sp.getInt("stableDefaultsVersion", 0);
+                  if(last >= 109) return;
+                  vadMode = "low";
+                  delayMode = "medium";
+                  micGateMode = "gate_low";
+                  audioSourceMode = "recognition";
+                  androidEffectsMode = "ns_only";
+                  openAiNoiseMode = "off";
+                  sp.edit().putInt("stableDefaultsVersion", 109).apply();
+                  save();
               }
 
               void save() {
@@ -332,7 +345,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V108");
+                  TextView title = label("Fordito_V109");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -830,7 +843,7 @@ jobs:
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
 
-                      // V108: hanglánc-próba: Android hangforrás + Android effektek + OpenAI zajszűrés menüből állítható.
+                      // V109: hanglánc-próba: Android hangforrás + Android effektek + OpenAI zajszűrés menüből állítható.
                       // Tapasztalat: kamionfülkében a túl szigorú helyi kapu levágta a beszéd elejét.
                       // Ezért az alapérték érzékenyebb: a beszéd sértetlenül menjen át, az OpenAI VAD dönt.
                       JSONObject vad = new JSONObject();
@@ -848,7 +861,7 @@ jobs:
                       input.put("format", format);
                       input.put("turn_detection", vad);
 
-                      // V108: OpenAI Realtime oldali zajszűrés menüből.
+                      // V109: OpenAI Realtime oldali zajszűrés menüből.
                       // near_field: telefon/headset közeli beszéd. far_field: távolabb lévő mikrofon.
                       if(!"off".equals(openAiNoiseMode)) {
                           JSONObject nr = new JSONObject();
@@ -1089,7 +1102,7 @@ jobs:
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4800);
 
-                  // V108: 24 kHz PCM16 mono marad. Buffer cél kb. 100 ms.
+                  // V109: 24 kHz PCM16 mono marad. Buffer cél kb. 100 ms.
                   // Hangforrás és Android/OpenAI zajszűrés menüből tesztelhető.
                   rec = makeBestAudioRecord(sr, bs);
                   if(rec == null) { runOnUiThread(() -> state.setText("mikrofon hiba")); return; }
@@ -2053,12 +2066,12 @@ jobs:
                         model = "gpt-realtime-2";
                         profile = "truck_bulk";
                         mode = "natural";
-                        vadMode = "medium";
+                        vadMode = "low";
                         delayMode = "medium";
-                        micGateMode = "sensitive";
+                        micGateMode = "gate_low";
                         audioSourceMode = "recognition";
-                        androidEffectsMode = "recommended";
-                        openAiNoiseMode = "near_field";
+                        androidEffectsMode = "ns_only";
+                        openAiNoiseMode = "off";
                         interpreterMode = false;
                         mirrorBottomMode = false;
                         save();
@@ -2354,14 +2367,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V108.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V108.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V109.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V109.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V108
+          name: Fordito_V109
           path: |
             artifact/*.apk
             artifact/*.aab
