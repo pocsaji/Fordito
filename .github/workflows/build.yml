@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 109; versionName = "10.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 110; versionName = "11.0" }
 
               signingConfigs {
                   create("release") {
@@ -79,7 +79,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V109" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V110" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -151,6 +151,7 @@ jobs:
               boolean finalizingStop = false;
               boolean interpreterMode = false;
               boolean mirrorBottomMode = false;
+              boolean backgroundScreenAllowed = false;
               boolean manualTopSource = true;
               boolean responseInProgress = false;
               long sessionStart = 0L;
@@ -245,10 +246,10 @@ jobs:
               };
 
               final String[][] vadModes = {
-                  {"Várakozó – hosszabb szünetet is kivár","low"},
-                  {"Normál – ajánlott","medium"},
-                  {"Gyors – csendes helyre","high"},
-                  {"Automatikus","auto"}
+                  {"Lassú mondatzárás – hosszabb szünetet kivár","low"},
+                  {"Átlagos mondatzárás – ajánlott","medium"},
+                  {"Gyors mondatzárás – rövidebb szünet után zár","high"},
+                  {"Automatikus mondatzárás","auto"}
               };
 
               final String[][] micGateModes = {
@@ -281,6 +282,7 @@ jobs:
                   super.onCreate(b);
                   sp = getSharedPreferences("settings", MODE_PRIVATE);
                   load();
+                  backgroundScreenAllowed = false;
                   applyV109StableDefaultsOnce();
                   ui();
                   reqMic();
@@ -345,7 +347,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V109");
+                  TextView title = label("Fordito_V110");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1002,15 +1004,15 @@ jobs:
               }
 
               String delayLabel() {
-                  if("low".equals(delayMode)) return "Gyors – kisebb késleltetés";
-                  if("medium".equals(delayMode)) return "Kiegyensúlyozott – ajánlott";
-                  if("high".equals(delayMode)) return "Pontos – precízebb hangbevitel";
-                  if("xhigh".equals(delayMode)) return "Nagyon pontos – hosszabb bevitel";
-                  return "Nagyon pontos – hosszabb bevitel";
+                  if("low".equals(delayMode)) return "Gyors – rövidebb bevitel";
+                  if("medium".equals(delayMode)) return "Átlagos – ajánlott";
+                  if("high".equals(delayMode)) return "Pontos – hosszabb bevitel";
+                  if("xhigh".equals(delayMode)) return "Nagyon pontos – leghosszabb bevitel";
+                  return "Nagyon pontos – leghosszabb bevitel";
               }
 
               void showDelayDialog() {
-                  final String[] names = {"Gyors", "Kiegyensúlyozott", "Pontos", "Nagyon pontos / hosszabb bevitel"};
+                  final String[] names = {"Gyors – rövidebb bevitel", "Átlagos – ajánlott", "Pontos – hosszabb bevitel", "Nagyon pontos – leghosszabb bevitel"};
                   final String[] vals = {"low", "medium", "high", "xhigh"};
                   int checked = 3;
                   if("low".equals(delayMode)) checked = 0;
@@ -1018,7 +1020,7 @@ jobs:
                   else if("high".equals(delayMode)) checked = 2;
 
                   new AlertDialog.Builder(this)
-                      .setTitle("Beszédfelismerés pontossága")
+                      .setTitle("Bevitel gyorsasága / pontossága")
                       .setSingleChoiceItems(names, checked, (d, which) -> {
                           delayMode = vals[which];
                           save();
@@ -1925,12 +1927,9 @@ jobs:
                       menuItem("AI modell", modelLabel(), false),
                       menuItem("Beszélgetési profil", profileLabel(), false),
                       menuItem("Fordítás stílusa", modeLabel(), false),
-                      menuItem("Beszéd felismerése", vadLabel(), false),
-                      menuItem("Beszédfelismerés pontossága", delayLabel(), false),
-                      menuItem("Mikrofon érzékenysége", micGateLabel(), false),
-                      menuItem("Hangforrás", audioSourceLabel(), false),
-                      menuItem("Android zajszűrés", androidEffectsLabel(), false),
-                      menuItem("OpenAI zajszűrés", openAiNoiseLabel(), false),
+                      menuItem("Beszédfelismerés", speechMenuLabel(), false),
+                      menuItem("Hang / zajszűrés", noiseMenuLabel(), false),
+                      menuItem("Háttér / lezárt kijelző", backgroundScreenLabel(), backgroundScreenAllowed),
                       menuItem("Tolmács mód", interpreterLabel(), interpreterMode),
                       menuItem("Ablakkezelés", "másolás, teljes törlés, tükör mód", false),
                       menuItem("Alapbeállítások", "nyelvpár marad, fordítás/bevitel visszaáll", false)
@@ -1941,15 +1940,68 @@ jobs:
                       if(w==1) chooseModel();
                       if(w==2) chooseProfile();
                       if(w==3) chooseMode();
-                      if(w==4) chooseVad();
-                      if(w==5) showDelayDialog();
-                      if(w==6) chooseMicGate();
-                      if(w==7) chooseAudioSource();
-                      if(w==8) chooseAndroidEffects();
-                      if(w==9) chooseOpenAiNoise();
-                      if(w==10) chooseInterpreterMode();
-                      if(w==11) windowMenu();
-                      if(w==12) resetCoreSettings();
+                      if(w==4) speechMenu();
+                      if(w==5) noiseMenu();
+                      if(w==6) chooseBackgroundScreenMode();
+                      if(w==7) chooseInterpreterMode();
+                      if(w==8) windowMenu();
+                      if(w==9) resetCoreSettings();
+                      updateButtons();
+                  });
+              }
+
+              String speechMenuLabel() {
+                  return "bevitel: " + delayLabel() + " / szünet: " + vadLabel();
+              }
+
+              String noiseMenuLabel() {
+                  return "mikrofon, hangforrás, Android/OpenAI";
+              }
+
+              String backgroundScreenLabel() {
+                  return backgroundScreenAllowed ? "engedélyezve erre az indításra" : "kikapcsolva – minden indításkor ez az alap";
+              }
+
+              void speechMenu() {
+                  if(uiLockedForLive || finalizingStop) return;
+                  CharSequence[] items = {
+                      menuItem("Bevitel gyorsasága / pontossága", delayLabel(), false),
+                      menuItem("Két mondat közötti szünet", vadLabel(), false)
+                  };
+
+                  showCenteredMenu("Beszédfelismerés", items, (d,w) -> {
+                      if(w==0) showDelayDialog();
+                      if(w==1) chooseVad();
+                      updateButtons();
+                  });
+              }
+
+              void noiseMenu() {
+                  if(uiLockedForLive || finalizingStop) return;
+                  CharSequence[] items = {
+                      menuItem("Mikrofon érzékenysége", micGateLabel(), false),
+                      menuItem("Hangforrás", audioSourceLabel(), false),
+                      menuItem("Android zajszűrés", androidEffectsLabel(), false),
+                      menuItem("OpenAI zajszűrés", openAiNoiseLabel(), false)
+                  };
+
+                  showCenteredMenu("Hang / zajszűrés", items, (d,w) -> {
+                      if(w==0) chooseMicGate();
+                      if(w==1) chooseAudioSource();
+                      if(w==2) chooseAndroidEffects();
+                      if(w==3) chooseOpenAiNoise();
+                      updateButtons();
+                  });
+              }
+
+              void chooseBackgroundScreenMode() {
+                  CharSequence[] items = {
+                      menuItem("Kikapcsolva", "alapértelmezett minden appindításkor", !backgroundScreenAllowed),
+                      menuItem("Engedélyezve erre az indításra", "csak menüállapot, háttérműködés még nincs beépítve", backgroundScreenAllowed)
+                  };
+                  showCenteredMenu("Háttér / lezárt kijelző", items, (d,w) -> {
+                      backgroundScreenAllowed = (w == 1);
+                      Toast.makeText(this, backgroundScreenAllowed ? "Háttér mód menüben engedélyezve erre az indításra." : "Háttér mód kikapcsolva.", Toast.LENGTH_SHORT).show();
                       updateButtons();
                   });
               }
@@ -2052,7 +2104,7 @@ jobs:
               void chooseModel() { chooseFrom("AI modell", models, model, v -> { model = v; save(); restartIfNeeded(); }); }
               void chooseProfile() { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save(); sessionUpdateIfConnected(); }); }
               void chooseMode() { chooseFrom("Fordítás stílusa", modes, mode, v -> { mode = v; save(); sessionUpdateIfConnected(); }); }
-              void chooseVad() { chooseFrom("Beszéd felismerése", vadModes, vadMode, v -> { vadMode = v; save(); sessionUpdateIfConnected(); }); }
+              void chooseVad() { chooseFrom("Két mondat közötti szünet", vadModes, vadMode, v -> { vadMode = v; save(); sessionUpdateIfConnected(); }); }
               void chooseMicGate() { chooseFrom("Mikrofon érzékenysége", micGateModes, micGateMode, v -> { micGateMode = v; save(); }); }
               void chooseAudioSource() { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }); }
               void chooseAndroidEffects() { chooseFrom("Android zajszűrés", androidEffectsModes, androidEffectsMode, v -> { androidEffectsMode = v; save(); restartIfNeeded(); }); }
@@ -2361,60 +2413,20 @@ jobs:
           keyPassword=$ANDROID_KEY_PASSWORD
           EOF
 
-      - name: Print SHA-256 certificate fingerprint
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          keytool -list -v \
-            -keystore release-key.jks \
-            -alias "$ANDROID_KEY_ALIAS" \
-            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
-            -keypass "$ANDROID_KEY_PASSWORD" | grep "SHA256"
-
-      - name: Save key info for backup
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          mkdir -p key-info
-          {
-            echo "Fordito release signing key info"
-            echo "Key file: release-key.jks"
-            echo "Alias: $ANDROID_KEY_ALIAS"
-            echo "Keystore password: use your saved password"
-            echo "Key password: usually the same saved password"
-            echo ""
-            keytool -list -v \
-              -keystore release-key.jks \
-              -alias "$ANDROID_KEY_ALIAS" \
-              -storepass "$ANDROID_KEYSTORE_PASSWORD" \
-              -keypass "$ANDROID_KEY_PASSWORD" | grep "SHA256"
-          } > key-info/release-key-info.txt
-
-      - name: Upload key info backup
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-key-info
-          path: key-info/release-key-info.txt
-          if-no-files-found: error
-
       - name: Build signed release APK and AAB
         run: gradle assembleRelease bundleRelease --stacktrace
 
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V109.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V109.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V110.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V110.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V109
+          name: Fordito_V110
           path: |
             artifact/*.apk
             artifact/*.aab
