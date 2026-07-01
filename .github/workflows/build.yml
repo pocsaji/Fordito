@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 110; versionName = "11.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 111; versionName = "11.1" }
 
               signingConfigs {
                   create("release") {
@@ -79,15 +79,76 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <application android:allowBackup="false" android:label="Fordito_V110" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+              <application android:allowBackup="false" android:label="Fordito_V111" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
+                  <service
+                      android:name=".VoiceForegroundService"
+                      android:exported="false"
+                      android:foregroundServiceType="microphone|mediaPlayback" />
               </application>
           </manifest>
+          EOF
+
+          cat > app/src/main/java/com/attila/forditokonzol/VoiceForegroundService.java <<'EOF'
+          package com.attila.forditokonzol;
+
+          import android.app.*;
+          import android.content.*;
+          import android.os.*;
+
+          public class VoiceForegroundService extends Service {
+              static final String CHANNEL_ID = "fordito_voice_background";
+              static final int NOTIFICATION_ID = 1101;
+
+              @Override public void onCreate() {
+                  super.onCreate();
+                  createChannel();
+              }
+
+              @Override public int onStartCommand(Intent intent, int flags, int startId) {
+                  startForeground(NOTIFICATION_ID, notification());
+                  return START_STICKY;
+              }
+
+              Notification notification() {
+                  Intent open = new Intent(this, MainActivity.class);
+                  open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                  PendingIntent pi = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+
+                  Notification.Builder b = Build.VERSION.SDK_INT >= 26
+                    ? new Notification.Builder(this, CHANNEL_ID)
+                    : new Notification.Builder(this);
+
+                  return b
+                    .setContentTitle("Fordító aktív")
+                    .setContentText("Háttér / lezárt kijelző engedélyezve – mikrofon használatban")
+                    .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                    .setContentIntent(pi)
+                    .setOngoing(true)
+                    .setCategory(Notification.CATEGORY_SERVICE)
+                    .build();
+              }
+
+              void createChannel() {
+                  if(Build.VERSION.SDK_INT >= 26) {
+                      NotificationChannel ch = new NotificationChannel(CHANNEL_ID, "Fordító háttér mód", NotificationManager.IMPORTANCE_LOW);
+                      ch.setDescription("Értesítés, amikor a fordító lezárt kijelzőnél is aktív.");
+                      NotificationManager nm = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
+                      if(nm != null) nm.createNotificationChannel(ch);
+                  }
+              }
+
+              @Override public IBinder onBind(Intent intent) { return null; }
+          }
           EOF
 
           cat > app/src/main/java/com/attila/forditokonzol/MainActivity.java <<'EOF'
@@ -286,6 +347,7 @@ jobs:
                   applyV109StableDefaultsOnce();
                   ui();
                   reqMic();
+                  reqNotifications();
                   initTts();
               }
 
@@ -786,6 +848,27 @@ jobs:
                       requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1001);
               }
 
+              void reqNotifications() {
+                  if(Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+                      requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1002);
+              }
+
+              void startBackgroundForegroundServiceIfAllowed() {
+                  if(!backgroundScreenAllowed) return;
+                  try {
+                      Intent i = new Intent(this, VoiceForegroundService.class);
+                      if(Build.VERSION.SDK_INT >= 26) startForegroundService(i);
+                      else startService(i);
+                  } catch(Exception e) {
+                      Toast.makeText(this, "Háttér mód nem indult: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                      backgroundScreenAllowed = false;
+                  }
+              }
+
+              void stopBackgroundForegroundService() {
+                  try { stopService(new Intent(this, VoiceForegroundService.class)); } catch(Exception ignored) {}
+              }
+
               boolean hasKey() {
                   return apiKey != null && apiKey.trim().startsWith("sk-");
               }
@@ -795,6 +878,7 @@ jobs:
                   if(withAudio && Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reqMic(); return; }
                   if(withAudio && sessionStart == 0L) sessionStart = System.currentTimeMillis();
                   if(withAudio && System.currentTimeMillis() - sessionStart > 20L*60L*1000L) { confirm(); return; }
+                  if(withAudio) startBackgroundForegroundServiceIfAllowed();
 
                   state.setText("kapcsolódás");
                   client = new OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build();
@@ -1167,6 +1251,7 @@ jobs:
                   recentLiveBlockHashOrder.clear();
                   try { if(ws != null) ws.close(1000, "stop"); } catch(Exception ignored) {}
                   ws = null;
+                  stopBackgroundForegroundService();
                   runOnUiThread(() -> {
                       state.setText("készenlét");
                       updateButtons();
@@ -1997,11 +2082,12 @@ jobs:
               void chooseBackgroundScreenMode() {
                   CharSequence[] items = {
                       menuItem("Kikapcsolva", "alapértelmezett minden appindításkor", !backgroundScreenAllowed),
-                      menuItem("Engedélyezve erre az indításra", "csak menüállapot, háttérműködés még nincs beépítve", backgroundScreenAllowed)
+                      menuItem("Engedélyezve erre az indításra", "lezárt kijelzőnél is fusson, értesítéssel", backgroundScreenAllowed)
                   };
                   showCenteredMenu("Háttér / lezárt kijelző", items, (d,w) -> {
                       backgroundScreenAllowed = (w == 1);
-                      Toast.makeText(this, backgroundScreenAllowed ? "Háttér mód menüben engedélyezve erre az indításra." : "Háttér mód kikapcsolva.", Toast.LENGTH_SHORT).show();
+                      if(!backgroundScreenAllowed) stopBackgroundForegroundService();
+                      Toast.makeText(this, backgroundScreenAllowed ? "Háttér mód engedélyezve erre az indításra." : "Háttér mód kikapcsolva.", Toast.LENGTH_SHORT).show();
                       updateButtons();
                   });
               }
@@ -2348,16 +2434,17 @@ jobs:
 
               @Override public void onPause() {
                   super.onPause();
-                  if(streaming) stop();
-                  // V98: ha háttérbe kerül az app, a mikrofon leáll,
-                  // de a FORDÍT és MENÜ gombokat is vissza kell engedni.
-                  finalizingStop = false;
-                  setLiveUiLocked(false);
-                  try {
-                      if(tts != null) tts.stop();
-                      ttsSpeaking = false;
-                  } catch(Exception ignored) {}
-                  updateButtons();
+                  if(streaming && !backgroundScreenAllowed) stop();
+                  if(!backgroundScreenAllowed) {
+                      // Ha nincs külön engedélyezve, háttérbe kerüléskor marad a régi, biztonságos működés: leáll.
+                      finalizingStop = false;
+                      setLiveUiLocked(false);
+                      try {
+                          if(tts != null) tts.stop();
+                          ttsSpeaking = false;
+                      } catch(Exception ignored) {}
+                      updateButtons();
+                  }
               }
 
               @Override public void onResume() {
@@ -2371,6 +2458,7 @@ jobs:
 
               @Override public void onDestroy() {
                   if(streaming) stop();
+                  else stopBackgroundForegroundService();
                   try {
                       if(tts != null) {
                           tts.stop();
