@@ -2383,6 +2383,14 @@ jobs:
           cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V109.aab
           ls -lah artifact
 
+
+      - name: Upload release keystore backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-key-backup
+          path: release-key.jks
+          if-no-files-found: error
+
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
