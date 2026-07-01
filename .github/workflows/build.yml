@@ -2373,6 +2373,34 @@ jobs:
             -storepass "$ANDROID_KEYSTORE_PASSWORD" \
             -keypass "$ANDROID_KEY_PASSWORD" | grep "SHA256"
 
+      - name: Save key info for backup
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          mkdir -p key-info
+          {
+            echo "Fordito release signing key info"
+            echo "Key file: release-key.jks"
+            echo "Alias: $ANDROID_KEY_ALIAS"
+            echo "Keystore password: use your saved password"
+            echo "Key password: usually the same saved password"
+            echo ""
+            keytool -list -v \
+              -keystore release-key.jks \
+              -alias "$ANDROID_KEY_ALIAS" \
+              -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+              -keypass "$ANDROID_KEY_PASSWORD" | grep "SHA256"
+          } > key-info/release-key-info.txt
+
+      - name: Upload key info backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-key-info
+          path: key-info/release-key-info.txt
+          if-no-files-found: error
+
       - name: Build signed release APK and AAB
         run: gradle assembleRelease bundleRelease --stacktrace
 
@@ -2382,14 +2410,6 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V109.apk
           cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V109.aab
           ls -lah artifact
-
-
-      - name: Upload release keystore backup
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-key-backup
-          path: release-key.jks
-          if-no-files-found: error
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
