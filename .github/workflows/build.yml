@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 111; versionName = "11.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 112; versionName = "11.2" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V111" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V112" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -211,6 +211,8 @@ jobs:
               boolean uiLockedForLive = false;
               boolean finalizingStop = false;
               boolean interpreterMode = false;
+              String interpreterAudioMode = "off";
+              volatile long ttsMuteUntilMs = 0L;
               boolean mirrorBottomMode = false;
               boolean backgroundScreenAllowed = false;
               boolean manualTopSource = true;
@@ -363,6 +365,9 @@ jobs:
                   androidEffectsMode = sp.getString("androidEffectsMode", "ns_only");
                   openAiNoiseMode = sp.getString("openAiNoiseMode", "off");
                   interpreterMode = sp.getBoolean("interpreterMode", false);
+                  interpreterAudioMode = sp.getString("interpreterAudioMode", interpreterMode ? "headset" : "off");
+                  if("off".equals(interpreterAudioMode)) interpreterMode = false;
+                  else interpreterMode = true;
                   mirrorBottomMode = sp.getBoolean("mirrorBottomMode", false);
                   topLang = sp.getString("topLang", "fr");
                   bottomLang = sp.getString("bottomLang", "hu");
@@ -395,6 +400,7 @@ jobs:
                     .putString("androidEffectsMode", androidEffectsMode)
                     .putString("openAiNoiseMode", openAiNoiseMode)
                     .putBoolean("interpreterMode", interpreterMode)
+                    .putString("interpreterAudioMode", interpreterAudioMode)
                     .putBoolean("mirrorBottomMode", mirrorBottomMode)
                     .putString("topLang", topLang)
                     .putString("bottomLang", bottomLang)
@@ -767,18 +773,21 @@ jobs:
                                   @Override public void onStart(String utteranceId) {}
                                   @Override public void onDone(String utteranceId) {
                                       runOnUiThread(() -> {
+                                          if("speaker".equals(interpreterAudioMode)) ttsMuteUntilMs = System.currentTimeMillis() + 500L;
                                           ttsSpeaking = false;
                                           drainSpeakQueue();
                                       });
                                   }
                                   @Override public void onError(String utteranceId) {
                                       runOnUiThread(() -> {
+                                          if("speaker".equals(interpreterAudioMode)) ttsMuteUntilMs = System.currentTimeMillis() + 500L;
                                           ttsSpeaking = false;
                                           drainSpeakQueue();
                                       });
                                   }
                                   @Override public void onError(String utteranceId, int errorCode) {
                                       runOnUiThread(() -> {
+                                          if("speaker".equals(interpreterAudioMode)) ttsMuteUntilMs = System.currentTimeMillis() + 500L;
                                           ttsSpeaking = false;
                                           drainSpeakQueue();
                                       });
@@ -821,6 +830,7 @@ jobs:
                       if(!interpreterMode) {
                           speakQueue.clear();
                           ttsSpeaking = false;
+                          ttsMuteUntilMs = 0L;
                           return;
                       }
                       if(tts == null || !ttsReady || ttsSpeaking || speakQueue.isEmpty()) return;
@@ -830,6 +840,7 @@ jobs:
                           return;
                       }
                       try { tts.setLanguage(localeForTts(item.lang)); } catch(Exception ignored) {}
+                      try { tts.setSpeechRate("hu".equals(item.lang) ? 1.0f : 1.10f); } catch(Exception ignored) {}
                       ttsSpeaking = true;
                       Bundle params = new Bundle();
                       String id = "fordito_tts_" + (++ttsSeq);
@@ -1205,6 +1216,9 @@ jobs:
                           if(read > 0) {
                               try {
                                   byte[] chunk = prepareAudioChunk(buf, read);
+                                  if("speaker".equals(interpreterAudioMode) && (ttsSpeaking || System.currentTimeMillis() < ttsMuteUntilMs)) {
+                                      chunk = new byte[read];
+                                  }
                                   JSONObject evt = new JSONObject();
                                   evt.put("type", "input_audio_buffer.append");
                                   evt.put("audio", Base64.encodeToString(chunk, Base64.NO_WRAP));
@@ -1235,6 +1249,7 @@ jobs:
               void stop() {
                   streaming = false;
                   connected = false;
+                  ttsMuteUntilMs = 0L;
                   releaseAndroidAudioEffects();
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception ignored) {}
                   rec = null;
@@ -2211,6 +2226,8 @@ jobs:
                         androidEffectsMode = "ns_only";
                         openAiNoiseMode = "off";
                         interpreterMode = false;
+                        interpreterAudioMode = "off";
+                        ttsMuteUntilMs = 0L;
                         mirrorBottomMode = false;
                         save();
                         sessionUpdateIfConnected();
@@ -2223,28 +2240,33 @@ jobs:
               }
 
               String interpreterLabel() {
-                  return interpreterMode ? "aktív – a kész fordítást felolvassa" : "inaktív – csak szöveges fordítás";
+                  if("headset".equals(interpreterAudioMode)) return "Bluetooth/headset mód – gyors, visszahallásvédelem nélkül";
+                  if("speaker".equals(interpreterAudioMode)) return "kihangosított telefon mód – visszahallásvédelemmel";
+                  return "kikapcsolva – csak szöveges fordítás";
               }
 
               void chooseInterpreterMode() {
                   String[][] data = {
-                      {"Inaktív", "off"},
-                      {"Aktív", "on"}
+                      {"Kikapcsolva", "off", "csak szöveges fordítás, nincs felolvasás"},
+                      {"Bluetooth/headset mód", "headset", "folyamatos beszélgetés headsettel, szüneteltetés nélkül"},
+                      {"Kihangosított telefon mód", "speaker", "telefon hangszóróhoz: TTS közben mikrofon tiltás + 500 ms védelem"}
                   };
                   CharSequence[] labels = new CharSequence[data.length];
                   for(int i=0;i<data.length;i++) {
-                      boolean selected = interpreterMode ? "on".equals(data[i][1]) : "off".equals(data[i][1]);
-                      String sub = "on".equals(data[i][1]) ? "a kész fordítást hangosan felolvassa" : "nem olvas fel, csak kiírja";
-                      labels[i] = menuItem(data[i][0], sub + (selected ? " • kiválasztva" : ""), selected);
+                      boolean selected = data[i][1].equals(interpreterAudioMode);
+                      labels[i] = menuItem(data[i][0], data[i][2] + (selected ? " • kiválasztva" : ""), selected);
                   }
                   showCenteredMenu("Tolmács mód", labels, (d,w) -> {
-                      interpreterMode = "on".equals(data[w][1]);
+                      interpreterAudioMode = data[w][1];
+                      interpreterMode = !"off".equals(interpreterAudioMode);
+                      ttsMuteUntilMs = 0L;
                       if(!interpreterMode) {
                           speakQueue.clear();
                           ttsSpeaking = false;
                           try { if(tts != null) tts.stop(); } catch(Exception ignored) {}
                       }
                       save();
+                      Toast.makeText(this, interpreterLabel(), Toast.LENGTH_SHORT).show();
                       updateButtons();
                   });
               }
