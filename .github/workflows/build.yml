@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 122; versionName = "12.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 123; versionName = "12.3" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V122" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V123" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -441,7 +441,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V122");
+                  TextView title = label("Fordito_V123");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2098,16 +2098,19 @@ jobs:
                   LinearLayout box = new LinearLayout(this);
                   box.setOrientation(LinearLayout.VERTICAL);
                   int pad = dp(18);
-                  box.setPadding(pad, dp(18), pad, dp(18));
+                  box.setPadding(pad, dp(10), pad, dp(14));
                   box.setBackgroundColor(Color.rgb(70,70,70));
 
                   TextView title = new TextView(this);
                   title.setText("Menü");
                   title.setTextColor(Color.WHITE);
-                  title.setTextSize(30);
+                  title.setTextSize(24);
+                  title.setIncludeFontPadding(false);
                   title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-                  title.setGravity(Gravity.LEFT);
-                  box.addView(title, new LinearLayout.LayoutParams(-1, dp(62)));
+                  title.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+                  LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(-1, dp(54));
+                  titleLp.setMargins(dp(12), 0, dp(12), dp(8));
+                  box.addView(title, titleLp);
 
                   addMenuButton(box, "Háttér / lezárt kijelző", backgroundMenuSubtitle(), backgroundScreenAllowed, v -> {
                       toggleBackgroundScreenMode();
@@ -2128,12 +2131,21 @@ jobs:
                   addMenuButton(box, "Ablakkezelés", "másolás, teljes törlés", false, v -> windowMenu());
                   addMenuButton(box, "Alapbeállítások", "nyelvpár marad, fordítás/bevitel visszaáll", false, v -> resetCoreSettings());
 
-                  AlertDialog dlg = new AlertDialog.Builder(this).setView(box).create();
+                  ScrollView scroll = new ScrollView(this);
+                  scroll.setFillViewport(false);
+                  scroll.setBackgroundColor(Color.TRANSPARENT);
+                  scroll.addView(box);
+
+                  AlertDialog dlg = new AlertDialog.Builder(this).setView(scroll).create();
                   holder[0] = dlg;
                   dlg.setOnShowListener(di -> {
                       try {
                           android.view.Window w = dlg.getWindow();
-                          if(w != null) w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+                          if(w != null) {
+                              w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+                              android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+                              w.setLayout((int)(dm.widthPixels * 0.96f), (int)(dm.heightPixels * 0.78f));
+                          }
                       } catch(Exception ignored) {}
                   });
                   dlg.show();
@@ -2155,40 +2167,41 @@ jobs:
                   b.setMinWidth(0);
                   b.setMinimumWidth(0);
                   b.setTextColor(Color.WHITE);
-                  b.setTextSize(21);
+                  b.setTextSize(18);
                   b.setGravity(Gravity.CENTER);
-                  b.setPadding(dp(14), dp(8), dp(14), dp(8));
+                  b.setPadding(dp(12), dp(8), dp(12), dp(8));
                   refreshMenuButton(b, title, subtitle, active);
                   b.setOnClickListener(listener);
-                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(110));
-                  lp.setMargins(dp(30), dp(8), dp(30), dp(8));
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(142));
+                  lp.setMargins(dp(30), dp(7), dp(30), dp(7));
                   parent.addView(b, lp);
                   return b;
               }
 
               void refreshMenuButton(Button b, String title, String subtitle, boolean active) {
-                  String full = title + (subtitle == null || subtitle.length() == 0 ? "" : "\n" + subtitle);
+                  String full = title + (subtitle == null || subtitle.length() == 0 ? "" : "
+" + subtitle);
                   SpannableString sp = new SpannableString(full);
                   sp.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                  sp.setSpan(new RelativeSizeSpan(1.12f), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                  sp.setSpan(new RelativeSizeSpan(1.05f), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   if(subtitle != null && subtitle.length() > 0) {
                       int start = title.length() + 1;
-                      sp.setSpan(new RelativeSizeSpan(0.72f), start, full.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                      sp.setSpan(new RelativeSizeSpan(0.55f), start, full.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   }
                   b.setText(sp);
                   b.setBackgroundColor(active ? Color.rgb(30,140,70) : Color.rgb(95,95,95));
               }
 
               String backgroundMenuSubtitle() {
-                  return backgroundScreenAllowed ? "mikrofon háttérben is aktív marad" : "kikapcsolva – minden indításkor ez az alap";
+                  return backgroundScreenAllowed ? "mikrofon háttérben is aktív marad" : "";
               }
 
               String interpreterMenuSubtitle() {
-                  return interpreterMode ? "a fordítást felolvassa" : "inaktív – csak szöveges fordítás";
+                  return interpreterMode ? "a fordítást felolvassa" : "";
               }
 
               String mirrorMenuSubtitle() {
-                  return mirrorBottomMode ? "a felső ablakot 180°-kal elfordítja" : "normál mód – mindkét ablak egy irányba";
+                  return mirrorBottomMode ? "a felső ablakot 180°-kal elfordítja" : "";
               }
 
               String translationMenuLabel() {
@@ -2798,14 +2811,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V122.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V122.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V123.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V123.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V122
+          name: Fordito_V123
           path: |
             artifact/*.apk
             artifact/*.aab
