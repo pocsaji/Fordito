@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 120; versionName = "12.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 130; versionName = "13.0" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V120" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V130" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -441,7 +441,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V120");
+                  TextView title = label("Fordito_V130");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -454,12 +454,8 @@ jobs:
                   manualBtn.setTextSize(12);
                   manualBtn.setSingleLine(false);
                   manualBtn.setMaxLines(2);
-                  manualBtn.setLines(2);
                   manualBtn.setGravity(Gravity.CENTER);
-                  manualBtn.setPadding(0,0,0,0);
-                  manualBtn.setMinHeight(0);
-                  manualBtn.setMinimumHeight(0);
-                  manualBtn.setIncludeFontPadding(false);
+                  manualBtn.setPadding(4,2,4,2);
                   bottomLangBtn = btn("ALSÓ");
                   langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,85,1));
                   langRow.addView(manualBtn, new LinearLayout.LayoutParams(0,85,1));
@@ -584,10 +580,8 @@ jobs:
                           manualBtn.setTextSize(12);
                           manualBtn.setSingleLine(false);
                           manualBtn.setMaxLines(2);
-                          manualBtn.setLines(2);
                           manualBtn.setGravity(Gravity.CENTER);
-                          manualBtn.setPadding(0,0,0,0);
-                          manualBtn.setIncludeFontPadding(false);
+                          manualBtn.setPadding(4,2,4,2);
                           manualBtn.setBackgroundColor(enabled ? Color.rgb(34,139,34) : Color.rgb(150,55,50));
                       }
                   } catch(Exception ignored) {}
@@ -2797,14 +2791,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V120.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V120.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V130.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V130.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V120
+          name: Fordito_V130
           path: |
             artifact/*.apk
             artifact/*.aab
