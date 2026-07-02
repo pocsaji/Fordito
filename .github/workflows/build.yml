@@ -450,7 +450,11 @@ jobs:
 
                   LinearLayout langRow = row();
                   topLangBtn = btn("FELSŐ");
-                  manualBtn = btn("MANUÁL");
+                  manualBtn = btn("ABLAKOK\nSZERKESZTÉSE");
+                  manualBtn.setTextSize(12);
+                  manualBtn.setSingleLine(false);
+                  manualBtn.setLines(2);
+                  manualBtn.setGravity(Gravity.CENTER);
                   bottomLangBtn = btn("ALSÓ");
                   langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,98,1));
                   langRow.addView(manualBtn, new LinearLayout.LayoutParams(0,98,1));
@@ -571,7 +575,11 @@ jobs:
                           hideKeyboard();
                       }
                       if(manualBtn != null) {
-                          manualBtn.setText(enabled ? "KÉSZ" : "MANUÁL");
+                          manualBtn.setText(enabled ? "ABLAKOK\nSZERKESZTÉSE" : "ABLAKOK\nLEZÁRVA");
+                          manualBtn.setTextSize(12);
+                          manualBtn.setSingleLine(false);
+                          manualBtn.setLines(2);
+                          manualBtn.setGravity(Gravity.CENTER);
                           manualBtn.setBackgroundColor(enabled ? Color.rgb(34,139,34) : Color.rgb(150,55,50));
                       }
                   } catch(Exception ignored) {}
@@ -1130,7 +1138,9 @@ jobs:
                   return "Nagyon pontos – leghosszabb bevitel";
               }
 
-              void showDelayDialog() {
+              void showDelayDialog() { showDelayDialog(null); }
+
+              void showDelayDialog(final Runnable back) {
                   final String[] names = {"Gyors – rövidebb bevitel", "Átlagos – ajánlott", "Pontos – hosszabb bevitel", "Nagyon pontos – leghosszabb bevitel"};
                   final String[] vals = {"low", "medium", "high", "xhigh"};
                   int checked = 3;
@@ -1145,6 +1155,7 @@ jobs:
                           save();
                           d.dismiss();
                           Toast.makeText(this, "Új kapcsolatnál érvényesül: " + names[which], Toast.LENGTH_SHORT).show();
+                          if(back != null) new Handler().postDelayed(back, 120);
                       })
                       .setNegativeButton("Mégse", null)
                       .show();
@@ -2129,10 +2140,10 @@ jobs:
                               w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
                               android.view.WindowManager.LayoutParams attrs = w.getAttributes();
                               attrs.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-                              attrs.y = dp(95);
+                              attrs.y = dp(150);
                               android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
                               getWindowManager().getDefaultDisplay().getMetrics(dm);
-                              attrs.width = Math.max(dp(560), dm.widthPixels - dp(64));
+                              attrs.width = dp(500);
                               w.setAttributes(attrs);
                           }
                       } catch(Exception ignored) {}
@@ -2157,8 +2168,8 @@ jobs:
                   b.setIncludeFontPadding(false);
                   b.setOnClickListener(listener);
                   refreshMenuButton(b, title, subtitle, active);
-                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(112));
-                  lp.setMargins(dp(0), dp(4), dp(0), dp(4));
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(130));
+                  lp.setMargins(dp(0), dp(5), dp(0), dp(5));
                   parent.addView(b, lp);
                   return b;
               }
@@ -2192,10 +2203,10 @@ jobs:
                   };
 
                   showCenteredMenu("Fordítási beállítások", items, (d,w) -> {
-                      if(w==0) chooseModel();
-                      if(w==1) chooseProfile();
-                      if(w==2) chooseMode();
-                      if(w==3) chooseSoundProfile();
+                      if(w==0) chooseModel(() -> translationMenu());
+                      if(w==1) chooseProfile(() -> translationMenu());
+                      if(w==2) chooseMode(() -> translationMenu());
+                      if(w==3) chooseSoundProfile(() -> translationMenu());
                       updateButtons();
                   });
               }
@@ -2234,8 +2245,8 @@ jobs:
                   };
 
                   showCenteredMenu("Beszédfelismerés", items, (d,w) -> {
-                      if(w==0) showDelayDialog();
-                      if(w==1) chooseVad();
+                      if(w==0) showDelayDialog(() -> speechMenu());
+                      if(w==1) chooseVad(() -> speechMenu());
                       updateButtons();
                   });
               }
@@ -2250,9 +2261,9 @@ jobs:
                   };
 
                   showCenteredMenu("Hang / zajszűrés", items, (d,w) -> {
-                      if(w==0) chooseMicGate();
-                      if(w==1) chooseAudioSource();
-                      if(w==2) chooseAndroidEffects();
+                      if(w==0) chooseMicGate(() -> noiseMenu());
+                      if(w==1) chooseAudioSource(() -> noiseMenu());
+                      if(w==2) chooseAndroidEffects(() -> noiseMenu());
                       updateButtons();
                   });
               }
@@ -2416,10 +2427,14 @@ jobs:
                   dlg.show();
               }
 
-              void chooseModel() { chooseFrom("AI modell", models, model, v -> { model = v; save(); restartIfNeeded(); }); }
-              void chooseProfile() { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save(); sessionUpdateIfConnected(); }); }
-              void chooseMode() { chooseFrom("Fordítás stílusa", modes, mode, v -> { mode = v; save(); sessionUpdateIfConnected(); }); }
-              void chooseSoundProfile() {
+              void chooseModel() { chooseModel(null); }
+              void chooseModel(Runnable back) { chooseFrom("AI modell", models, model, v -> { model = v; save(); restartIfNeeded(); }, back); }
+              void chooseProfile() { chooseProfile(null); }
+              void chooseProfile(Runnable back) { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save(); sessionUpdateIfConnected(); }, back); }
+              void chooseMode() { chooseMode(null); }
+              void chooseMode(Runnable back) { chooseFrom("Fordítás stílusa", modes, mode, v -> { mode = v; save(); sessionUpdateIfConnected(); }, back); }
+              void chooseSoundProfile() { chooseSoundProfile(null); }
+              void chooseSoundProfile(final Runnable back) {
                   CharSequence[] labels = new CharSequence[soundProfiles.length];
                   for(int i=0;i<soundProfiles.length;i++) {
                       boolean selected = soundProfiles[i][1].equals(soundProfile);
@@ -2429,6 +2444,7 @@ jobs:
                   showCenteredMenu("Hangprofil", labels, (d,w) -> {
                       applySoundProfile(soundProfiles[w][1]);
                       updateButtons();
+                      if(back != null) new Handler().postDelayed(back, 120);
                   });
               }
 
@@ -2460,10 +2476,14 @@ jobs:
                   return "Általános – ajánlott";
               }
 
-              void chooseVad() { chooseFrom("Két mondat közötti szünet", vadModes, vadMode, v -> { vadMode = v; save(); sessionUpdateIfConnected(); }); }
-              void chooseMicGate() { chooseFrom("Mikrofon érzékenysége", micGateModes, micGateMode, v -> { micGateMode = v; save(); }); }
-              void chooseAudioSource() { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }); }
-              void chooseAndroidEffects() { chooseFrom("Android zajszűrés", androidEffectsModes, androidEffectsMode, v -> { androidEffectsMode = v; save(); restartIfNeeded(); }); }
+              void chooseVad() { chooseVad(null); }
+              void chooseVad(Runnable back) { chooseFrom("Két mondat közötti szünet", vadModes, vadMode, v -> { vadMode = v; save(); sessionUpdateIfConnected(); }, back); }
+              void chooseMicGate() { chooseMicGate(null); }
+              void chooseMicGate(Runnable back) { chooseFrom("Mikrofon érzékenysége", micGateModes, micGateMode, v -> { micGateMode = v; save(); }, back); }
+              void chooseAudioSource() { chooseAudioSource(null); }
+              void chooseAudioSource(Runnable back) { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }, back); }
+              void chooseAndroidEffects() { chooseAndroidEffects(null); }
+              void chooseAndroidEffects(Runnable back) { chooseFrom("Android zajszűrés", androidEffectsModes, androidEffectsMode, v -> { androidEffectsMode = v; save(); restartIfNeeded(); }, back); }
               void chooseOpenAiNoise() { chooseFrom("OpenAI zajszűrés", openAiNoiseModes, openAiNoiseMode, v -> { openAiNoiseMode = v; save(); sessionUpdateIfConnected(); }); }
 
               void resetCoreSettings() {
@@ -2560,11 +2580,16 @@ jobs:
               interface Setter { void set(String v); }
 
               void chooseFrom(String title, String[][] data, String current, Setter setter) {
+                  chooseFrom(title, data, current, setter, null);
+              }
+
+              void chooseFrom(String title, String[][] data, String current, Setter setter, final Runnable back) {
                   CharSequence[] labels = new CharSequence[data.length];
                   for(int i=0;i<data.length;i++) labels[i] = menuItem(data[i][0], data[i][1].equals(current) ? "kiválasztva" : "", data[i][1].equals(current));
                   showCenteredMenu(title, labels, (d,w) -> {
                       setter.set(data[w][1]);
                       updateButtons();
+                      if(back != null) new Handler().postDelayed(back, 120);
                   });
               }
 
