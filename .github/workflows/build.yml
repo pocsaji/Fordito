@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 118; versionName = "11.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 120; versionName = "12.0" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V118" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V120" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -168,6 +168,7 @@ jobs:
           import android.text.style.*;
           import android.util.Base64;
           import android.view.Gravity;
+          import android.view.View;
           import android.text.Layout;
           import android.view.inputmethod.InputMethodManager;
           import android.widget.*;
@@ -440,7 +441,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V118");
+                  TextView title = label("Fordito_V120");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -460,9 +461,9 @@ jobs:
                   manualBtn.setMinimumHeight(0);
                   manualBtn.setIncludeFontPadding(false);
                   bottomLangBtn = btn("ALSÓ");
-                  langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,98,1));
-                  langRow.addView(manualBtn, new LinearLayout.LayoutParams(0,98,1));
-                  langRow.addView(bottomLangBtn, new LinearLayout.LayoutParams(0,98,1));
+                  langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,85,1));
+                  langRow.addView(manualBtn, new LinearLayout.LayoutParams(0,85,1));
+                  langRow.addView(bottomLangBtn, new LinearLayout.LayoutParams(0,85,1));
                   root.addView(langRow);
 
                   topBox = box("FELSŐ ABLAK — átirat / fordítás");
@@ -478,9 +479,9 @@ jobs:
                   micBtn = btn("MIKROFON");
                   translateBtn = btn("FORDÍT");
                   menuBtn = btn("MENÜ");
-                  controls.addView(micBtn, new LinearLayout.LayoutParams(0,98,1));
-                  controls.addView(translateBtn, new LinearLayout.LayoutParams(0,98,1));
-                  controls.addView(menuBtn, new LinearLayout.LayoutParams(0,98,1));
+                  controls.addView(micBtn, new LinearLayout.LayoutParams(0,85,1));
+                  controls.addView(translateBtn, new LinearLayout.LayoutParams(0,85,1));
+                  controls.addView(menuBtn, new LinearLayout.LayoutParams(0,85,1));
                   root.addView(controls);
 
                   topBox.setOnClickListener(v -> enterManualEditMode(true));
@@ -581,6 +582,12 @@ jobs:
                       if(manualBtn != null) {
                           manualBtn.setText(enabled ? "ABLAKOK\nSZERKESZTÉSE" : "ABLAKOK\nLEZÁRVA");
                           manualBtn.setTextSize(12);
+                          manualBtn.setSingleLine(false);
+                          manualBtn.setMaxLines(2);
+                          manualBtn.setLines(2);
+                          manualBtn.setGravity(Gravity.CENTER);
+                          manualBtn.setPadding(0,0,0,0);
+                          manualBtn.setIncludeFontPadding(false);
                           manualBtn.setBackgroundColor(enabled ? Color.rgb(34,139,34) : Color.rgb(150,55,50));
                       }
                   } catch(Exception ignored) {}
@@ -2103,33 +2110,33 @@ jobs:
               void menu() {
                   if(uiLockedForLive || finalizingStop) return;
 
-                  final AlertDialog[] holder = new AlertDialog[1];
                   LinearLayout box = new LinearLayout(this);
                   box.setOrientation(LinearLayout.VERTICAL);
-                  box.setPadding(dp(10), dp(10), dp(10), dp(10));
+                  box.setPadding(10, 10, 10, 10);
                   box.setBackgroundColor(Color.rgb(35,38,44));
 
                   addMenuButton(box, "Háttér / lezárt kijelző", backgroundScreenLabel(), backgroundScreenAllowed, v -> {
                       toggleBackgroundScreenMode();
                       refreshMenuButton((Button)v, "Háttér / lezárt kijelző", backgroundScreenLabel(), backgroundScreenAllowed);
+                      updateButtons();
                   });
                   addMenuButton(box, "Tolmács felolvasás", interpreterQuickLabel(), interpreterMode, v -> {
                       toggleInterpreterQuick();
                       refreshMenuButton((Button)v, "Tolmács felolvasás", interpreterQuickLabel(), interpreterMode);
+                      updateButtons();
                   });
                   addMenuButton(box, "Tükör mód", displayModeLabel(), mirrorBottomMode, v -> {
                       toggleDisplayModeQuick();
                       refreshMenuButton((Button)v, "Tükör mód", displayModeLabel(), mirrorBottomMode);
+                      updateButtons();
                   });
-
                   addMenuButton(box, "OpenAI API kulcs", hasKey() ? "kulcs mentve – megnyitáskor kijelölve" : "nincs megadva", hasKey(), v -> showApi());
                   addMenuButton(box, "Fordítási beállítások", translationMenuLabel(), false, v -> translationMenu());
                   addMenuButton(box, "Szakértői beállítások", "beszédfelismerés, hang / zajszűrés", false, v -> advancedMenu());
                   addMenuButton(box, "Ablakkezelés", "másolás, teljes törlés", false, v -> windowMenu());
-                  addMenuButton(box, "Alapbeállítások", "nyelvpár marad, fordítás/bevitel visszaáll", false, v -> resetCoreSettings());
+                  addMenuButton(box, "Alapbeállítások", "nyelvpár marad, fordítás/bevitel visszaáll", false, v -> { resetCoreSettings(); updateButtons(); });
 
                   AlertDialog dlg = new AlertDialog.Builder(this).setView(box).create();
-                  holder[0] = dlg;
                   dlg.setOnShowListener(di -> {
                       try {
                           android.view.Window w = dlg.getWindow();
@@ -2137,8 +2144,8 @@ jobs:
                               w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
                               android.view.WindowManager.LayoutParams attrs = w.getAttributes();
                               attrs.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-                              attrs.y = dp(120);
-                              attrs.width = dp(560);
+                              attrs.y = 120;
+                              attrs.width = 560;
                               w.setAttributes(attrs);
                           }
                       } catch(Exception ignored) {}
@@ -2146,16 +2153,12 @@ jobs:
                   dlg.show();
               }
 
-              int dp(int v) {
-                  return v;
-              }
-
               Button addMenuButton(LinearLayout parent, String title, String subtitle, boolean active, View.OnClickListener listener) {
                   Button b = new Button(this);
                   b.setAllCaps(false);
                   b.setTextColor(Color.WHITE);
                   b.setGravity(Gravity.CENTER);
-                  b.setPadding(dp(8), dp(8), dp(8), dp(8));
+                  b.setPadding(8, 8, 8, 8);
                   b.setSingleLine(false);
                   b.setMaxLines(2);
                   b.setLineSpacing(0, 1.0f);
@@ -2166,8 +2169,8 @@ jobs:
                   b.setMinimumWidth(0);
                   b.setOnClickListener(listener);
                   refreshMenuButton(b, title, subtitle, active);
-                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(130));
-                  lp.setMargins(dp(0), dp(5), dp(0), dp(5));
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, 130);
+                  lp.setMargins(0, 5, 0, 5);
                   parent.addView(b, lp);
                   return b;
               }
@@ -2794,14 +2797,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V118.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V118.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V120.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V120.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V118
+          name: Fordito_V120
           path: |
             artifact/*.apk
             artifact/*.aab
