@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 134; versionName = "13.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 136; versionName = "13.6" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V134" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V136" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -180,7 +180,7 @@ jobs:
           public class MainActivity extends Activity {
               TextView state;
               EditText topBox, bottomBox;
-              Button micBtn, translateBtn, menuBtn, topLangBtn, manualBtn, bottomLangBtn;
+              Button micBtn, translateBtn, menuBtn, topLangBtn, bottomLangBtn;
               SharedPreferences sp;
               OkHttpClient client;
               WebSocket ws;
@@ -441,7 +441,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V134");
+                  TextView title = label("Fordito_V136");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1024,12 +1024,12 @@ jobs:
               String instructions() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
-                  return "You are a live two-language interpreter. Output text only. No explanations. " +
+                  return "You are a live two-language interpreter. Output text only. No explanations. Never censor, soften, replace or label profanity, insults, sexual words, rude speech or adult language; translate and preserve the speaker's wording and tone exactly as far as language allows. " +
                     pairRules() +
                     "The user may switch between TOP and BOTTOM while the microphone is running. Every completed speech block must be classified again using only the selected pair. " +
                     "Do not turn background noise, engine hum, wind, radio, clicks or breathing into speech. If meaningful human speech is not present, output nothing. " +
                     "Do not wait for a long monologue. Treat every complete sentence, short clause, numbered item, or list item as a finished block. " +
-                    "For every completed block return exactly three lines: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <clean original in the detected selected language> then TRANSLATION: <natural translation into the other selected language>. " +
+                    "For every completed block return exactly three lines: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <original text in the detected selected language, with only obvious speech-recognition corrections> then TRANSLATION: <natural translation into the other selected language>. " +
                     "Keep ORIGINAL short and readable. Correct only obvious speech recognition mistakes; do not invent missing facts. " +
                     "Conversation profile: " + profilePrompt() + " " +
                     "Translation mode: " + modePrompt();
@@ -1038,7 +1038,7 @@ jobs:
               String manualBlockInstructions() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
-                  return "You are a translation engine for the FULL edited window text. " +
+                  return "You are a translation engine for the FULL edited window text. Never censor, soften, replace or label profanity, insults, sexual words, rude speech or adult language; translate and preserve the speaker's wording and tone exactly as far as language allows. " +
                     "The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. " +
                     "Translate the entire TEXT from SOURCE_LANG to TARGET_LANG. " +
                     "The selected languages are " + top + " and " + bottom + ". " +
@@ -1051,11 +1051,11 @@ jobs:
               String liveBlockInstructions(boolean ignoredSourceIsTop) {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
-                  return "You are translating ONE already segmented speech transcript block. " +
-                    "The input has already been filtered on the input side to the selected language pair only. " +
+                  return "You are translating ONE already segmented speech transcript block. Never censor, soften, replace or label profanity, insults, sexual words, rude speech or adult language; translate and preserve the speaker's wording and tone exactly as far as language allows. " +
+                    "The input has already been segmented on the input side for the selected language pair only. " +
                     "Use ONLY these two languages: TOP=" + top + ", BOTTOM=" + bottom + ". " +
                     "Do not search for or preserve any third language. " +
-                    "Return EXACTLY three lines and nothing else: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <cleaned original text> then TRANSLATION: <natural translation into the other selected language>. " +
+                    "Return EXACTLY three lines and nothing else: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <original text with only obvious speech-recognition corrections> then TRANSLATION: <natural translation into the other selected language>. " +
                     "Do not merge this block with earlier or later speech. Do not invent information. " + modePrompt();
               }
 
@@ -2656,7 +2656,6 @@ jobs:
 
                       if(topLangBtn != null) topLangBtn.setBackgroundColor(topActive ? active : inactive);
                       if(bottomLangBtn != null) bottomLangBtn.setBackgroundColor(!topActive ? active : inactive);
-                      if(manualBtn != null) manualBtn.setBackgroundColor(manualEditMode ? green : red);
                       if(translateBtn != null) translateBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : inactive);
                       if(menuBtn != null) menuBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : inactive);
 
@@ -2776,14 +2775,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V134.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V134.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V136.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V136.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V134
+          name: V136
           path: |
             artifact/*.apk
             artifact/*.aab
