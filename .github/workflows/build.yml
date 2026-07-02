@@ -2097,18 +2097,9 @@ jobs:
                   final AlertDialog[] holder = new AlertDialog[1];
                   LinearLayout box = new LinearLayout(this);
                   box.setOrientation(LinearLayout.VERTICAL);
-                  int pad = dp(20);
-                  box.setPadding(pad, dp(8), pad, dp(12));
+                  int pad = dp(10);
+                  box.setPadding(pad, dp(10), pad, dp(10));
                   box.setBackgroundColor(Color.rgb(70,70,70));
-
-                  TextView title = new TextView(this);
-                  title.setText("Menü");
-                  title.setTextColor(Color.WHITE);
-                  title.setTextSize(22);
-                  title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-                  title.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
-                  title.setIncludeFontPadding(false);
-                  box.addView(title, new LinearLayout.LayoutParams(-1, dp(56)));
 
                   addMenuButton(box, "Háttér / lezárt kijelző", backgroundScreenLabel(), backgroundScreenAllowed, v -> {
                       toggleBackgroundScreenMode();
@@ -2139,6 +2130,9 @@ jobs:
                               android.view.WindowManager.LayoutParams attrs = w.getAttributes();
                               attrs.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
                               attrs.y = dp(95);
+                              android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
+                              getWindowManager().getDefaultDisplay().getMetrics(dm);
+                              attrs.width = Math.max(dp(560), dm.widthPixels - dp(64));
                               w.setAttributes(attrs);
                           }
                       } catch(Exception ignored) {}
@@ -2157,13 +2151,14 @@ jobs:
                   b.setAllCaps(false);
                   b.setTextColor(Color.WHITE);
                   b.setGravity(Gravity.CENTER);
-                  b.setPadding(dp(10), dp(6), dp(10), dp(6));
+                  b.setPadding(dp(8), dp(10), dp(8), dp(10));
                   b.setSingleLine(false);
+                  b.setLineSpacing(0, 1.0f);
                   b.setIncludeFontPadding(false);
                   b.setOnClickListener(listener);
                   refreshMenuButton(b, title, subtitle, active);
-                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(96));
-                  lp.setMargins(dp(10), dp(4), dp(10), dp(4));
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(112));
+                  lp.setMargins(dp(0), dp(4), dp(0), dp(4));
                   parent.addView(b, lp);
                   return b;
               }
@@ -2172,11 +2167,11 @@ jobs:
                   String sub = subtitle == null ? "" : subtitle.trim();
                   String text = title + (sub.length() == 0 ? "" : "\n" + sub);
                   SpannableString ss = new SpannableString(text);
-                  ss.setSpan(new AbsoluteSizeSpan(17, true), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                  ss.setSpan(new AbsoluteSizeSpan(15, true), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   ss.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   if(sub.length() > 0) {
                       int start = title.length() + 1;
-                      ss.setSpan(new AbsoluteSizeSpan(8, true), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                      ss.setSpan(new AbsoluteSizeSpan(10, true), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                       ss.setSpan(new ForegroundColorSpan(Color.rgb(230,230,230)), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   }
                   b.setText(ss);
