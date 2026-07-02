@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 115; versionName = "11.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 116; versionName = "11.6" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V115" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V116" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -361,7 +361,7 @@ jobs:
               void load() {
                   apiKey = sp.getString("apiKey", "");
                   model = sp.getString("model", "gpt-realtime-2");
-                  // V115: ehhez a kétirányú FR/HU tolmács-logikához maradunk a standard /v1/realtime + gpt-realtime-2 útvonalon.
+                  // V116: ehhez a kétirányú FR/HU tolmács-logikához maradunk a standard /v1/realtime + gpt-realtime-2 útvonalon.
                   // A gpt-realtime-translate külön /v1/realtime/translations végpontot és egyirányú target output nyelvet várna,
                   // ezért itt nem engedjük visszatölteni régi mentésből sem.
                   if(!"gpt-realtime-2".equals(model)) model = "gpt-realtime-2";
@@ -385,7 +385,7 @@ jobs:
               }
 
               void applyV109StableDefaultsOnce() {
-                  // V115: menü-átszervezés. A V114 beállításokat nem írjuk felül frissítéskor.
+                  // V116: menü-átszervezés. A V114 beállításokat nem írjuk felül frissítéskor.
                   // Új telepítésnél a korábbi stabil alapok maradnak, a háttér mód továbbra is minden induláskor kikapcsolt.
                   int last = sp.getInt("stableDefaultsVersion", 0);
                   if(last < 114) {
@@ -437,7 +437,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V115");
+                  TextView title = label("Fordito_V116");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -990,7 +990,7 @@ jobs:
 
                       JSONObject tr = new JSONObject();
                       tr.put("model", "gpt-realtime-whisper");
-                      // V115: gpt-realtime-whisper GA alatt promptot nem használunk, és language hintet sem állítunk fixre,
+                      // V116: gpt-realtime-whisper GA alatt promptot nem használunk, és language hintet sem állítunk fixre,
                       // mert a mikrofon egy munkameneten belül TOP és BOTTOM nyelven is megszólalhat.
                       // A kiválasztott nyelvpárt a BEVITEL után, még fordítás előtt zárjuk:
                       // csak TOP/BOTTOM nyelvpárba illő, tisztított transcript blokk mehet tovább.
@@ -1488,7 +1488,7 @@ jobs:
                       b = cleanTranscriptForSelectedPair(b);
                       b = finalizeSpeechBlockText(b);
                       if(b.length() == 0) continue;
-                      // V115: nyelvpár-zárás a BEVITELI oldalon.
+                      // V116: nyelvpár-zárás a BEVITELI oldalon.
                       // A fordító csak akkor kap blokkot, ha az átirat nem tűnik harmadik nyelvű zajnak.
                       if(!passesSelectedPairInputGate(b)) continue;
                       if(!markLiveBlockQueued(b)) continue;
@@ -1541,7 +1541,7 @@ jobs:
                   if(looksLikeObviousThirdLanguageNoise(t)) return false;
                   if(isLikelyNoisyTranscriptBlock(t)) return false;
 
-                  // V115: ha FR/HU pár fut, a leggyakoribb kamionos zaj-hallucinációkat
+                  // V116: ha FR/HU pár fut, a leggyakoribb kamionos zaj-hallucinációkat
                   // már a bevitelnél eldobjuk. Ez nem teljes nyelvdetektor, csak kapu.
                   String top = code(topLang).toLowerCase(Locale.ROOT);
                   String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
@@ -2668,14 +2668,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V115.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V115.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V116.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V116.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V115
+          name: Fordito_V116
           path: |
             artifact/*.apk
             artifact/*.aab
