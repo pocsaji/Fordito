@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 132; versionName = "13.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 134; versionName = "13.4" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V132" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V134" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -180,7 +180,7 @@ jobs:
           public class MainActivity extends Activity {
               TextView state;
               EditText topBox, bottomBox;
-              Button micBtn, translateBtn, menuBtn, topLangBtn, bottomLangBtn;
+              Button micBtn, translateBtn, menuBtn, topLangBtn, manualBtn, bottomLangBtn;
               SharedPreferences sp;
               OkHttpClient client;
               WebSocket ws;
@@ -441,7 +441,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V132");
+                  TextView title = label("Fordito_V134");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2656,6 +2656,7 @@ jobs:
 
                       if(topLangBtn != null) topLangBtn.setBackgroundColor(topActive ? active : inactive);
                       if(bottomLangBtn != null) bottomLangBtn.setBackgroundColor(!topActive ? active : inactive);
+                      if(manualBtn != null) manualBtn.setBackgroundColor(manualEditMode ? green : red);
                       if(translateBtn != null) translateBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : inactive);
                       if(menuBtn != null) menuBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : inactive);
 
@@ -2775,14 +2776,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V132.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V132.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V134.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V134.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V132
+          name: Fordito_V134
           path: |
             artifact/*.apk
             artifact/*.aab
