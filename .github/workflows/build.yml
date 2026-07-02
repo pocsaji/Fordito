@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 126; versionName = "12.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 118; versionName = "11.8" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V126" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V118" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -168,7 +168,6 @@ jobs:
           import android.text.style.*;
           import android.util.Base64;
           import android.view.Gravity;
-          import android.view.View;
           import android.text.Layout;
           import android.view.inputmethod.InputMethodManager;
           import android.widget.*;
@@ -256,7 +255,7 @@ jobs:
               String model = "gpt-realtime-2";
               String profile = "general";
               String soundProfile = "general";
-              String mode = "interpreter";
+              String mode = "natural";
               String vadMode = "low";
               String delayMode = "medium";
               String micGateMode = "gate_low";
@@ -371,7 +370,7 @@ jobs:
                   if(!"gpt-realtime-2".equals(model)) model = "gpt-realtime-2";
                   profile = sp.getString("profile", "general");
                   soundProfile = sp.getString("soundProfile", "general");
-                  mode = sp.getString("mode", "interpreter");
+                  mode = sp.getString("mode", "natural");
                   vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "xhigh");
                   micGateMode = sp.getString("micGateMode", "gate_low");
@@ -395,7 +394,7 @@ jobs:
                   if(last < 114) {
                       profile = "general";
                       soundProfile = "general";
-                      mode = "interpreter";
+                      mode = "natural";
                       vadMode = "medium";
                       delayMode = "xhigh";
                       micGateMode = "gate_low";
@@ -441,7 +440,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V126");
+                  TextView title = label("Fordito_V118");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -453,15 +452,13 @@ jobs:
                   manualBtn = btn("ABLAKOK\nSZERKESZTÉSE");
                   manualBtn.setTextSize(12);
                   manualBtn.setSingleLine(false);
+                  manualBtn.setMaxLines(2);
                   manualBtn.setLines(2);
                   manualBtn.setGravity(Gravity.CENTER);
-                  manualBtn.setIncludeFontPadding(false);
-                  manualBtn.setLineSpacing(0, 0.92f);
-                  manualBtn.setPadding(2,0,2,0);
+                  manualBtn.setPadding(0,0,0,0);
                   manualBtn.setMinHeight(0);
                   manualBtn.setMinimumHeight(0);
-                  manualBtn.setMinWidth(0);
-                  manualBtn.setMinimumWidth(0);
+                  manualBtn.setIncludeFontPadding(false);
                   bottomLangBtn = btn("ALSÓ");
                   langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,98,1));
                   langRow.addView(manualBtn, new LinearLayout.LayoutParams(0,98,1));
@@ -533,11 +530,6 @@ jobs:
                   b.setAllCaps(false);
                   b.setTextSize(15);
                   b.setSingleLine(true);
-                  b.setIncludeFontPadding(false);
-                  b.setMinHeight(0);
-                  b.setMinimumHeight(0);
-                  b.setMinWidth(0);
-                  b.setMinimumWidth(0);
                   b.setPadding(4,2,4,2);
                   return b;
               }
@@ -589,14 +581,6 @@ jobs:
                       if(manualBtn != null) {
                           manualBtn.setText(enabled ? "ABLAKOK\nSZERKESZTÉSE" : "ABLAKOK\nLEZÁRVA");
                           manualBtn.setTextSize(12);
-                          manualBtn.setSingleLine(false);
-                          manualBtn.setLines(2);
-                          manualBtn.setGravity(Gravity.CENTER);
-                          manualBtn.setIncludeFontPadding(false);
-                          manualBtn.setLineSpacing(0, 0.92f);
-                          manualBtn.setPadding(2,0,2,0);
-                          manualBtn.setMinHeight(0);
-                          manualBtn.setMinimumHeight(0);
                           manualBtn.setBackgroundColor(enabled ? Color.rgb(34,139,34) : Color.rgb(150,55,50));
                       }
                   } catch(Exception ignored) {}
@@ -1155,9 +1139,7 @@ jobs:
                   return "Nagyon pontos – leghosszabb bevitel";
               }
 
-              void showDelayDialog() { showDelayDialog(null); }
-
-              void showDelayDialog(final Runnable back) {
+              void showDelayDialog() {
                   final String[] names = {"Gyors – rövidebb bevitel", "Átlagos – ajánlott", "Pontos – hosszabb bevitel", "Nagyon pontos – leghosszabb bevitel"};
                   final String[] vals = {"low", "medium", "high", "xhigh"};
                   int checked = 3;
@@ -1172,7 +1154,6 @@ jobs:
                           save();
                           d.dismiss();
                           Toast.makeText(this, "Új kapcsolatnál érvényesül: " + names[which], Toast.LENGTH_SHORT).show();
-                          if(back != null) new Handler().postDelayed(back, 120);
                       })
                       .setNegativeButton("Mégse", null)
                       .show();
@@ -2125,9 +2106,8 @@ jobs:
                   final AlertDialog[] holder = new AlertDialog[1];
                   LinearLayout box = new LinearLayout(this);
                   box.setOrientation(LinearLayout.VERTICAL);
-                  int pad = dp(10);
-                  box.setPadding(pad, dp(10), pad, dp(10));
-                  box.setBackgroundColor(Color.rgb(70,70,70));
+                  box.setPadding(dp(10), dp(10), dp(10), dp(10));
+                  box.setBackgroundColor(Color.rgb(35,38,44));
 
                   addMenuButton(box, "Háttér / lezárt kijelző", backgroundScreenLabel(), backgroundScreenAllowed, v -> {
                       toggleBackgroundScreenMode();
@@ -2158,8 +2138,6 @@ jobs:
                               android.view.WindowManager.LayoutParams attrs = w.getAttributes();
                               attrs.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
                               attrs.y = dp(120);
-                              android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
-                              getWindowManager().getDefaultDisplay().getMetrics(dm);
                               attrs.width = dp(560);
                               w.setAttributes(attrs);
                           }
@@ -2169,8 +2147,6 @@ jobs:
               }
 
               int dp(int v) {
-                  // Ebben az appban a teljes felület nyers pixelméretekkel dolgozik.
-                  // A menü is így marad, hogy ne nőjön túl nagyra nagy DPI-s telefonokon.
                   return v;
               }
 
@@ -2179,10 +2155,15 @@ jobs:
                   b.setAllCaps(false);
                   b.setTextColor(Color.WHITE);
                   b.setGravity(Gravity.CENTER);
-                  b.setPadding(dp(8), dp(10), dp(8), dp(10));
+                  b.setPadding(dp(8), dp(8), dp(8), dp(8));
                   b.setSingleLine(false);
+                  b.setMaxLines(2);
                   b.setLineSpacing(0, 1.0f);
                   b.setIncludeFontPadding(false);
+                  b.setMinHeight(0);
+                  b.setMinimumHeight(0);
+                  b.setMinWidth(0);
+                  b.setMinimumWidth(0);
                   b.setOnClickListener(listener);
                   refreshMenuButton(b, title, subtitle, active);
                   LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(130));
@@ -2198,9 +2179,9 @@ jobs:
                   ss.setSpan(new AbsoluteSizeSpan(15, true), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   ss.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   if(sub.length() > 0) {
-                      int start = title.length() + 1;
-                      ss.setSpan(new AbsoluteSizeSpan(10, true), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                      ss.setSpan(new ForegroundColorSpan(Color.rgb(230,230,230)), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                      int st = title.length() + 1;
+                      ss.setSpan(new AbsoluteSizeSpan(12, true), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                      ss.setSpan(new ForegroundColorSpan(Color.rgb(230,230,230)), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   }
                   b.setText(ss);
                   b.setBackgroundColor(active ? Color.rgb(30,140,70) : Color.rgb(95,95,95));
@@ -2220,10 +2201,10 @@ jobs:
                   };
 
                   showCenteredMenu("Fordítási beállítások", items, (d,w) -> {
-                      if(w==0) chooseModel(() -> translationMenu());
-                      if(w==1) chooseProfile(() -> translationMenu());
-                      if(w==2) chooseMode(() -> translationMenu());
-                      if(w==3) chooseSoundProfile(() -> translationMenu());
+                      if(w==0) chooseModel();
+                      if(w==1) chooseProfile();
+                      if(w==2) chooseMode();
+                      if(w==3) chooseSoundProfile();
                       updateButtons();
                   });
               }
@@ -2262,8 +2243,8 @@ jobs:
                   };
 
                   showCenteredMenu("Beszédfelismerés", items, (d,w) -> {
-                      if(w==0) showDelayDialog(() -> speechMenu());
-                      if(w==1) chooseVad(() -> speechMenu());
+                      if(w==0) showDelayDialog();
+                      if(w==1) chooseVad();
                       updateButtons();
                   });
               }
@@ -2278,9 +2259,9 @@ jobs:
                   };
 
                   showCenteredMenu("Hang / zajszűrés", items, (d,w) -> {
-                      if(w==0) chooseMicGate(() -> noiseMenu());
-                      if(w==1) chooseAudioSource(() -> noiseMenu());
-                      if(w==2) chooseAndroidEffects(() -> noiseMenu());
+                      if(w==0) chooseMicGate();
+                      if(w==1) chooseAudioSource();
+                      if(w==2) chooseAndroidEffects();
                       updateButtons();
                   });
               }
@@ -2444,14 +2425,10 @@ jobs:
                   dlg.show();
               }
 
-              void chooseModel() { chooseModel(null); }
-              void chooseModel(Runnable back) { chooseFrom("AI modell", models, model, v -> { model = v; save(); restartIfNeeded(); }, back); }
-              void chooseProfile() { chooseProfile(null); }
-              void chooseProfile(Runnable back) { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save(); sessionUpdateIfConnected(); }, back); }
-              void chooseMode() { chooseMode(null); }
-              void chooseMode(Runnable back) { chooseFrom("Fordítás stílusa", modes, mode, v -> { mode = v; save(); sessionUpdateIfConnected(); }, back); }
-              void chooseSoundProfile() { chooseSoundProfile(null); }
-              void chooseSoundProfile(final Runnable back) {
+              void chooseModel() { chooseFrom("AI modell", models, model, v -> { model = v; save(); restartIfNeeded(); }); }
+              void chooseProfile() { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save(); sessionUpdateIfConnected(); }); }
+              void chooseMode() { chooseFrom("Fordítás stílusa", modes, mode, v -> { mode = v; save(); sessionUpdateIfConnected(); }); }
+              void chooseSoundProfile() {
                   CharSequence[] labels = new CharSequence[soundProfiles.length];
                   for(int i=0;i<soundProfiles.length;i++) {
                       boolean selected = soundProfiles[i][1].equals(soundProfile);
@@ -2461,7 +2438,6 @@ jobs:
                   showCenteredMenu("Hangprofil", labels, (d,w) -> {
                       applySoundProfile(soundProfiles[w][1]);
                       updateButtons();
-                      if(back != null) new Handler().postDelayed(back, 120);
                   });
               }
 
@@ -2493,14 +2469,10 @@ jobs:
                   return "Általános – ajánlott";
               }
 
-              void chooseVad() { chooseVad(null); }
-              void chooseVad(Runnable back) { chooseFrom("Két mondat közötti szünet", vadModes, vadMode, v -> { vadMode = v; save(); sessionUpdateIfConnected(); }, back); }
-              void chooseMicGate() { chooseMicGate(null); }
-              void chooseMicGate(Runnable back) { chooseFrom("Mikrofon érzékenysége", micGateModes, micGateMode, v -> { micGateMode = v; save(); }, back); }
-              void chooseAudioSource() { chooseAudioSource(null); }
-              void chooseAudioSource(Runnable back) { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }, back); }
-              void chooseAndroidEffects() { chooseAndroidEffects(null); }
-              void chooseAndroidEffects(Runnable back) { chooseFrom("Android zajszűrés", androidEffectsModes, androidEffectsMode, v -> { androidEffectsMode = v; save(); restartIfNeeded(); }, back); }
+              void chooseVad() { chooseFrom("Két mondat közötti szünet", vadModes, vadMode, v -> { vadMode = v; save(); sessionUpdateIfConnected(); }); }
+              void chooseMicGate() { chooseFrom("Mikrofon érzékenysége", micGateModes, micGateMode, v -> { micGateMode = v; save(); }); }
+              void chooseAudioSource() { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }); }
+              void chooseAndroidEffects() { chooseFrom("Android zajszűrés", androidEffectsModes, androidEffectsMode, v -> { androidEffectsMode = v; save(); restartIfNeeded(); }); }
               void chooseOpenAiNoise() { chooseFrom("OpenAI zajszűrés", openAiNoiseModes, openAiNoiseMode, v -> { openAiNoiseMode = v; save(); sessionUpdateIfConnected(); }); }
 
               void resetCoreSettings() {
@@ -2511,7 +2483,7 @@ jobs:
                         model = "gpt-realtime-2";
                         profile = "general";
                         soundProfile = "general";
-                        mode = "interpreter";
+                        mode = "natural";
                         vadMode = "medium";
                         delayMode = "xhigh";
                         micGateMode = "gate_low";
@@ -2597,16 +2569,11 @@ jobs:
               interface Setter { void set(String v); }
 
               void chooseFrom(String title, String[][] data, String current, Setter setter) {
-                  chooseFrom(title, data, current, setter, null);
-              }
-
-              void chooseFrom(String title, String[][] data, String current, Setter setter, final Runnable back) {
                   CharSequence[] labels = new CharSequence[data.length];
                   for(int i=0;i<data.length;i++) labels[i] = menuItem(data[i][0], data[i][1].equals(current) ? "kiválasztva" : "", data[i][1].equals(current));
                   showCenteredMenu(title, labels, (d,w) -> {
                       setter.set(data[w][1]);
                       updateButtons();
-                      if(back != null) new Handler().postDelayed(back, 120);
                   });
               }
 
@@ -2827,14 +2794,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V126.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V126.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V118.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V118.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V126
+          name: Fordito_V118
           path: |
             artifact/*.apk
             artifact/*.aab
