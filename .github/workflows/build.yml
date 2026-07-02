@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 112; versionName = "11.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 114; versionName = "11.4" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V112" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V114" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -279,8 +279,7 @@ jobs:
               };
 
               final String[][] models = {
-                  {"fordítási motor","gpt-realtime-2"},
-                  {"Fordításra: GPT-Realtime-Translate","gpt-realtime-translate"}
+                  {"GPT-Realtime-2 / kétirányú tolmács","gpt-realtime-2"}
               };
 
               final String[][] profiles = {
@@ -356,12 +355,16 @@ jobs:
               void load() {
                   apiKey = sp.getString("apiKey", "");
                   model = sp.getString("model", "gpt-realtime-2");
+                  // V114: ehhez a kétirányú FR/HU tolmács-logikához maradunk a standard /v1/realtime + gpt-realtime-2 útvonalon.
+                  // A gpt-realtime-translate külön /v1/realtime/translations végpontot és egyirányú target output nyelvet várna,
+                  // ezért itt nem engedjük visszatölteni régi mentésből sem.
+                  if(!"gpt-realtime-2".equals(model)) model = "gpt-realtime-2";
                   profile = sp.getString("profile", "truck_bulk");
                   mode = sp.getString("mode", "natural");
-                  vadMode = sp.getString("vadMode", "low");
-                  delayMode = sp.getString("delayMode", "medium");
+                  vadMode = sp.getString("vadMode", "medium");
+                  delayMode = sp.getString("delayMode", "xhigh");
                   micGateMode = sp.getString("micGateMode", "gate_low");
-                  audioSourceMode = sp.getString("audioSourceMode", "recognition");
+                  audioSourceMode = sp.getString("audioSourceMode", "unprocessed");
                   androidEffectsMode = sp.getString("androidEffectsMode", "ns_only");
                   openAiNoiseMode = sp.getString("openAiNoiseMode", "off");
                   interpreterMode = sp.getBoolean("interpreterMode", false);
@@ -375,15 +378,21 @@ jobs:
               }
 
               void applyV109StableDefaultsOnce() {
+                  // V114: zajos kamionos teszt alapján új induló alapértékek.
+                  // Nyelvpár marad, API kulcs marad. A háttér mód továbbra is minden induláskor kikapcsolt.
                   int last = sp.getInt("stableDefaultsVersion", 0);
-                  if(last >= 109) return;
-                  vadMode = "low";
-                  delayMode = "medium";
+                  if(last >= 114) return;
+                  profile = "general";
+                  mode = "natural";
+                  vadMode = "medium";
+                  delayMode = "xhigh";
                   micGateMode = "gate_low";
-                  audioSourceMode = "recognition";
+                  audioSourceMode = "unprocessed";
                   androidEffectsMode = "ns_only";
                   openAiNoiseMode = "off";
-                  sp.edit().putInt("stableDefaultsVersion", 109).apply();
+                  interpreterMode = false;
+                  interpreterAudioMode = "off";
+                  sp.edit().putInt("stableDefaultsVersion", 114).apply();
                   save();
               }
 
@@ -415,7 +424,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V110");
+                  TextView title = label("Fordito_V114");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -968,12 +977,11 @@ jobs:
 
                       JSONObject tr = new JSONObject();
                       tr.put("model", "gpt-realtime-whisper");
-                      // V60: Realtime transcription nem támogat prompt paramétert ezen az endpointon.
-                      // Ezért itt NEM küldünk promptot; a nyelvpár-döntés az átirat beérkezése után történik.
-                      // V56: ne kössük a beszédfelismerést az éppen fókuszos ablak nyelvéhez.
-                      // A mikrofon futása közbeni nyelvváltásnál ez keverte össze a felső/alsó ablakot.
-                      // A Realtime automatikusan felismeri a beszélt nyelvet, mi pedig a transcript szövege alapján
-                      // döntjük el, hogy a két kiválasztott nyelv közül melyik oldal a forrás.
+                      // V114: gpt-realtime-whisper GA alatt promptot nem használunk, és language hintet sem állítunk fixre,
+                      // mert a mikrofon egy munkameneten belül TOP és BOTTOM nyelven is megszólalhat.
+                      // A kiválasztott nyelvpárt a BEVITEL után, még fordítás előtt zárjuk:
+                      // csak TOP/BOTTOM nyelvpárba illő, tisztított transcript blokk mehet tovább.
+                      // Így a fordító már nem kap holland/angol/spanyol/német zaj-hallucinációt.
                       tr.put("delay", delayMode);
                       input.put("transcription", tr);
 
@@ -1031,12 +1039,11 @@ jobs:
               String liveBlockInstructions(boolean ignoredSourceIsTop) {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
-                  return "You are translating ONE already segmented rough speech transcript block. " +
-                    pairRules() +
-                    "Decide whether TEXT is TOP=" + top + " or BOTTOM=" + bottom + ". " +
+                  return "You are translating ONE already segmented speech transcript block. " +
+                    "The input has already been filtered on the input side to the selected language pair only. " +
+                    "Use ONLY these two languages: TOP=" + top + ", BOTTOM=" + bottom + ". " +
+                    "Do not search for or preserve any third language. " +
                     "Return EXACTLY three lines and nothing else: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <cleaned original text> then TRANSLATION: <natural translation into the other selected language>. " +
-                    "If TEXT contains third-language-looking fragments or foreign-script junk, do not preserve them; repair or ignore them using only the selected pair. " +
-                    "If TEXT is mostly not one of the two selected languages, return empty ORIGINAL and empty TRANSLATION rather than hallucinating. " +
                     "Do not merge this block with earlier or later speech. Do not invent information. " + modePrompt();
               }
 
@@ -1468,6 +1475,9 @@ jobs:
                       b = cleanTranscriptForSelectedPair(b);
                       b = finalizeSpeechBlockText(b);
                       if(b.length() == 0) continue;
+                      // V114: nyelvpár-zárás a BEVITELI oldalon.
+                      // A fordító csak akkor kap blokkot, ha az átirat nem tűnik harmadik nyelvű zajnak.
+                      if(!passesSelectedPairInputGate(b)) continue;
                       if(!markLiveBlockQueued(b)) continue;
                       // V71: nem a helyi/fókusz heurisztika dönti el véglegesen a forrásoldalt.
                       // A blokk ideiglenesen az utolsó aktív oldalra kerül, majd a fordító AI
@@ -1505,6 +1515,50 @@ jobs:
                   char last = t.charAt(t.length() - 1);
                   if(last == ',' || last == ';' || last == ':') t = t.substring(0, t.length() - 1).trim() + ".";
                   return t;
+              }
+
+              boolean passesSelectedPairInputGate(String block) {
+                  if(block == null) return false;
+                  String t = block.trim();
+                  if(t.length() == 0) return false;
+                  int words = t.split("\\s+").length;
+                  if(words <= 1) return false;
+
+                  // Először a régi, óvatos harmadik-nyelv/zaj szűrő.
+                  if(looksLikeObviousThirdLanguageNoise(t)) return false;
+                  if(isLikelyNoisyTranscriptBlock(t)) return false;
+
+                  // V114: ha FR/HU pár fut, a leggyakoribb kamionos zaj-hallucinációkat
+                  // már a bevitelnél eldobjuk. Ez nem teljes nyelvdetektor, csak kapu.
+                  String top = code(topLang).toLowerCase(Locale.ROOT);
+                  String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
+                  boolean frHu = (top.equals("fr") && bottom.equals("hu")) || (top.equals("hu") && bottom.equals("fr"));
+                  if(frHu && looksLikeNonFrHuNoise(t)) return false;
+
+                  return true;
+              }
+
+              boolean looksLikeNonFrHuNoise(String text) {
+                  if(text == null) return false;
+                  String x = " " + text.toLowerCase(Locale.ROOT)
+                          .replaceAll("[^a-záéíóöőúüűàâçèéêëîïôùûüÿñæœß\\s]", " ")
+                          .replaceAll("\\s+", " ").trim() + " ";
+                  int words = x.trim().length() == 0 ? 0 : x.trim().split("\\s+").length;
+                  int hits = 0;
+
+                  String[] nl = {" het ", " een ", " niet ", " geen ", " maar ", " jullie ", " microfoon", " spuit", " gevonden", " gewoon", " wordt ", " bij ", " adidas"};
+                  String[] en = {" and ", " the ", " that ", " that's ", " this ", " your ", " hair ", " would ", " good ", " microphone ", " environment "};
+                  String[] de = {" ich ", " nicht ", " und ", " oder ", " bitte ", " danke ", " aber ", " wasser "};
+                  String[] es = {" entonces ", " ahora ", " puede ", " funciona ", " pantalla ", " bloqueada "};
+                  String[] it = {" allora ", " questo ", " questa ", " funziona ", " schermo "};
+                  for(String w: nl) if(x.contains(w)) hits++;
+                  for(String w: en) if(x.contains(w)) hits++;
+                  for(String w: de) if(x.contains(w)) hits++;
+                  for(String w: es) if(x.contains(w)) hits++;
+                  for(String w: it) if(x.contains(w)) hits++;
+
+                  if(words < 6 && hits >= 1) return true;
+                  return hits >= 2;
               }
 
               boolean isLikelyNoisyTranscriptBlock(String block) {
@@ -2217,12 +2271,12 @@ jobs:
                     .setMessage("Visszaállítsam az ajánlott fordítási és beszédfelismerési alapértékeket? Az API kulcs és a nyelvpár nem törlődik.")
                     .setPositiveButton("Igen", (d,w) -> {
                         model = "gpt-realtime-2";
-                        profile = "truck_bulk";
+                        profile = "general";
                         mode = "natural";
-                        vadMode = "low";
-                        delayMode = "medium";
+                        vadMode = "medium";
+                        delayMode = "xhigh";
                         micGateMode = "gate_low";
-                        audioSourceMode = "recognition";
+                        audioSourceMode = "unprocessed";
                         androidEffectsMode = "ns_only";
                         openAiNoiseMode = "off";
                         interpreterMode = false;
@@ -2529,14 +2583,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V110.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V110.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V114.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V114.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V110
+          name: Fordito_V114
           path: |
             artifact/*.apk
             artifact/*.aab
