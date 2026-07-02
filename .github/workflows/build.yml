@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 138; versionName = "13.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 139; versionName = "13.9" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V138" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V139" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -441,7 +441,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V138");
+                  TextView title = label("Fordito_V139");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1030,7 +1030,8 @@ jobs:
                     "The user may switch between TOP and BOTTOM while the microphone is running. Every completed speech block must be classified again using only the selected pair. " +
                     "Do not turn background noise, engine hum, wind, radio, clicks or breathing into speech. If meaningful human speech is not present, output nothing. " +
                     "Do not wait for a long monologue. Treat every complete sentence, short clause, numbered item, or list item as a finished block. " +
-                    "For every completed block return exactly three lines: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <clean original in the detected selected language> then TRANSLATION: <natural translation into the other selected language>. " +
+                    "For every completed block return exactly three lines: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <verbatim original text in the detected selected language> then TRANSLATION: <natural translation into the other selected language>. " +
+                    "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly in ORIGINAL and TRANSLATION. Never output square-bracket category placeholders or asterisk-masked words. " +
                     "Keep ORIGINAL short and readable. Correct only obvious speech recognition mistakes; do not invent missing facts. " +
                     "Conversation profile: " + profilePrompt() + " " +
                     "Translation mode: " + modePrompt();
@@ -1045,6 +1046,7 @@ jobs:
                     "The selected languages are " + top + " and " + bottom + ". " +
                     "Return ONLY the translated full text. Preserve paragraphs and line breaks where reasonable. " +
                     "Never include labels such as SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT or TRANSLATION. " +
+                    "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly in the translation. Never output square-bracket category placeholders or asterisk-masked words. " +
                     "No markdown, no quotes, no explanation. " +
                     "Keep meaning, context and tone. " + modePrompt();
               }
@@ -1056,14 +1058,15 @@ jobs:
                     "The input has already been filtered on the input side to the selected language pair only. " +
                     "Use ONLY these two languages: TOP=" + top + ", BOTTOM=" + bottom + ". " +
                     "Do not search for or preserve any third language. " +
-                    "Return EXACTLY three lines and nothing else: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <cleaned original text> then TRANSLATION: <natural translation into the other selected language>. " +
+                    "Return EXACTLY three lines and nothing else: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <verbatim original text> then TRANSLATION: <natural translation into the other selected language>. " +
+                    "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly in ORIGINAL and TRANSLATION. Never output square-bracket category placeholders or asterisk-masked words. " +
                     "Do not merge this block with earlier or later speech. Do not invent information. " + modePrompt();
               }
 
               String modePrompt() {
-                  if(mode.equals("precise")) return "Precise mode: stay close to the meaning, do not expand, but always use correct natural grammar.";
-                  if(mode.equals("interpreter")) return "Interpreter mode: use context strongly, make the translation sound like a human interpreter, but do not invent facts.";
-                  return "Natural mode: translate meaning naturally and fluently, with light correction only.";
+                  if(mode.equals("precise")) return "Precise mode: stay close to the meaning, do not expand, but always use correct natural grammar. Do not censor or mask words.";
+                  if(mode.equals("interpreter")) return "Interpreter mode: use context strongly, make the translation sound like a human interpreter, but do not invent facts. Do not censor or mask words.";
+                  return "Natural mode: translate meaning naturally and fluently, with light correction only. Do not censor or mask words.";
               }
 
 
@@ -1423,7 +1426,7 @@ jobs:
                       JSONObject c = new JSONObject();
                       c.put("type", "input_text");
                       manualResponseMode = true;
-                      c.put("text", "MANUAL_FULL_WINDOW_TRANSLATION\n" + text + "\n\nReturn ONLY the translated full text. Preserve paragraphs and line breaks where reasonable. Do not write SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT, TRANSLATION, markdown, quotes or explanation.");
+                      c.put("text", "MANUAL_FULL_WINDOW_TRANSLATION\n" + text + "\n\nReturn ONLY the translated full text. Preserve paragraphs and line breaks where reasonable. Do not write SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT, TRANSLATION, markdown, quotes or explanation. Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording.");
                       content.put(c);
                       item.put("content", content);
                       msg.put("item", item);
@@ -2777,14 +2780,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V138.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V138.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V139.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V139.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V138
+          name: V139
           path: |
             artifact/*.apk
             artifact/*.aab
