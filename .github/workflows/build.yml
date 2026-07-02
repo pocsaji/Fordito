@@ -451,11 +451,21 @@ jobs:
                   LinearLayout langRow = row();
                   topLangBtn = btn("FELSŐ");
                   manualBtn = btn("ABLAKOK\nSZERKESZTÉSE");
-                  formatManualMainButton();
+                  manualBtn.setTextSize(12);
+                  manualBtn.setSingleLine(false);
+                  manualBtn.setLines(2);
+                  manualBtn.setGravity(Gravity.CENTER);
+                  manualBtn.setIncludeFontPadding(false);
+                  manualBtn.setLineSpacing(0, 0.92f);
+                  manualBtn.setPadding(2,0,2,0);
+                  manualBtn.setMinHeight(0);
+                  manualBtn.setMinimumHeight(0);
+                  manualBtn.setMinWidth(0);
+                  manualBtn.setMinimumWidth(0);
                   bottomLangBtn = btn("ALSÓ");
-                  langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,110,1));
-                  langRow.addView(manualBtn, new LinearLayout.LayoutParams(0,110,1));
-                  langRow.addView(bottomLangBtn, new LinearLayout.LayoutParams(0,110,1));
+                  langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,98,1));
+                  langRow.addView(manualBtn, new LinearLayout.LayoutParams(0,98,1));
+                  langRow.addView(bottomLangBtn, new LinearLayout.LayoutParams(0,98,1));
                   root.addView(langRow);
 
                   topBox = box("FELSŐ ABLAK — átirat / fordítás");
@@ -523,24 +533,13 @@ jobs:
                   b.setAllCaps(false);
                   b.setTextSize(15);
                   b.setSingleLine(true);
+                  b.setIncludeFontPadding(false);
+                  b.setMinHeight(0);
+                  b.setMinimumHeight(0);
+                  b.setMinWidth(0);
+                  b.setMinimumWidth(0);
                   b.setPadding(4,2,4,2);
                   return b;
-              }
-
-              void formatManualMainButton() {
-                  if(manualBtn == null) return;
-                  manualBtn.setTextSize(12);
-                  manualBtn.setSingleLine(false);
-                  manualBtn.setMaxLines(2);
-                  manualBtn.setLines(2);
-                  manualBtn.setGravity(Gravity.CENTER);
-                  manualBtn.setPadding(0,0,0,0);
-                  manualBtn.setIncludeFontPadding(false);
-                  manualBtn.setLineSpacing(-2, 0.92f);
-                  manualBtn.setMinHeight(0);
-                  manualBtn.setMinimumHeight(0);
-                  manualBtn.setMinWidth(0);
-                  manualBtn.setMinimumWidth(0);
               }
 
               EditText box(String hint) {
@@ -589,7 +588,15 @@ jobs:
                       }
                       if(manualBtn != null) {
                           manualBtn.setText(enabled ? "ABLAKOK\nSZERKESZTÉSE" : "ABLAKOK\nLEZÁRVA");
-                          formatManualMainButton();
+                          manualBtn.setTextSize(12);
+                          manualBtn.setSingleLine(false);
+                          manualBtn.setLines(2);
+                          manualBtn.setGravity(Gravity.CENTER);
+                          manualBtn.setIncludeFontPadding(false);
+                          manualBtn.setLineSpacing(0, 0.92f);
+                          manualBtn.setPadding(2,0,2,0);
+                          manualBtn.setMinHeight(0);
+                          manualBtn.setMinimumHeight(0);
                           manualBtn.setBackgroundColor(enabled ? Color.rgb(34,139,34) : Color.rgb(150,55,50));
                       }
                   } catch(Exception ignored) {}
