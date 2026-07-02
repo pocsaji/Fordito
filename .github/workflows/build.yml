@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 114; versionName = "11.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 115; versionName = "11.5" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V114" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V115" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -253,7 +253,8 @@ jobs:
 
               String apiKey = "";
               String model = "gpt-realtime-2";
-              String profile = "truck_bulk";
+              String profile = "general";
+              String soundProfile = "general";
               String mode = "natural";
               String vadMode = "low";
               String delayMode = "medium";
@@ -340,6 +341,11 @@ jobs:
                   {"OpenAI zajszűrés ki","off"}
               };
 
+              final String[][] soundProfiles = {
+                  {"Általános – ajánlott","general"},
+                  {"Kamion / zajos környezet","truck_noisy"}
+              };
+
               @Override public void onCreate(Bundle b) {
                   super.onCreate(b);
                   sp = getSharedPreferences("settings", MODE_PRIVATE);
@@ -355,11 +361,12 @@ jobs:
               void load() {
                   apiKey = sp.getString("apiKey", "");
                   model = sp.getString("model", "gpt-realtime-2");
-                  // V114: ehhez a kétirányú FR/HU tolmács-logikához maradunk a standard /v1/realtime + gpt-realtime-2 útvonalon.
+                  // V115: ehhez a kétirányú FR/HU tolmács-logikához maradunk a standard /v1/realtime + gpt-realtime-2 útvonalon.
                   // A gpt-realtime-translate külön /v1/realtime/translations végpontot és egyirányú target output nyelvet várna,
                   // ezért itt nem engedjük visszatölteni régi mentésből sem.
                   if(!"gpt-realtime-2".equals(model)) model = "gpt-realtime-2";
-                  profile = sp.getString("profile", "truck_bulk");
+                  profile = sp.getString("profile", "general");
+                  soundProfile = sp.getString("soundProfile", "general");
                   mode = sp.getString("mode", "natural");
                   vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "xhigh");
@@ -378,22 +385,27 @@ jobs:
               }
 
               void applyV109StableDefaultsOnce() {
-                  // V114: zajos kamionos teszt alapján új induló alapértékek.
-                  // Nyelvpár marad, API kulcs marad. A háttér mód továbbra is minden induláskor kikapcsolt.
+                  // V115: menü-átszervezés. A V114 beállításokat nem írjuk felül frissítéskor.
+                  // Új telepítésnél a korábbi stabil alapok maradnak, a háttér mód továbbra is minden induláskor kikapcsolt.
                   int last = sp.getInt("stableDefaultsVersion", 0);
-                  if(last >= 114) return;
-                  profile = "general";
-                  mode = "natural";
-                  vadMode = "medium";
-                  delayMode = "xhigh";
-                  micGateMode = "gate_low";
-                  audioSourceMode = "unprocessed";
-                  androidEffectsMode = "ns_only";
-                  openAiNoiseMode = "off";
-                  interpreterMode = false;
-                  interpreterAudioMode = "off";
-                  sp.edit().putInt("stableDefaultsVersion", 114).apply();
-                  save();
+                  if(last < 114) {
+                      profile = "general";
+                      soundProfile = "general";
+                      mode = "natural";
+                      vadMode = "medium";
+                      delayMode = "xhigh";
+                      micGateMode = "gate_low";
+                      audioSourceMode = "unprocessed";
+                      androidEffectsMode = "ns_only";
+                      openAiNoiseMode = "off";
+                      interpreterMode = false;
+                      interpreterAudioMode = "off";
+                  }
+                  if(last < 115) {
+                      if(soundProfile == null || soundProfile.length() == 0) soundProfile = "general";
+                      sp.edit().putInt("stableDefaultsVersion", 115).apply();
+                      save();
+                  }
               }
 
               void save() {
@@ -401,6 +413,7 @@ jobs:
                     .putString("apiKey", apiKey)
                     .putString("model", model)
                     .putString("profile", profile)
+                    .putString("soundProfile", soundProfile)
                     .putString("mode", mode)
                     .putString("vadMode", vadMode)
                     .putString("delayMode", delayMode)
@@ -424,7 +437,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V114");
+                  TextView title = label("Fordito_V115");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -977,7 +990,7 @@ jobs:
 
                       JSONObject tr = new JSONObject();
                       tr.put("model", "gpt-realtime-whisper");
-                      // V114: gpt-realtime-whisper GA alatt promptot nem használunk, és language hintet sem állítunk fixre,
+                      // V115: gpt-realtime-whisper GA alatt promptot nem használunk, és language hintet sem állítunk fixre,
                       // mert a mikrofon egy munkameneten belül TOP és BOTTOM nyelven is megszólalhat.
                       // A kiválasztott nyelvpárt a BEVITEL után, még fordítás előtt zárjuk:
                       // csak TOP/BOTTOM nyelvpárba illő, tisztított transcript blokk mehet tovább.
@@ -1475,7 +1488,7 @@ jobs:
                       b = cleanTranscriptForSelectedPair(b);
                       b = finalizeSpeechBlockText(b);
                       if(b.length() == 0) continue;
-                      // V114: nyelvpár-zárás a BEVITELI oldalon.
+                      // V115: nyelvpár-zárás a BEVITELI oldalon.
                       // A fordító csak akkor kap blokkot, ha az átirat nem tűnik harmadik nyelvű zajnak.
                       if(!passesSelectedPairInputGate(b)) continue;
                       if(!markLiveBlockQueued(b)) continue;
@@ -1528,7 +1541,7 @@ jobs:
                   if(looksLikeObviousThirdLanguageNoise(t)) return false;
                   if(isLikelyNoisyTranscriptBlock(t)) return false;
 
-                  // V114: ha FR/HU pár fut, a leggyakoribb kamionos zaj-hallucinációkat
+                  // V115: ha FR/HU pár fut, a leggyakoribb kamionos zaj-hallucinációkat
                   // már a bevitelnél eldobjuk. Ez nem teljes nyelvdetektor, csak kapu.
                   String top = code(topLang).toLowerCase(Locale.ROOT);
                   String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
@@ -2077,29 +2090,59 @@ jobs:
               void menu() {
                   if(uiLockedForLive || finalizingStop) return;
                   CharSequence[] items = {
-                      menuItem("OpenAI API kulcs", "", false),
-                      menuItem("AI modell", modelLabel(), false),
-                      menuItem("Beszélgetési profil", profileLabel(), false),
-                      menuItem("Fordítás stílusa", modeLabel(), false),
-                      menuItem("Beszédfelismerés", speechMenuLabel(), false),
-                      menuItem("Hang / zajszűrés", noiseMenuLabel(), false),
-                      menuItem("Háttér / lezárt kijelző", backgroundScreenLabel(), backgroundScreenAllowed),
-                      menuItem("Tolmács mód", interpreterLabel(), interpreterMode),
+                      menuItem("Normál beállítások", normalMenuLabel(), false),
+                      menuItem("Haladó beállítások", "beszédfelismerés, hang / zajszűrés", false),
                       menuItem("Ablakkezelés", "másolás, teljes törlés, tükör mód", false),
                       menuItem("Alapbeállítások", "nyelvpár marad, fordítás/bevitel visszaáll", false)
                   };
 
                   showCenteredMenu("Menü", items, (d,w) -> {
+                      if(w==0) normalMenu();
+                      if(w==1) advancedMenu();
+                      if(w==2) windowMenu();
+                      if(w==3) resetCoreSettings();
+                      updateButtons();
+                  });
+              }
+
+              String normalMenuLabel() {
+                  return profileLabel() + " / " + soundProfileLabel();
+              }
+
+              void normalMenu() {
+                  if(uiLockedForLive || finalizingStop) return;
+                  CharSequence[] items = {
+                      menuItem("OpenAI API kulcs", "", false),
+                      menuItem("AI modell", modelLabel(), false),
+                      menuItem("Beszélgetési profil", profileLabel(), false),
+                      menuItem("Fordítás stílusa", modeLabel(), false),
+                      menuItem("Hangprofil", soundProfileLabel(), false),
+                      menuItem("Háttér / lezárt kijelző", backgroundScreenLabel(), backgroundScreenAllowed),
+                      menuItem("Tolmács mód", interpreterLabel(), interpreterMode)
+                  };
+
+                  showCenteredMenu("Normál beállítások", items, (d,w) -> {
                       if(w==0) showApi();
                       if(w==1) chooseModel();
                       if(w==2) chooseProfile();
                       if(w==3) chooseMode();
-                      if(w==4) speechMenu();
-                      if(w==5) noiseMenu();
-                      if(w==6) chooseBackgroundScreenMode();
-                      if(w==7) chooseInterpreterMode();
-                      if(w==8) windowMenu();
-                      if(w==9) resetCoreSettings();
+                      if(w==4) chooseSoundProfile();
+                      if(w==5) chooseBackgroundScreenMode();
+                      if(w==6) chooseInterpreterMode();
+                      updateButtons();
+                  });
+              }
+
+              void advancedMenu() {
+                  if(uiLockedForLive || finalizingStop) return;
+                  CharSequence[] items = {
+                      menuItem("Beszédfelismerés", speechMenuLabel(), false),
+                      menuItem("Hang / zajszűrés", noiseMenuLabel(), false)
+                  };
+
+                  showCenteredMenu("Haladó beállítások", items, (d,w) -> {
+                      if(w==0) speechMenu();
+                      if(w==1) noiseMenu();
                       updateButtons();
                   });
               }
@@ -2259,6 +2302,47 @@ jobs:
               void chooseModel() { chooseFrom("AI modell", models, model, v -> { model = v; save(); restartIfNeeded(); }); }
               void chooseProfile() { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save(); sessionUpdateIfConnected(); }); }
               void chooseMode() { chooseFrom("Fordítás stílusa", modes, mode, v -> { mode = v; save(); sessionUpdateIfConnected(); }); }
+              void chooseSoundProfile() {
+                  CharSequence[] labels = new CharSequence[soundProfiles.length];
+                  for(int i=0;i<soundProfiles.length;i++) {
+                      boolean selected = soundProfiles[i][1].equals(soundProfile);
+                      String sub = "general".equals(soundProfiles[i][1]) ? "általános, csendesebb környezet" : "kamionfülke, motorzaj, headsetes próba";
+                      labels[i] = menuItem(soundProfiles[i][0], sub + (selected ? " • kiválasztva" : ""), selected);
+                  }
+                  showCenteredMenu("Hangprofil", labels, (d,w) -> {
+                      applySoundProfile(soundProfiles[w][1]);
+                      updateButtons();
+                  });
+              }
+
+              void applySoundProfile(String v) {
+                  soundProfile = v;
+                  if("truck_noisy".equals(v)) {
+                      vadMode = "medium";
+                      delayMode = "xhigh";
+                      micGateMode = "gate_low";
+                      audioSourceMode = "unprocessed";
+                      androidEffectsMode = "ns_only";
+                      openAiNoiseMode = "off";
+                  } else {
+                      vadMode = "medium";
+                      delayMode = "xhigh";
+                      micGateMode = "gate_low";
+                      audioSourceMode = "unprocessed";
+                      androidEffectsMode = "ns_only";
+                      openAiNoiseMode = "off";
+                  }
+                  save();
+                  sessionUpdateIfConnected();
+                  restartIfNeeded();
+                  Toast.makeText(this, "Hangprofil: " + soundProfileLabel(), Toast.LENGTH_SHORT).show();
+              }
+
+              String soundProfileLabel() {
+                  if("truck_noisy".equals(soundProfile)) return "Kamion / zajos környezet";
+                  return "Általános – ajánlott";
+              }
+
               void chooseVad() { chooseFrom("Két mondat közötti szünet", vadModes, vadMode, v -> { vadMode = v; save(); sessionUpdateIfConnected(); }); }
               void chooseMicGate() { chooseFrom("Mikrofon érzékenysége", micGateModes, micGateMode, v -> { micGateMode = v; save(); }); }
               void chooseAudioSource() { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }); }
@@ -2272,6 +2356,7 @@ jobs:
                     .setPositiveButton("Igen", (d,w) -> {
                         model = "gpt-realtime-2";
                         profile = "general";
+                        soundProfile = "general";
                         mode = "natural";
                         vadMode = "medium";
                         delayMode = "xhigh";
@@ -2583,14 +2668,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V114.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V114.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V115.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V115.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V114
+          name: Fordito_V115
           path: |
             artifact/*.apk
             artifact/*.aab
