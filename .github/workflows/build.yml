@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 123; versionName = "12.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 124; versionName = "12.4" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V123" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V124" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -441,7 +441,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V123");
+                  TextView title = label("Fordito_V124");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2179,8 +2179,7 @@ jobs:
               }
 
               void refreshMenuButton(Button b, String title, String subtitle, boolean active) {
-                  String full = title + (subtitle == null || subtitle.length() == 0 ? "" : "
-" + subtitle);
+                  String full = title + (subtitle == null || subtitle.length() == 0 ? "" : "\n" + subtitle);
                   SpannableString sp = new SpannableString(full);
                   sp.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   sp.setSpan(new RelativeSizeSpan(1.05f), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
@@ -2811,14 +2810,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V123.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/Fordito_V123.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/Fordito_V124.apk
+          cp app/build/outputs/bundle/release/Fordito_V124.aab artifact/Fordito_V124.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Fordito_V123
+          name: Fordito_V124
           path: |
             artifact/*.apk
             artifact/*.aab
