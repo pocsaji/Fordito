@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 151; versionName = "15.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 154; versionName = "15.4" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V151" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V154" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -340,7 +340,6 @@ jobs:
 
               final String[][] androidEffectsModes = {
                   {"Ajánlott: NS+AGC, AEC ki","recommended"},
-                  {"Teljes: NS+AGC+AEC","full"},
                   {"Csak zajszűrés","ns_only"}
               };
 
@@ -385,6 +384,7 @@ jobs:
                   micGateMode = sp.getString("micGateMode", "gate_low");
                   audioSourceMode = sp.getString("audioSourceMode", "unprocessed");
                   androidEffectsMode = sp.getString("androidEffectsMode", "ns_only");
+                  if("full".equals(androidEffectsMode)) androidEffectsMode = "ns_only"; // V154: régi hibás teljes mód biztonságos visszaállítása
                   openAiNoiseMode = "off"; // V117: OpenAI zajszűrés fixen kikapcsolva
                   lastInterpreterAudioMode = sp.getString("lastInterpreterAudioMode", sp.getString("interpreterAudioMode", "headset"));
                   if(!"speaker".equals(lastInterpreterAudioMode) && !"headset".equals(lastInterpreterAudioMode)) lastInterpreterAudioMode = "headset";
@@ -450,7 +450,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V151");
+                  TextView title = label("Fordito_V154");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1007,11 +1007,12 @@ jobs:
 
                       JSONObject tr = new JSONObject();
                       tr.put("model", "gpt-realtime-whisper");
-                      // V117: gpt-realtime-whisper GA alatt promptot nem használunk, és language hintet sem állítunk fixre,
-                      // mert a mikrofon egy munkameneten belül TOP és BOTTOM nyelven is megszólalhat.
-                      // A kiválasztott nyelvpárt a BEVITEL után, még fordítás előtt zárjuk:
-                      // csak TOP/BOTTOM nyelvpárba illő, tisztított transcript blokk mehet tovább.
-                      // Így a fordító már nem kap holland/angol/spanyol/német zaj-hallucinációt.
+                      // V153: Automatikus nyelvnél marad a laza felismerés.
+                      // Ha az aktív beviteli oldal konkrét nyelv, azt language hintként adjuk a transzkripciónak.
+                      // Ez nem fordítási prompt és nem utólagos szócsere: a beszédfelismerést tereli a kiválasztott nyelvre,
+                      // hogy a magyarban használt idegen szavak (pl. headset) ne essenek szét magyar szám/szó darabokra.
+                      String trLang = activeTranscriptionLanguageHint();
+                      if(trLang.length() > 0) tr.put("language", trLang);
                       tr.put("delay", delayMode);
                       input.put("transcription", tr);
 
@@ -1027,6 +1028,15 @@ jobs:
                   } catch(Exception e) {
                       append("\n[session hiba] " + e.getMessage());
                   }
+              }
+
+              String activeTranscriptionLanguageHint() {
+                  // AUTO kiválasztásnál nincs nyelvi hint: ilyenkor a Realtime STT automatikusan dönt.
+                  // Konkrét nyelvnél az aktuális beviteli oldal nyelve segíti a felismerést.
+                  // topActive=true: felső ablak a beszéd forrása, topActive=false: alsó ablak.
+                  String lang = topActive ? topLang : bottomLang;
+                  String api = apiCode(lang);
+                  return api == null ? "" : api.trim().toLowerCase(Locale.ROOT);
               }
 
               String pairRules() {
@@ -2423,10 +2433,10 @@ jobs:
                       refreshMenuButton((Button)v, "Tükör mód", displayModeLabel(), mirrorBottomMode);
                       updateButtons();
                   });
-                  addMenuButton(box, "OpenAI API kulcs", hasKey() ? "kulcs mentve – megnyitáskor kijelölve" : "nincs megadva", hasKey(), v -> showApi());
                   addMenuButton(box, "Fordítási beállítások", translationMenuLabel(), false, v -> translationMenu());
                   addMenuButton(box, "Szakértői beállítások", "beszédfelismerés, hang / zajszűrés", false, v -> advancedMenu());
                   addMenuButton(box, "Ablakkezelés", "másolás, teljes törlés", false, v -> windowMenu());
+                  addMenuButton(box, "OpenAI API kulcs", hasKey() ? "kulcs mentve – megnyitáskor kijelölve" : "nincs megadva", hasKey(), v -> showApi());
                   addMenuButton(box, "Alapbeállítások", "nyelvpár marad, fordítás/bevitel visszaáll", false, v -> { resetCoreSettings(); updateButtons(); });
 
                   AlertDialog dlg = new AlertDialog.Builder(this).setView(box).create();
@@ -3152,14 +3162,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V151.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V151.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V154.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V154.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V151
+          name: V154
           path: |
             artifact/*.apk
             artifact/*.aab
