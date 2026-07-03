@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 164; versionName = "16.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 165; versionName = "16.5" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V164" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V165" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -473,7 +473,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V164");
+                  TextView title = label("Fordito_V165");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -958,8 +958,9 @@ jobs:
               void connectRealtimeTranscription() {
                   transcriptionClient = new OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build();
                   Request req = new Request.Builder()
-                    .url("wss://api.openai.com/v1/realtime?model=gpt-realtime-2")
+                    .url("wss://api.openai.com/v1/realtime?intent=transcription")
                     .addHeader("Authorization", "Bearer " + apiKey.trim())
+                    .addHeader("OpenAI-Beta", "realtime=v1")
                     .build();
 
                   transcriptionWs = transcriptionClient.newWebSocket(req, new WebSocketListener() {
@@ -1002,7 +1003,7 @@ jobs:
 
                       @Override public void onFailure(WebSocket w, Throwable e, Response r) {
                           transcriptionConnected = false;
-                          if(transcriptionMode) runOnUiThread(() -> state.setText("átírás kapcsolat hiba"));
+                          if(transcriptionMode) runOnUiThread(() -> { String m = e == null ? "ismeretlen" : String.valueOf(e.getMessage()); state.setText("átírás kapcsolat hiba: " + m); Toast.makeText(this, "Átírás kapcsolat hiba: " + m, Toast.LENGTH_LONG).show(); });
                       }
 
                       @Override public void onClosed(WebSocket w, int c, String reason) {
@@ -1047,7 +1048,7 @@ jobs:
                       if(type.equals("error")) {
                           JSONObject er=o.optJSONObject("error");
                           String msg=er==null?o.toString():er.optString("message",er.toString());
-                          runOnUiThread(() -> state.setText("átírás hiba: "+msg));
+                          runOnUiThread(() -> { state.setText("átírás hiba: " + msg); Toast.makeText(this, "Átírás hiba: " + msg, Toast.LENGTH_LONG).show(); });
                       }
                   } catch(Exception ignored) {}
               }
@@ -3516,14 +3517,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V164.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V164.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V165.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V165.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V164
+          name: V165
           path: |
             artifact/*.apk
             artifact/*.aab
