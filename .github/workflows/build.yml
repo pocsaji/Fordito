@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 148; versionName = "14.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 149; versionName = "14.9" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V148" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V149" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -448,7 +448,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V148");
+                  TextView title = label("Fordito_V149");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2417,9 +2417,9 @@ jobs:
                   });
                   addMenuButton(box, "Tolmács felolvasás", interpreterQuickLabel(), interpreterMode, v -> {
                       toggleInterpreterQuick();
-                      refreshMenuButton((Button)v, "Tolmács felolvasás", interpreterQuickLabel(), interpreterMode);
                       updateButtons();
                   });
+                  addInterpreterOutputMenuButton(box);
                   addMenuButton(box, "Tükör mód", displayModeLabel(), mirrorBottomMode, v -> {
                       toggleDisplayModeQuick();
                       refreshMenuButton((Button)v, "Tükör mód", displayModeLabel(), mirrorBottomMode);
@@ -2471,6 +2471,10 @@ jobs:
               }
 
               void refreshMenuButton(Button b, String title, String subtitle, boolean active) {
+                  refreshMenuButtonColor(b, title, subtitle, active ? Color.rgb(30,140,70) : Color.rgb(95,95,95));
+              }
+
+              void refreshMenuButtonColor(Button b, String title, String subtitle, int bgColor) {
                   String sub = subtitle == null ? "" : subtitle.trim();
                   String text = title + (sub.length() == 0 ? "" : "\n" + sub);
                   SpannableString ss = new SpannableString(text);
@@ -2482,7 +2486,44 @@ jobs:
                       ss.setSpan(new ForegroundColorSpan(Color.rgb(230,230,230)), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   }
                   b.setText(ss);
-                  b.setBackgroundColor(active ? Color.rgb(30,140,70) : Color.rgb(95,95,95));
+                  b.setBackgroundColor(bgColor);
+              }
+
+              void addInterpreterOutputMenuButton(LinearLayout box) {
+                  Button b = new Button(this);
+                  b.setAllCaps(false);
+                  b.setTextColor(Color.WHITE);
+                  b.setGravity(Gravity.CENTER);
+                  b.setPadding(8, 8, 8, 8);
+                  b.setSingleLine(false);
+                  b.setMaxLines(2);
+                  b.setLineSpacing(0, 1.0f);
+                  b.setIncludeFontPadding(false);
+                  b.setMinHeight(0);
+                  b.setMinimumHeight(0);
+                  b.setMinWidth(0);
+                  b.setMinimumWidth(0);
+                  b.setOnClickListener(v -> {
+                      if(!interpreterMode) {
+                          Toast.makeText(this, "Előbb kapcsold be a Tolmács felolvasást.", Toast.LENGTH_SHORT).show();
+                          return;
+                      }
+                      toggleInterpreterOutputMode();
+                      refreshInterpreterOutputButton((Button)v);
+                      updateButtons();
+                  });
+                  refreshInterpreterOutputButton(b);
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, 130);
+                  lp.setMargins(0, 5, 0, 5);
+                  box.addView(b, lp);
+              }
+
+              void refreshInterpreterOutputButton(Button b) {
+                  int bg;
+                  if(!interpreterMode) bg = Color.rgb(95,95,95);
+                  else if("speaker".equals(interpreterAudioMode)) bg = Color.rgb(30,140,70);
+                  else bg = Color.rgb(60,95,150);
+                  refreshMenuButtonColor(b, "Tolmács hangkimenet", interpreterOutputLabel(), bg);
               }
 
               String translationMenuLabel() {
@@ -2587,6 +2628,25 @@ jobs:
 
               String interpreterQuickLabel() {
                   return interpreterMode ? "aktív – csak a következő újraindításig" : "inaktív – csak szöveges fordítás";
+              }
+
+              String interpreterOutputLabel() {
+                  if(!interpreterMode) return "inaktív – tolmács felolvasás kikapcsolva";
+                  if("speaker".equals(interpreterAudioMode)) return "kihangosított telefon – TTS közben mikrofon tiltva";
+                  return "Bluetooth/headset – folyamatos mikrofon";
+              }
+
+              void toggleInterpreterOutputMode() {
+                  if(!interpreterMode) return;
+                  if("speaker".equals(interpreterAudioMode)) {
+                      interpreterAudioMode = "headset";
+                      ttsMuteUntilMs = 0L;
+                  } else {
+                      interpreterAudioMode = "speaker";
+                      if(ttsSpeaking) ttsMuteUntilMs = System.currentTimeMillis() + 500L;
+                  }
+                  save();
+                  Toast.makeText(this, interpreterOutputLabel(), Toast.LENGTH_SHORT).show();
               }
 
               void toggleInterpreterQuick() {
@@ -3087,14 +3147,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V148.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V148.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V149.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V149.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V148
+          name: V149
           path: |
             artifact/*.apk
             artifact/*.aab
