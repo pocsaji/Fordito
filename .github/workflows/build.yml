@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 156; versionName = "15.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 158; versionName = "15.8" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V156" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V158" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -267,10 +267,10 @@ jobs:
               String profile = "general";
               String soundProfile = "general";
               String mode = "natural";
-              String vadMode = "low";
-              String delayMode = "medium";
+              String vadMode = "high";
+              String delayMode = "low";
               String micGateMode = "gate_low";
-              String audioSourceMode = "recognition";
+              String audioSourceMode = "unprocessed";
               String androidEffectsMode = "ns_only";
               String openAiNoiseMode = "off";
               String topLang = "hu";
@@ -341,8 +341,8 @@ jobs:
               };
 
               final String[][] androidEffectsModes = {
-                  {"Ajánlott: NS+AGC, AEC ki","recommended"},
-                  {"Csak zajszűrés","ns_only"}
+                  {"Csak zajszűrés","ns_only"},
+                  {"Kikapcsolva","off"}
               };
 
               final String[][] openAiNoiseModes = {
@@ -381,12 +381,12 @@ jobs:
                   profile = sp.getString("profile", "general");
                   soundProfile = sp.getString("soundProfile", "general");
                   mode = sp.getString("mode", "natural");
-                  vadMode = sp.getString("vadMode", "medium");
-                  delayMode = sp.getString("delayMode", "xhigh");
+                  vadMode = sp.getString("vadMode", "high");
+                  delayMode = sp.getString("delayMode", "low");
                   micGateMode = sp.getString("micGateMode", "gate_low");
                   audioSourceMode = sp.getString("audioSourceMode", "unprocessed");
                   androidEffectsMode = sp.getString("androidEffectsMode", "ns_only");
-                  if("full".equals(androidEffectsMode)) androidEffectsMode = "ns_only"; // V154: régi hibás teljes mód biztonságos visszaállítása
+                  if("full".equals(androidEffectsMode) || "recommended".equals(androidEffectsMode)) androidEffectsMode = "ns_only"; // V158: AGC/AEC ágak kerülése
                   openAiNoiseMode = "off"; // V117: OpenAI zajszűrés fixen kikapcsolva
                   lastInterpreterAudioMode = sp.getString("lastInterpreterAudioMode", sp.getString("interpreterAudioMode", "headset"));
                   if(!"speaker".equals(lastInterpreterAudioMode) && !"headset".equals(lastInterpreterAudioMode)) lastInterpreterAudioMode = "headset";
@@ -452,7 +452,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V156");
+                  TextView title = label("Fordito_V158");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1008,34 +1008,10 @@ jobs:
                       }
 
                       JSONObject tr = new JSONObject();
-                      // V156: a pontosabb GPT-4o Transcribe végzi a beszéd -> szöveg lépést.
-                      // Ennél a modellnél a Realtime transzkripció dokumentált promptja használható.
-                      tr.put("model", "gpt-4o-transcribe");
-
-                      String topCode = code(topLang);
-                      String bottomCode = code(bottomLang);
-                      String expectedLanguages;
-                      if("AUTO".equalsIgnoreCase(topCode) && "AUTO".equalsIgnoreCase(bottomCode)) {
-                          expectedLanguages = "Detect the spoken language naturally.";
-                      } else if("AUTO".equalsIgnoreCase(topCode)) {
-                          expectedLanguages = "One expected conversation language is " + bottomCode + "; the other may be detected automatically.";
-                      } else if("AUTO".equalsIgnoreCase(bottomCode)) {
-                          expectedLanguages = "One expected conversation language is " + topCode + "; the other may be detected automatically.";
-                      } else {
-                          expectedLanguages = "The conversation normally uses " + topCode + " and " + bottomCode + ".";
-                      }
-
-                      String transcriptionPrompt =
-                          expectedLanguages + " " +
-                          "Transcribe exactly what an ordinary person says in natural everyday speech. " +
-                          "Use sentence context. Everyday speech may contain slang, profanity, colloquial expressions, borrowed foreign words, " +
-                          "international technical terms, brand names, product names, personal names and place names. " +
-                          "Keep familiar borrowed and technical words as the words actually spoken; do not force them into unrelated native-sounding words. " +
-                          "Examples of normal everyday terms include headset, Bluetooth, Samsung, Galaxy Buds, WhatsApp, hotspot, roaming, API and OpenAI. " +
-                          "Do not translate. Do not censor. Do not sanitize. Do not add explanations. Do not invent speech from background noise. " +
-                          "If speech is uncertain, prefer the interpretation that makes sense in the surrounding everyday sentence.";
-
-                      tr.put("prompt", transcriptionPrompt);
+                      // V157: gyors élő mód. A V156 pontosabb, de túl lassú és túl nagy blokkokban záró modelljét kivesszük.
+                      // Nincs fix language kényszer és nincs transzkripciós prompt; a kiválasztott nyelvek a fordítási irányt szabják meg.
+                      tr.put("model", "gpt-realtime-whisper");
+                      tr.put("delay", delayMode);
                       input.put("transcription", tr);
 
                       JSONObject audio = new JSONObject();
@@ -1251,9 +1227,9 @@ jobs:
                       if(rec == null || "off".equals(androidEffectsMode)) return;
                       int sid = rec.getAudioSessionId();
 
-                      boolean useNs = "recommended".equals(androidEffectsMode) || "full".equals(androidEffectsMode) || "ns_only".equals(androidEffectsMode);
-                      boolean useAgc = "recommended".equals(androidEffectsMode) || "full".equals(androidEffectsMode);
-                      boolean useAec = "full".equals(androidEffectsMode);
+                      boolean useNs = "ns_only".equals(androidEffectsMode);
+                      boolean useAgc = false;
+                      boolean useAec = false;
 
                       if(useNs && NoiseSuppressor.isAvailable()) {
                           noiseSuppressor = NoiseSuppressor.create(sid);
@@ -2793,15 +2769,15 @@ jobs:
               void applySoundProfile(String v) {
                   soundProfile = v;
                   if("truck_noisy".equals(v)) {
-                      vadMode = "medium";
-                      delayMode = "xhigh";
+                      vadMode = "high";
+                      delayMode = "low";
                       micGateMode = "gate_low";
                       audioSourceMode = "unprocessed";
                       androidEffectsMode = "ns_only";
                       openAiNoiseMode = "off";
                   } else {
-                      vadMode = "medium";
-                      delayMode = "xhigh";
+                      vadMode = "high";
+                      delayMode = "low";
                       micGateMode = "gate_low";
                       audioSourceMode = "unprocessed";
                       androidEffectsMode = "ns_only";
@@ -2833,8 +2809,8 @@ jobs:
                         profile = "general";
                         soundProfile = "general";
                         mode = "natural";
-                        vadMode = "medium";
-                        delayMode = "xhigh";
+                        vadMode = "high";
+                        delayMode = "low";
                         micGateMode = "gate_low";
                         audioSourceMode = "unprocessed";
                         androidEffectsMode = "ns_only";
@@ -3138,14 +3114,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V156.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V156.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V158.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V158.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V156
+          name: V158
           path: |
             artifact/*.apk
             artifact/*.aab
