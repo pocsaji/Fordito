@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 139; versionName = "13.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 141; versionName = "14.1" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V139" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V141" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -214,6 +214,14 @@ jobs:
               boolean interpreterMode = false;
               String interpreterAudioMode = "off";
               volatile long ttsMuteUntilMs = 0L;
+              static final int MAX_TRAILING_SILENCE_SEND_MS = 600;
+              static final int PRE_ROLL_AUDIO_MS = 500;
+              volatile long lastVoiceChunkSentAtMs = 0L;
+              volatile boolean trailingSilenceOpen = false;
+              volatile boolean voiceSendActive = false;
+              volatile boolean pendingAudioStartAfterSessionUpdate = false;
+              final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
+              int preRollAudioBytes = 0;
               boolean mirrorBottomMode = false;
               boolean backgroundScreenAllowed = false;
               boolean manualTopSource = true;
@@ -317,10 +325,10 @@ jobs:
               };
 
               final String[][] micGateModes = {
-                  {"Jelenlegi / enyhe kapu","sensitive"},
-                  {"Kicsit erősebb kapu","gate_low"},
-                  {"Normál kapu","normal"},
-                  {"Erősebb kapu","gate_high"}
+                  {"Kikapcsolva – minden hang megy","sensitive"},
+                  {"Enyhe – kevés üresjárat szűrés","gate_low"},
+                  {"Normál – ajánlott","normal"},
+                  {"Erős – zajos környezet","gate_high"}
               };
 
               final String[][] audioSourceModes = {
@@ -441,7 +449,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V139");
+                  TextView title = label("Fordito_V141");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -483,20 +491,17 @@ jobs:
                   bottomBox.addTextChangedListener(manualWatcher(false));
                   applyDisplayMode();
                   
-                  topLangBtn.setOnClickListener(v -> { if(!uiLockedForLive && !finalizingStop) chooseLang(true); });
-                  bottomLangBtn.setOnClickListener(v -> { if(!uiLockedForLive && !finalizingStop) chooseLang(false); });
-                  topLangBtn.setOnLongClickListener(v -> { if(!uiLockedForLive && !finalizingStop) copyBox(true); return true; });
-                  bottomLangBtn.setOnLongClickListener(v -> { if(!uiLockedForLive && !finalizingStop) copyBox(false); return true; });
+                  topLangBtn.setOnClickListener(v -> chooseLang(true));
+                  bottomLangBtn.setOnClickListener(v -> chooseLang(false));
+                  topLangBtn.setOnLongClickListener(v -> { copyBox(true); return true; });
+                  bottomLangBtn.setOnLongClickListener(v -> { copyBox(false); return true; });
                   micBtn.setOnClickListener(v -> {
-                      if(streaming || finalizingStop) {
-                          stopWithFinalizeDelay();
-                      } else if(!uiLockedForLive) {
-                          start(true);
-                      }
+                      if(streaming) stop();
+                      else start(true);
                   });
-                  translateBtn.setOnClickListener(v -> { if(!uiLockedForLive && !finalizingStop) manualTranslate(); });
-                  menuBtn.setOnClickListener(v -> { if(!uiLockedForLive && !finalizingStop) menu(); });
-                  menuBtn.setOnLongClickListener(v -> { if(!uiLockedForLive && !finalizingStop) clearBothBoxes(); return true; });
+                  translateBtn.setOnClickListener(v -> manualTranslate());
+                  menuBtn.setOnClickListener(v -> menu());
+                  menuBtn.setOnLongClickListener(v -> { clearBothBoxes(); return true; });
 
                   updateButtons();
               }
@@ -925,8 +930,18 @@ jobs:
                           connected = true;
                           runOnUiThread(() -> {
                               sessionUpdate();
-                              if(withAudio) audioLoop();
-                              else state.setText("fordítási kapcsolat");
+                              if(withAudio) {
+                                  pendingAudioStartAfterSessionUpdate = true;
+                                  state.setText("mikrofon előkészítés");
+                                  new Handler().postDelayed(() -> {
+                                      if(pendingAudioStartAfterSessionUpdate && connected && ws != null && !streaming) {
+                                          pendingAudioStartAfterSessionUpdate = false;
+                                          audioLoop();
+                                      }
+                                  }, 1200);
+                              } else {
+                                  state.setText("fordítási kapcsolat");
+                              }
                               updateButtons();
                               if(!withAudio && pendingManualText.length() > 0) {
                                   String p = pendingManualText;
@@ -1083,19 +1098,22 @@ jobs:
               }
 
               int vadSilenceMs() {
-                  if("high".equals(vadMode)) return 500;
-                  if("medium".equals(vadMode)) return 850;
-                  if("auto".equals(vadMode)) return 850;
-                  return 1200;
+                  // V140: a szerver VAD mondatzárása sehol nem várhat tovább 500 ms-nál,
+                  // mert a helyi küldési kapu legfeljebb 600 ms lezáró csendet enged fel.
+                  if("high".equals(vadMode)) return 300;
+                  if("medium".equals(vadMode)) return 450;
+                  if("auto".equals(vadMode)) return 450;
+                  return 500;
               }
 
               int micGateThreshold() {
-                  // V107: négy fokozat teszteléshez. Nem dobja el a csomagot, csak nullázza a túl halk/zajos részt.
-                  if("sensitive".equals(micGateMode)) return 60;    // eddigi V106 közeli állapot
-                  if("gate_low".equals(micGateMode)) return 100;    // enyhe emelés
-                  if("normal".equals(micGateMode)) return 150;      // ajánlott próba zajosabb fülkében
-                  if("gate_high".equals(micGateMode)) return 220;   // erősebb szűrés, ha sok a szemét
-                  return 60;
+                  // V140: a kapu már nem csak nulláz, hanem üresjáratban a küldést is megfogja.
+                  // sensitive = kikapcsolva: minden hangcsomag megy, a régi folyamatos stream viselkedéshez.
+                  if("sensitive".equals(micGateMode)) return 0;
+                  if("gate_low".equals(micGateMode)) return 100;
+                  if("normal".equals(micGateMode)) return 150;
+                  if("gate_high".equals(micGateMode)) return 220;
+                  return 100;
               }
 
               int avgAbsPcm16(byte[] data, int len) {
@@ -1113,12 +1131,55 @@ jobs:
                   return (int)(sum / samples);
               }
 
-              byte[] prepareAudioChunk(byte[] data, int len) {
-                  int threshold = micGateThreshold();
-                  if(threshold <= 0 || avgAbsPcm16(data, len) >= threshold) return Arrays.copyOf(data, len);
-                  // Nem eldobjuk a csendes/zajos részt, hanem nullára húzzuk.
-                  // Így a Realtime VAD továbbra is érzékeli a szünetet, de kevesebb kabinzaj jut át.
-                  return new byte[len];
+              void clearPreRollAudio() {
+                  synchronized(preRollAudioChunks) {
+                      preRollAudioChunks.clear();
+                      preRollAudioBytes = 0;
+                  }
+              }
+
+              void rememberPreRollAudio(byte[] data, int len) {
+                  if(data == null || len <= 0) return;
+                  byte[] copy = Arrays.copyOf(data, len);
+                  int maxBytes = Math.max(1, 24000 * 2 * PRE_ROLL_AUDIO_MS / 1000);
+                  synchronized(preRollAudioChunks) {
+                      preRollAudioChunks.add(copy);
+                      preRollAudioBytes += copy.length;
+                      while(preRollAudioBytes > maxBytes && !preRollAudioChunks.isEmpty()) {
+                          byte[] old = preRollAudioChunks.poll();
+                          if(old != null) preRollAudioBytes -= old.length;
+                      }
+                  }
+              }
+
+              ArrayList<byte[]> takePreRollAudio() {
+                  ArrayList<byte[]> out = new ArrayList<>();
+                  synchronized(preRollAudioChunks) {
+                      while(!preRollAudioChunks.isEmpty()) {
+                          byte[] b = preRollAudioChunks.poll();
+                          if(b != null) out.add(b);
+                      }
+                      preRollAudioBytes = 0;
+                  }
+                  return out;
+              }
+
+              void sendAudioChunk(byte[] chunk) throws Exception {
+                  if(chunk == null || chunk.length == 0 || ws == null) return;
+                  JSONObject evt = new JSONObject();
+                  evt.put("type", "input_audio_buffer.append");
+                  evt.put("audio", Base64.encodeToString(chunk, Base64.NO_WRAP));
+                  ws.send(evt.toString());
+              }
+
+              byte[] prepareTrailingSilenceChunk(byte[] data, int len) {
+                  long now = System.currentTimeMillis();
+                  if(trailingSilenceOpen && lastVoiceChunkSentAtMs > 0L && now - lastVoiceChunkSentAtMs <= MAX_TRAILING_SILENCE_SEND_MS) {
+                      return new byte[len];
+                  }
+                  trailingSilenceOpen = false;
+                  voiceSendActive = false;
+                  return null;
               }
 
               String delayLabel() {
@@ -1228,24 +1289,59 @@ jobs:
                   if(rec == null) { runOnUiThread(() -> state.setText("mikrofon hiba")); return; }
                   enableAndroidAudioEffects();
                   streaming = true;
-                      setLiveUiLocked(true);
+                  setLiveUiLocked(false);
                   rec.startRecording();
                   updateButtons();
 
                   audioExec.submit(() -> {
                       byte[] buf = new byte[bs];
+                      clearPreRollAudio();
+                      voiceSendActive = false;
+                      trailingSilenceOpen = false;
+                      lastVoiceChunkSentAtMs = 0L;
                       while(streaming && connected && ws != null && rec != null) {
                           int read = rec.read(buf, 0, buf.length);
                           if(read > 0) {
                               try {
-                                  byte[] chunk = prepareAudioChunk(buf, read);
                                   if("speaker".equals(interpreterAudioMode) && (ttsSpeaking || System.currentTimeMillis() < ttsMuteUntilMs)) {
-                                      chunk = new byte[read];
+                                      trailingSilenceOpen = false;
+                                      voiceSendActive = false;
+                                      clearPreRollAudio();
+                                      continue;
                                   }
-                                  JSONObject evt = new JSONObject();
-                                  evt.put("type", "input_audio_buffer.append");
-                                  evt.put("audio", Base64.encodeToString(chunk, Base64.NO_WRAP));
-                                  ws.send(evt.toString());
+
+                                  int threshold = micGateThreshold();
+                                  long now = System.currentTimeMillis();
+                                  if(threshold <= 0) {
+                                      clearPreRollAudio();
+                                      voiceSendActive = true;
+                                      trailingSilenceOpen = true;
+                                      lastVoiceChunkSentAtMs = now;
+                                      sendAudioChunk(Arrays.copyOf(buf, read));
+                                      continue;
+                                  }
+
+                                  boolean overGate = avgAbsPcm16(buf, read) >= threshold;
+                                  if(overGate) {
+                                      if(!voiceSendActive) {
+                                          for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr);
+                                      }
+                                      voiceSendActive = true;
+                                      trailingSilenceOpen = true;
+                                      lastVoiceChunkSentAtMs = now;
+                                      sendAudioChunk(Arrays.copyOf(buf, read));
+                                      continue;
+                                  }
+
+                                  if(voiceSendActive) {
+                                      byte[] tail = prepareTrailingSilenceChunk(buf, read);
+                                      if(tail != null) {
+                                          sendAudioChunk(tail);
+                                          continue;
+                                      }
+                                  }
+
+                                  rememberPreRollAudio(buf, read);
                               } catch(Exception ignored) {}
                           }
                       }
@@ -1273,6 +1369,11 @@ jobs:
                   streaming = false;
                   connected = false;
                   ttsMuteUntilMs = 0L;
+                  lastVoiceChunkSentAtMs = 0L;
+                  trailingSilenceOpen = false;
+                  voiceSendActive = false;
+                  pendingAudioStartAfterSessionUpdate = false;
+                  clearPreRollAudio();
                   releaseAndroidAudioEffects();
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception ignored) {}
                   rec = null;
@@ -1300,6 +1401,13 @@ jobs:
                   try {
                       JSONObject o = new JSONObject(s);
                       String type = o.optString("type", "");
+
+                      if(type.equals("session.updated")) {
+                          if(pendingAudioStartAfterSessionUpdate && connected && ws != null && !streaming) {
+                              pendingAudioStartAfterSessionUpdate = false;
+                              runOnUiThread(() -> audioLoop());
+                          }
+                      }
 
                       if(type.equals("response.created")) {
                           responseInProgress = true;
@@ -1609,6 +1717,7 @@ jobs:
                   String h = normalizeLiveBlockHash(block);
                   if(h.length() < 3) return false;
                   if(recentLiveBlockHashes.contains(h)) return false;
+                  if(isRecentlySimilarLiveBlock(h)) return false;
                   recentLiveBlockHashes.add(h);
                   recentLiveBlockHashOrder.add(h);
                   while(recentLiveBlockHashOrder.size() > 80) {
@@ -1616,6 +1725,29 @@ jobs:
                       if(old != null) recentLiveBlockHashes.remove(old);
                   }
                   return true;
+              }
+
+              boolean isRecentlySimilarLiveBlock(String h) {
+                  if(h == null || h.length() < 8) return false;
+                  for(String old : recentLiveBlockHashOrder) {
+                      if(old == null || old.length() < 8) continue;
+                      int min = Math.min(h.length(), old.length());
+                      int max = Math.max(h.length(), old.length());
+                      if(min >= 12 && (h.contains(old) || old.contains(h)) && (min * 100 / Math.max(1, max)) >= 70) return true;
+
+                      String[] a = h.split("\\s+");
+                      String[] b = old.split("\\s+");
+                      if(a.length >= 3 && b.length >= 3) {
+                          HashSet<String> sa = new HashSet<>(Arrays.asList(a));
+                          HashSet<String> sb = new HashSet<>(Arrays.asList(b));
+                          int common = 0;
+                          for(String w : sa) if(sb.contains(w)) common++;
+                          int small = Math.min(sa.size(), sb.size());
+                          int large = Math.max(sa.size(), sb.size());
+                          if(small >= 3 && common * 100 / Math.max(1, small) >= 85 && small * 100 / Math.max(1, large) >= 70) return true;
+                      }
+                  }
+                  return false;
               }
 
               String normalizeLiveBlockHash(String block) {
@@ -2239,7 +2371,7 @@ jobs:
                   if(uiLockedForLive || finalizingStop) return;
                   openAiNoiseMode = "off";
                   CharSequence[] items = {
-                      menuItem("Mikrofon érzékenysége", micGateLabel(), false),
+                      menuItem("Mikrofon küldési kapu", micGateLabel(), false),
                       menuItem("Hangforrás", audioSourceLabel(), false),
                       menuItem("Android zajszűrés", androidEffectsLabel(), false)
                   };
@@ -2456,7 +2588,7 @@ jobs:
               }
 
               void chooseVad() { chooseFrom("Két mondat közötti szünet", vadModes, vadMode, v -> { vadMode = v; save(); sessionUpdateIfConnected(); }); }
-              void chooseMicGate() { chooseFrom("Mikrofon érzékenysége", micGateModes, micGateMode, v -> { micGateMode = v; save(); }); }
+              void chooseMicGate() { chooseFrom("Mikrofon küldési kapu", micGateModes, micGateMode, v -> { micGateMode = v; save(); }); }
               void chooseAudioSource() { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }); }
               void chooseAndroidEffects() { chooseFrom("Android zajszűrés", androidEffectsModes, androidEffectsMode, v -> { androidEffectsMode = v; save(); restartIfNeeded(); }); }
               void chooseOpenAiNoise() { chooseFrom("OpenAI zajszűrés", openAiNoiseModes, openAiNoiseMode, v -> { openAiNoiseMode = v; save(); sessionUpdateIfConnected(); }); }
@@ -2636,15 +2768,14 @@ jobs:
               }
 
               void setLiveUiLocked(boolean locked) {
-                  uiLockedForLive = locked;
+                  // V140: élő mikrofon alatt nem zárjuk a kezelőfelületet.
+                  // A háttérmód miatt a véletlen nyomkodás elleni régi védelemre nincs szükség;
+                  // csak a mikrofon gomb színe/szövege jelzi az aktív állapotot.
+                  uiLockedForLive = false;
+                  finalizingStop = false;
                   try {
-                      // V98: élő mikrofon alatt csak a két veszélyes alsó gomb záródik:
-                      // FORDÍT és MENÜ. Az ablakokhoz, scrollhoz, nyelvgombokhoz nem nyúlunk.
-                      boolean blocked = locked || finalizingStop;
-
-                      if(translateBtn != null) translateBtn.setEnabled(!blocked);
-                      if(menuBtn != null) menuBtn.setEnabled(!blocked);
-
+                      if(translateBtn != null) translateBtn.setEnabled(true);
+                      if(menuBtn != null) menuBtn.setEnabled(true);
                       styleUiState();
                   } catch(Exception ignored) {}
               }
@@ -2661,8 +2792,8 @@ jobs:
                       if(topLangBtn != null) topLangBtn.setBackgroundColor(topActive ? active : inactive);
                       if(bottomLangBtn != null) bottomLangBtn.setBackgroundColor(!topActive ? active : inactive);
                       
-                      if(translateBtn != null) translateBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : inactive);
-                      if(menuBtn != null) menuBtn.setBackgroundColor((uiLockedForLive || finalizingStop) ? disabled : inactive);
+                      if(translateBtn != null) translateBtn.setBackgroundColor(inactive);
+                      if(menuBtn != null) menuBtn.setBackgroundColor(inactive);
 
                       if(micBtn != null) {
                           micBtn.setEnabled(true);
@@ -2681,16 +2812,12 @@ jobs:
               }
 
               void stopWithFinalizeDelay() {
-                  if(finalizingStop) return;
-                  finalizingStop = true;
+                  // V140: a mikrofon leállítása nem tartja lezárva a menüt/fordítás gombot.
+                  // Meghagyjuk kompatibilitásból, de hosszú 1.8 mp várakozás nélkül.
                   try { stop(); } catch(Exception ignored) {}
-                  state.setText("lezárás...");
-                  setLiveUiLocked(true);
-                  new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                      finalizingStop = false;
-                      setLiveUiLocked(false);
-                      updateButtons();
-                  }, 1800);
+                  finalizingStop = false;
+                  setLiveUiLocked(false);
+                  updateButtons();
               }
 
               void updateButtons() {
@@ -2780,14 +2907,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V139.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V139.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V141.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V141.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V139
+          name: V141
           path: |
             artifact/*.apk
             artifact/*.aab
