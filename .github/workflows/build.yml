@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 149; versionName = "14.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 150; versionName = "15.0" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V149" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V150" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -448,7 +448,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V149");
+                  TextView title = label("Fordito_V150");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2512,6 +2512,16 @@ jobs:
                       refreshInterpreterOutputButton((Button)v);
                       updateButtons();
                   });
+                  b.setOnLongClickListener(v -> {
+                      if(!interpreterMode) {
+                          Toast.makeText(this, "A tolmács felolvasás már ki van kapcsolva.", Toast.LENGTH_SHORT).show();
+                          return true;
+                      }
+                      disableInterpreterOutput();
+                      refreshInterpreterOutputButton((Button)v);
+                      updateButtons();
+                      return true;
+                  });
                   refreshInterpreterOutputButton(b);
                   LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, 130);
                   lp.setMargins(0, 5, 0, 5);
@@ -2647,6 +2657,17 @@ jobs:
                   }
                   save();
                   Toast.makeText(this, interpreterOutputLabel(), Toast.LENGTH_SHORT).show();
+              }
+
+              void disableInterpreterOutput() {
+                  interpreterMode = false;
+                  interpreterAudioMode = "off";
+                  ttsMuteUntilMs = 0L;
+                  speakQueue.clear();
+                  ttsSpeaking = false;
+                  try { if(tts != null) tts.stop(); } catch(Exception ignored) {}
+                  save();
+                  Toast.makeText(this, "Tolmács felolvasás kikapcsolva.", Toast.LENGTH_SHORT).show();
               }
 
               void toggleInterpreterQuick() {
@@ -3147,14 +3168,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V149.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V149.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V150.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V150.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V149
+          name: V150
           path: |
             artifact/*.apk
             artifact/*.aab
