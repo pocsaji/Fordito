@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 158; versionName = "15.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 159; versionName = "15.9" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V158" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V159" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -270,7 +270,7 @@ jobs:
               String vadMode = "high";
               String delayMode = "low";
               String micGateMode = "gate_low";
-              String audioSourceMode = "unprocessed";
+              String audioSourceMode = "recognition";
               String androidEffectsMode = "ns_only";
               String openAiNoiseMode = "off";
               String topLang = "hu";
@@ -384,7 +384,7 @@ jobs:
                   vadMode = sp.getString("vadMode", "high");
                   delayMode = sp.getString("delayMode", "low");
                   micGateMode = sp.getString("micGateMode", "gate_low");
-                  audioSourceMode = sp.getString("audioSourceMode", "unprocessed");
+                  audioSourceMode = sp.getString("audioSourceMode", "recognition");
                   androidEffectsMode = sp.getString("androidEffectsMode", "ns_only");
                   if("full".equals(androidEffectsMode) || "recommended".equals(androidEffectsMode)) androidEffectsMode = "ns_only"; // V158: AGC/AEC ágak kerülése
                   openAiNoiseMode = "off"; // V117: OpenAI zajszűrés fixen kikapcsolva
@@ -408,9 +408,9 @@ jobs:
                       mode = "natural";
                       vadMode = "medium";
                       delayMode = "xhigh";
-                      micGateMode = "gate_low";
-                      audioSourceMode = "unprocessed";
-                      androidEffectsMode = "ns_only";
+                      micGateMode = "sensitive";
+                      audioSourceMode = "recognition";
+                      androidEffectsMode = "off";
                       openAiNoiseMode = "off";
                       interpreterMode = false;
                       interpreterAudioMode = "off";
@@ -452,7 +452,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V158");
+                  TextView title = label("Fordito_V159");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -999,19 +999,17 @@ jobs:
                       input.put("format", format);
                       input.put("turn_detection", vad);
 
-                      // V109: OpenAI Realtime oldali zajszűrés menüből.
-                      // near_field: telefon/headset közeli beszéd. far_field: távolabb lévő mikrofon.
-                      if(!"off".equals(openAiNoiseMode)) {
-                          JSONObject nr = new JSONObject();
-                          nr.put("type", openAiNoiseMode);
-                          input.put("noise_reduction", nr);
-                      }
+                      // V159 CLEAN: nincs külön OpenAI zajszűrés. Először egyetlen tiszta hangláncot mérünk.
 
                       JSONObject tr = new JSONObject();
                       // V157: gyors élő mód. A V156 pontosabb, de túl lassú és túl nagy blokkokban záró modelljét kivesszük.
                       // Nincs fix language kényszer és nincs transzkripciós prompt; a kiválasztott nyelvek a fordítási irányt szabják meg.
                       tr.put("model", "gpt-realtime-whisper");
                       tr.put("delay", delayMode);
+                      String expectedInputLang = code(topActive ? topLang : bottomLang);
+                      if(expectedInputLang != null && !"AUTO".equalsIgnoreCase(expectedInputLang)) {
+                          tr.put("language", expectedInputLang.toLowerCase(Locale.ROOT));
+                      }
                       input.put("transcription", tr);
 
                       JSONObject audio = new JSONObject();
@@ -1078,16 +1076,14 @@ jobs:
                     "Keep meaning, context and tone. " + modePrompt();
               }
 
-              String liveBlockInstructions(boolean ignoredSourceIsTop) {
-                  String top = code(topLang);
-                  String bottom = code(bottomLang);
-                  return "You are translating ONE already segmented speech transcript block. " +
-                    "The input has already been filtered on the input side to the selected language pair only. " +
-                    "Use ONLY these two languages: TOP=" + top + ", BOTTOM=" + bottom + ". " +
-                    "Do not search for or preserve any third language. " +
-                    "Return EXACTLY three lines and nothing else: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <verbatim original text> then TRANSLATION: <natural translation into the other selected language>. " +
-                    "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly in ORIGINAL and TRANSLATION. Never output square-bracket category placeholders or asterisk-masked words. " +
-                    "Do not merge this block with earlier or later speech. Do not invent information. " + modePrompt();
+              String liveBlockInstructions(boolean sourceIsTop) {
+                  String source = code(sourceIsTop ? topLang : bottomLang);
+                  String target = code(sourceIsTop ? bottomLang : topLang);
+                  return "Translate one completed speech transcript from " + source + " to " + target + ". " +
+                    "The transcript is ordinary everyday speech. Preserve loanwords, brand names, names, slang and profanity. " +
+                    "Do not reinterpret, correct, expand or rewrite the source text. " +
+                    "Return EXACTLY three lines: SOURCE_LANG: " + source + " then ORIGINAL: the source text verbatim then TRANSLATION: the natural everyday translation. " +
+                    "No explanation, no markdown, no extra text. " + modePrompt();
               }
 
               String modePrompt() {
@@ -1281,13 +1277,8 @@ jobs:
               }
 
               AudioRecord makeBestAudioRecord(int sr, int bs) {
-                  AudioRecord r = makeAudioRecord(selectedAudioSource(), sr, bs);
-                  if(r != null) return r;
-                  r = makeAudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sr, bs);
-                  if(r != null) return r;
-                  r = makeAudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sr, bs);
-                  if(r != null) return r;
-                  return makeAudioRecord(MediaRecorder.AudioSource.MIC, sr, bs);
+                  // V159 CLEAN: nincs titkos fallback. A kiválasztott hangforrás vagy elindul, vagy látható hibát ad.
+                  return makeAudioRecord(selectedAudioSource(), sr, bs);
               }
 
               void audioLoop() {
@@ -1295,11 +1286,9 @@ jobs:
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4800);
 
-                  // V109: 24 kHz PCM16 mono marad. Buffer cél kb. 100 ms.
-                  // Hangforrás és Android/OpenAI zajszűrés menüből tesztelhető.
                   rec = makeBestAudioRecord(sr, bs);
-                  if(rec == null) { runOnUiThread(() -> state.setText("mikrofon hiba")); return; }
-                  enableAndroidAudioEffects();
+                  if(rec == null) { runOnUiThread(() -> state.setText("mikrofon hiba: " + audioSourceLabel())); return; }
+                  // V159 CLEAN: nincs Android NS/AGC/AEC, nincs saját kapu, pre-roll vagy utócsend.
                   streaming = true;
                   setLiveUiLocked(false);
                   rec.startRecording();
@@ -1307,53 +1296,12 @@ jobs:
 
                   audioExec.submit(() -> {
                       byte[] buf = new byte[bs];
-                      clearPreRollAudio();
-                      voiceSendActive = false;
-                      trailingSilenceOpen = false;
-                      lastVoiceChunkSentAtMs = 0L;
                       while(streaming && connected && ws != null && rec != null) {
                           int read = rec.read(buf, 0, buf.length);
                           if(read > 0) {
                               try {
-                                  if("speaker".equals(interpreterAudioMode) && (ttsSpeaking || System.currentTimeMillis() < ttsMuteUntilMs)) {
-                                      trailingSilenceOpen = false;
-                                      voiceSendActive = false;
-                                      clearPreRollAudio();
-                                      continue;
-                                  }
-
-                                  int threshold = micGateThreshold();
-                                  long now = System.currentTimeMillis();
-                                  if(threshold <= 0) {
-                                      clearPreRollAudio();
-                                      voiceSendActive = true;
-                                      trailingSilenceOpen = true;
-                                      lastVoiceChunkSentAtMs = now;
-                                      sendAudioChunk(Arrays.copyOf(buf, read));
-                                      continue;
-                                  }
-
-                                  boolean overGate = avgAbsPcm16(buf, read) >= threshold;
-                                  if(overGate) {
-                                      if(!voiceSendActive) {
-                                          for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr);
-                                      }
-                                      voiceSendActive = true;
-                                      trailingSilenceOpen = true;
-                                      lastVoiceChunkSentAtMs = now;
-                                      sendAudioChunk(Arrays.copyOf(buf, read));
-                                      continue;
-                                  }
-
-                                  if(voiceSendActive) {
-                                      byte[] tail = prepareTrailingSilenceChunk(buf, read);
-                                      if(tail != null) {
-                                          sendAudioChunk(tail);
-                                          continue;
-                                      }
-                                  }
-
-                                  rememberPreRollAudio(buf, read);
+                                  if("speaker".equals(interpreterAudioMode) && (ttsSpeaking || System.currentTimeMillis() < ttsMuteUntilMs)) continue;
+                                  sendAudioChunk(Arrays.copyOf(buf, read));
                               } catch(Exception ignored) {}
                           }
                       }
@@ -1446,8 +1394,7 @@ jobs:
                       }
 
                       if(type.equals("conversation.item.input_audio_transcription.delta")) {
-                          String d = o.optString("delta", "");
-                          if(!d.isEmpty()) runOnUiThread(() -> handleTranscriptDelta(d));
+                          // V159 CLEAN: delta csak részleges előnézet lenne; végleges blokkot soha nem építünk belőle.
                       }
 
                       if(type.equals("conversation.item.input_audio_transcription.completed")) {
@@ -1589,8 +1536,7 @@ jobs:
               }
 
               void handleTranscriptCompleted(String itemId, String transcript) {
-                  // V155: ugyanaz a lezárt Realtime audio-item csak egyszer juthat tovább.
-                  // Ez eseményazonosító-alapú védelem; nem hasonló mondatokat tilt.
+                  // V159 CLEAN: egyetlen hiteles végleges forrás a completed esemény.
                   if(itemId != null && itemId.trim().length() > 0) {
                       String id = itemId.trim();
                       if(processedTranscriptItemIds.contains(id)) return;
@@ -1601,18 +1547,11 @@ jobs:
                           if(old != null) processedTranscriptItemIds.remove(old);
                       }
                   }
-                  // V51 duplázás-javítás:
-                  // A completed esemény sokszor ugyanazt a teljes mondatot küldi újra,
-                  // amit a delta eseményekből már kiírtunk és fordítottunk.
-                  // Ha volt delta ebben a körben, NEM töltjük vissza a teljes transcriptet,
-                  // csak a bufferben maradt befejezetlen részt zárjuk le.
-                  if(!liveHadTranscriptDelta && liveTranscriptBuffer.trim().length() == 0 && transcript != null && transcript.trim().length() > 0) {
-                      liveBufferStartedAt = System.currentTimeMillis();
-                      liveTranscriptBuffer = transcript;
-                  }
-                  flushReadyTranscriptBlocks(true);
-                  liveIdleFlushToken++;
-                  liveHadTranscriptDelta = false;
+                  String b = transcript == null ? "" : transcript.trim();
+                  if(b.length() == 0) return;
+                  int id = addSourceOnlyBlock(topActive, b);
+                  liveTranslateQueue.add(id);
+                  processNextLiveTranslation();
               }
 
               void flushReadyTranscriptBlocks(boolean flushAll) {
@@ -2122,7 +2061,7 @@ jobs:
                       c.put("type", "input_text");
                       String topCode = code(topLang);
                       String bottomCode = code(bottomLang);
-                      c.put("text", "LIVE_PAIR_CLASSIFY_AND_TRANSLATE\nSELECTED_TOP_LANG: " + topCode + "\nSELECTED_BOTTOM_LANG: " + bottomCode + "\nTEXT:\n" + src.trim());
+                      c.put("text", src.trim());
                       content.put(c);
                       item.put("content", content);
                       msg.put("item", item);
@@ -2771,16 +2710,16 @@ jobs:
                   if("truck_noisy".equals(v)) {
                       vadMode = "high";
                       delayMode = "low";
-                      micGateMode = "gate_low";
-                      audioSourceMode = "unprocessed";
-                      androidEffectsMode = "ns_only";
+                      micGateMode = "sensitive";
+                      audioSourceMode = "recognition";
+                      androidEffectsMode = "off";
                       openAiNoiseMode = "off";
                   } else {
                       vadMode = "high";
                       delayMode = "low";
-                      micGateMode = "gate_low";
-                      audioSourceMode = "unprocessed";
-                      androidEffectsMode = "ns_only";
+                      micGateMode = "sensitive";
+                      audioSourceMode = "recognition";
+                      androidEffectsMode = "off";
                       openAiNoiseMode = "off";
                   }
                   save();
@@ -2811,9 +2750,9 @@ jobs:
                         mode = "natural";
                         vadMode = "high";
                         delayMode = "low";
-                        micGateMode = "gate_low";
-                        audioSourceMode = "unprocessed";
-                        androidEffectsMode = "ns_only";
+                        micGateMode = "sensitive";
+                        audioSourceMode = "recognition";
+                        androidEffectsMode = "off";
                         openAiNoiseMode = "off";
                         interpreterMode = false;
                         interpreterAudioMode = "off";
