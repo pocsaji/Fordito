@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 165; versionName = "16.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 166; versionName = "16.6" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V165" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V166" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -473,7 +473,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V165");
+                  TextView title = label("Fordito_V166");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -606,9 +606,9 @@ jobs:
                   setManualEditMode(!manualEditMode);
                   if(manualEditMode) {
                       if(streaming) stop();
-                      Toast.makeText(this, "Manuális bevitel aktív", Toast.LENGTH_SHORT).show();
+                      Toast.makeText(getApplicationContext(), "Manuális bevitel aktív", Toast.LENGTH_SHORT).show();
                   } else {
-                      Toast.makeText(this, "Ablakok lezárva", Toast.LENGTH_SHORT).show();
+                      Toast.makeText(getApplicationContext(), "Ablakok lezárva", Toast.LENGTH_SHORT).show();
                   }
               }
 
@@ -923,7 +923,7 @@ jobs:
                       if(Build.VERSION.SDK_INT >= 26) startForegroundService(i);
                       else startService(i);
                   } catch(Exception e) {
-                      Toast.makeText(this, "Háttér mód nem indult: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                      Toast.makeText(getApplicationContext(), "Háttér mód nem indult: " + e.getMessage(), Toast.LENGTH_LONG).show();
                       backgroundScreenAllowed = false;
                   }
               }
@@ -1003,7 +1003,7 @@ jobs:
 
                       @Override public void onFailure(WebSocket w, Throwable e, Response r) {
                           transcriptionConnected = false;
-                          if(transcriptionMode) runOnUiThread(() -> { String m = e == null ? "ismeretlen" : String.valueOf(e.getMessage()); state.setText("átírás kapcsolat hiba: " + m); Toast.makeText(this, "Átírás kapcsolat hiba: " + m, Toast.LENGTH_LONG).show(); });
+                          if(transcriptionMode) runOnUiThread(() -> { String m = e == null ? "ismeretlen" : String.valueOf(e.getMessage()); state.setText("átírás kapcsolat hiba: " + m); Toast.makeText(getApplicationContext(), "Átírás kapcsolat hiba: " + m, Toast.LENGTH_LONG).show(); });
                       }
 
                       @Override public void onClosed(WebSocket w, int c, String reason) {
@@ -1048,7 +1048,7 @@ jobs:
                       if(type.equals("error")) {
                           JSONObject er=o.optJSONObject("error");
                           String msg=er==null?o.toString():er.optString("message",er.toString());
-                          runOnUiThread(() -> { state.setText("átírás hiba: " + msg); Toast.makeText(this, "Átírás hiba: " + msg, Toast.LENGTH_LONG).show(); });
+                          runOnUiThread(() -> { state.setText("átírás hiba: " + msg); Toast.makeText(getApplicationContext(), "Átírás hiba: " + msg, Toast.LENGTH_LONG).show(); });
                       }
                   } catch(Exception ignored) {}
               }
@@ -1158,7 +1158,7 @@ jobs:
               void ensureSystemRecognizer() {
                   if(systemRecognizer != null) return;
                   if(!SpeechRecognizer.isRecognitionAvailable(this)) {
-                      Toast.makeText(this, "Nincs elérhető Android beszédfelismerő szolgáltatás.", Toast.LENGTH_LONG).show();
+                      Toast.makeText(getApplicationContext(), "Nincs elérhető Android beszédfelismerő szolgáltatás.", Toast.LENGTH_LONG).show();
                       streaming = false;
                       systemSpeechMode = false;
                       updateButtons();
@@ -1667,7 +1667,7 @@ jobs:
                           delayMode = vals[which];
                           save();
                           d.dismiss();
-                          Toast.makeText(this, "Új kapcsolatnál érvényesül: " + names[which], Toast.LENGTH_SHORT).show();
+                          Toast.makeText(getApplicationContext(), "Új kapcsolatnál érvényesül: " + names[which], Toast.LENGTH_SHORT).show();
                       })
                       .setNegativeButton("Mégse", null)
                       .show();
@@ -1770,13 +1770,13 @@ jobs:
                   if(manualResponseMode) {
                       manualResponseMode = false;
                       pendingManualText = "";
-                      Toast.makeText(this, "Kapcsolat hiba kézi fordítás közben. Próbáld újra a FORDÍT gombbal.", Toast.LENGTH_LONG).show();
+                      Toast.makeText(getApplicationContext(), "Kapcsolat hiba kézi fordítás közben. Próbáld újra a FORDÍT gombbal.", Toast.LENGTH_LONG).show();
                       stop();
                       return;
                   }
 
                   // Normál beszéd/élő fordításnál se írjunk hibaüzenetet a fordítási ablakba.
-                  Toast.makeText(this, "Kapcsolat hiba: " + msg, Toast.LENGTH_LONG).show();
+                  Toast.makeText(getApplicationContext(), "Kapcsolat hiba: " + msg, Toast.LENGTH_LONG).show();
                   stop();
               }
 
@@ -1896,7 +1896,7 @@ jobs:
                           if(manualResponseMode) {
                               runOnUiThread(() -> handleConnectionFailure(new RuntimeException(msg)));
                           } else {
-                              runOnUiThread(() -> Toast.makeText(this, "API hiba: " + msg, Toast.LENGTH_LONG).show());
+                              runOnUiThread(() -> Toast.makeText(getApplicationContext(), "API hiba: " + msg, Toast.LENGTH_LONG).show());
                           }
                       }
                   } catch(Exception e) {
@@ -1915,7 +1915,7 @@ jobs:
 
                   String sourceText = source.getText().toString().trim();
                   if(sourceText.length() == 0) {
-                      Toast.makeText(this, manualTopSource ? "A felső ablak üres." : "Az alsó ablak üres.", Toast.LENGTH_LONG).show();
+                      Toast.makeText(getApplicationContext(), manualTopSource ? "A felső ablak üres." : "Az alsó ablak üres.", Toast.LENGTH_LONG).show();
                       return;
                   }
 
@@ -1975,7 +1975,7 @@ jobs:
                       ws.send(resp.toString());
                   } catch(Exception e) {
                       manualResponseMode = false;
-                      Toast.makeText(this, "Kézi fordítás hiba. Próbáld újra.", Toast.LENGTH_LONG).show();
+                      Toast.makeText(getApplicationContext(), "Kézi fordítás hiba. Próbáld újra.", Toast.LENGTH_LONG).show();
                   }
               }
 
@@ -2623,7 +2623,7 @@ jobs:
 
                   // V74: nincs laza fallback új blokkra. Címke nélküli vagy rossz nyelvű válasz
                   // nem kerülhet be, mert ez hozta vissza korábban a káoszt.
-                  Toast.makeText(this, "Nem szabályos AI-válasz érkezett, a blokk újrafordítható.", Toast.LENGTH_SHORT).show();
+                  Toast.makeText(getApplicationContext(), "Nem szabályos AI-válasz érkezett, a blokk újrafordítható.", Toast.LENGTH_SHORT).show();
               }
 
               boolean isCleanManualTranslation(String tr) {
@@ -2641,7 +2641,7 @@ jobs:
                   try {
                       String tr = cleanOneBlockTranslation(out);
                       if(!isCleanManualTranslation(tr)) {
-                          Toast.makeText(this, "Nem tiszta fordítás érkezett. Nyomd meg újra a FORDÍT gombot.", Toast.LENGTH_LONG).show();
+                          Toast.makeText(getApplicationContext(), "Nem tiszta fordítás érkezett. Nyomd meg újra a FORDÍT gombot.", Toast.LENGTH_LONG).show();
                           return;
                       }
 
@@ -2656,9 +2656,9 @@ jobs:
                       rebuildBlocksFromCurrentBoxes();
                       renderBlocksKeepView();
                       enqueueSpeak(tr, manualTopSource ? bottomLang : topLang);
-                      Toast.makeText(this, "Teljes ablak újrafordítva.", Toast.LENGTH_SHORT).show();
+                      Toast.makeText(getApplicationContext(), "Teljes ablak újrafordítva.", Toast.LENGTH_SHORT).show();
                   } catch(Exception e) {
-                      Toast.makeText(this, "Kézi fordítás feldolgozási hiba. Próbáld újra.", Toast.LENGTH_LONG).show();
+                      Toast.makeText(getApplicationContext(), "Kézi fordítás feldolgozási hiba. Próbáld újra.", Toast.LENGTH_LONG).show();
                   }
               }
 
@@ -2873,7 +2873,7 @@ jobs:
                   });
                   b.setOnLongClickListener(v -> {
                       if(!interpreterMode) {
-                          Toast.makeText(this, "A tolmács felolvasás már ki van kapcsolva.", Toast.LENGTH_SHORT).show();
+                          Toast.makeText(getApplicationContext(), "A tolmács felolvasás már ki van kapcsolva.", Toast.LENGTH_SHORT).show();
                           return true;
                       }
                       disableInterpreterOutput();
@@ -2982,7 +2982,7 @@ jobs:
                   showCenteredMenu("Háttér / lezárt kijelző", items, (d,w) -> {
                       backgroundScreenAllowed = (w == 1);
                       if(!backgroundScreenAllowed) stopBackgroundForegroundService();
-                      Toast.makeText(this, backgroundScreenAllowed ? "Háttér mód engedélyezve erre az indításra." : "Háttér mód kikapcsolva.", Toast.LENGTH_SHORT).show();
+                      Toast.makeText(getApplicationContext(), backgroundScreenAllowed ? "Háttér mód engedélyezve erre az indításra." : "Háttér mód kikapcsolva.", Toast.LENGTH_SHORT).show();
                       updateButtons();
                   });
               }
@@ -2991,7 +2991,7 @@ jobs:
               void toggleBackgroundScreenMode() {
                   backgroundScreenAllowed = !backgroundScreenAllowed;
                   if(!backgroundScreenAllowed) stopBackgroundForegroundService();
-                  Toast.makeText(this, backgroundScreenAllowed ? "Háttér mód aktív erre az indításra." : "Háttér mód kikapcsolva.", Toast.LENGTH_SHORT).show();
+                  Toast.makeText(getApplicationContext(), backgroundScreenAllowed ? "Háttér mód aktív erre az indításra." : "Háttér mód kikapcsolva.", Toast.LENGTH_SHORT).show();
                   updateButtons();
               }
 
@@ -3021,7 +3021,7 @@ jobs:
                       if(ttsSpeaking) ttsMuteUntilMs = System.currentTimeMillis() + 500L;
                   }
                   save();
-                  Toast.makeText(this, interpreterOutputLabel(), Toast.LENGTH_SHORT).show();
+                  Toast.makeText(getApplicationContext(), interpreterOutputLabel(), Toast.LENGTH_SHORT).show();
               }
 
               void disableInterpreterOutput() {
@@ -3033,14 +3033,14 @@ jobs:
                   ttsSpeaking = false;
                   try { if(tts != null) tts.stop(); } catch(Exception ignored) {}
                   save();
-                  Toast.makeText(this, "Tolmács felolvasás kikapcsolva.", Toast.LENGTH_SHORT).show();
+                  Toast.makeText(getApplicationContext(), "Tolmács felolvasás kikapcsolva.", Toast.LENGTH_SHORT).show();
               }
 
               void toggleDisplayModeQuick() {
                   mirrorBottomMode = !mirrorBottomMode;
                   applyDisplayMode();
                   save();
-                  Toast.makeText(this, displayModeLabel(), Toast.LENGTH_SHORT).show();
+                  Toast.makeText(getApplicationContext(), displayModeLabel(), Toast.LENGTH_SHORT).show();
                   updateButtons();
               }
 
@@ -3068,7 +3068,7 @@ jobs:
                   programmaticChange=false;
                   topManualStart=-1;
                   textBlocks.clear();
-                  Toast.makeText(this, "Felső ablak törölve.", Toast.LENGTH_SHORT).show();
+                  Toast.makeText(getApplicationContext(), "Felső ablak törölve.", Toast.LENGTH_SHORT).show();
               }
 
               void clearBottomBox() {
@@ -3077,7 +3077,7 @@ jobs:
                   programmaticChange=false;
                   bottomManualStart=-1;
                   textBlocks.clear();
-                  Toast.makeText(this, "Alsó ablak törölve.", Toast.LENGTH_SHORT).show();
+                  Toast.makeText(getApplicationContext(), "Alsó ablak törölve.", Toast.LENGTH_SHORT).show();
               }
 
               void clearBothBoxes() {
@@ -3089,20 +3089,20 @@ jobs:
                   topManualStart=-1;
                   bottomManualStart=-1;
                   textBlocks.clear();
-                  Toast.makeText(this, "Mindkét ablak törölve.", Toast.LENGTH_SHORT).show();
+                  Toast.makeText(getApplicationContext(), "Mindkét ablak törölve.", Toast.LENGTH_SHORT).show();
               }
 
               void copyBox(boolean top) {
                   EditText source = top ? topBox : bottomBox;
                   String text = source.getText().toString();
                   if(text.trim().isEmpty()) {
-                      Toast.makeText(this, top ? "A felső ablak üres." : "Az alsó ablak üres.", Toast.LENGTH_SHORT).show();
+                      Toast.makeText(getApplicationContext(), top ? "A felső ablak üres." : "Az alsó ablak üres.", Toast.LENGTH_SHORT).show();
                       return;
                   }
                   android.content.ClipboardManager cm = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
                   if(cm != null) {
                       cm.setPrimaryClip(android.content.ClipData.newPlainText(top ? "Felső ablak" : "Alsó ablak", text));
-                      Toast.makeText(this, top ? "Felső ablak másolva." : "Alsó ablak másolva.", Toast.LENGTH_SHORT).show();
+                      Toast.makeText(getApplicationContext(), top ? "Felső ablak másolva." : "Alsó ablak másolva.", Toast.LENGTH_SHORT).show();
                   }
               }
 
@@ -3147,7 +3147,7 @@ jobs:
                           apiKey = "";
                           save();
                           updateButtons();
-                          Toast.makeText(this, "API kulcs törölve.", Toast.LENGTH_SHORT).show();
+                          Toast.makeText(getApplicationContext(), "API kulcs törölve.", Toast.LENGTH_SHORT).show();
                       });
                   });
                   dlg.show();
@@ -3189,7 +3189,7 @@ jobs:
                   save();
                   sessionUpdateIfConnected();
                   restartIfNeeded();
-                  Toast.makeText(this, "Hangprofil: " + soundProfileLabel(), Toast.LENGTH_SHORT).show();
+                  Toast.makeText(getApplicationContext(), "Hangprofil: " + soundProfileLabel(), Toast.LENGTH_SHORT).show();
               }
 
               String soundProfileLabel() {
@@ -3225,7 +3225,7 @@ jobs:
                         save();
                         sessionUpdateIfConnected();
                         applyDisplayMode();
-                        Toast.makeText(this, "Alapbeállítások visszaállítva.", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(getApplicationContext(), "Alapbeállítások visszaállítva.", Toast.LENGTH_SHORT).show();
                         updateButtons();
                     })
                     .setNegativeButton("Mégse", null)
@@ -3259,7 +3259,7 @@ jobs:
                           try { if(tts != null) tts.stop(); } catch(Exception ignored) {}
                       }
                       save();
-                      Toast.makeText(this, interpreterLabel(), Toast.LENGTH_SHORT).show();
+                      Toast.makeText(getApplicationContext(), interpreterLabel(), Toast.LENGTH_SHORT).show();
                       updateButtons();
                   });
               }
@@ -3517,14 +3517,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V165.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V165.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V166.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V166.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V165
+          name: V166
           path: |
             artifact/*.apk
             artifact/*.aab
