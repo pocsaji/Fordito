@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 146; versionName = "14.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 147; versionName = "14.7" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V146" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V147" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -382,8 +382,8 @@ jobs:
                   vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "xhigh");
                   micGateMode = sp.getString("micGateMode", "gate_low");
-                  audioSourceMode = sp.getString("audioSourceMode", "recognition");
-                  androidEffectsMode = sp.getString("androidEffectsMode", "recommended");
+                  audioSourceMode = sp.getString("audioSourceMode", "unprocessed");
+                  androidEffectsMode = sp.getString("androidEffectsMode", "ns_only");
                   openAiNoiseMode = "off"; // V117: OpenAI zajszűrés fixen kikapcsolva
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   interpreterAudioMode = sp.getString("interpreterAudioMode", interpreterMode ? "headset" : "off");
@@ -406,8 +406,8 @@ jobs:
                       vadMode = "medium";
                       delayMode = "xhigh";
                       micGateMode = "gate_low";
-                      audioSourceMode = "recognition";
-                      androidEffectsMode = "recommended";
+                      audioSourceMode = "unprocessed";
+                      androidEffectsMode = "ns_only";
                       openAiNoiseMode = "off";
                       interpreterMode = false;
                       interpreterAudioMode = "off";
@@ -448,7 +448,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V146");
+                  TextView title = label("Fordito_V147");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -617,13 +617,12 @@ jobs:
                   manualTopSource = top;
                   topActive = top;
 
-                  // V146: élő mikrofon közben az ablakba kattintás vagy gépelés
-                  // NEM állítja le a mikrofont és nem bontja a live fordítási állapotot.
-                  // A háttérmód és a zöld STOP gomb mellett nincs szükség a régi kényszerleállításra.
-                  // Ha a felhasználó élő használat közben kézzel beleír, azt nem védjük túl:
-                  // a mikrofon megy tovább, a következő live blokk a szokott módon érkezik.
+                  // V98: kézi szerkesztés és live mikrofon nem futhat egyszerre.
+                  // Ha a felhasználó bármelyik ablakba kattint vagy írni kezd,
+                  // a mikrofon és minden függő live fordítás leáll. Így a kézi
+                  // teljes ablakos fordításba nem írhat vissza későn érkező live válasz.
                   if(streaming) {
-                      updateButtons();
+                      stop();
                       return;
                   }
 
@@ -1646,200 +1645,20 @@ jobs:
                   String t = block.trim();
                   if(t.length() == 0) return false;
                   int words = t.split("\\s+").length;
+                  if(words <= 1) return false;
 
-                  // V146: élő tolmácsnál az egy szavas, biztonságos válaszok fontosak
-                  // (igen/nem/jó/oui/non/merci/stb.). Ezek csak akkor mehetnek át,
-                  // ha a kiválasztott két nyelv egyikéhez tartozó, előre biztonságosnak vett rövid válaszok.
-                  if(words <= 1) return selectedPairStrictInputGateEnabled() && isSafeSingleWordForSelectedPair(t);
-
-                  // Ha bármelyik oldal AUTO, marad a korábbi, lazább eljárás.
-                  // Ha mindkét nyelv konkrétan ki van választva, már a BEVITELNÉL
-                  // pozitív kapuval zárunk a két kiválasztott nyelvre. Nem 80 nyelvet tiltunk,
-                  // hanem azt kérdezzük: elég valószínű-e, hogy a blokk a két kiválasztott nyelv egyike.
-                  if(selectedPairStrictInputGateEnabled() && !looksLikeSelectedPairSpeech(t)) return false;
-
-                  // A régi, óvatos harmadik-nyelv/zaj szűrő megmarad biztonsági hálónak.
+                  // Először a régi, óvatos harmadik-nyelv/zaj szűrő.
                   if(looksLikeObviousThirdLanguageNoise(t)) return false;
                   if(isLikelyNoisyTranscriptBlock(t)) return false;
 
-                  // FR/HU párnál a korábbi gyakori kamionos zaj-hallucinációk szűrése is marad,
-                  // de nem ez a fő nyelvzár, csak kiegészítő védelem.
+                  // V117: ha FR/HU pár fut, a leggyakoribb kamionos zaj-hallucinációkat
+                  // már a bevitelnél eldobjuk. Ez nem teljes nyelvdetektor, csak kapu.
                   String top = code(topLang).toLowerCase(Locale.ROOT);
                   String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
                   boolean frHu = (top.equals("fr") && bottom.equals("hu")) || (top.equals("hu") && bottom.equals("fr"));
                   if(frHu && looksLikeNonFrHuNoise(t)) return false;
 
                   return true;
-              }
-
-              boolean isSafeSingleWordForSelectedPair(String text) {
-                  if(text == null) return false;
-                  String x = normalizeLangGateText(text);
-                  if(x.length() == 0 || x.contains(" ")) return false;
-                  String top = code(topLang).toLowerCase(Locale.ROOT);
-                  String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
-                  return isSafeSingleWordForLang(x, top) || isSafeSingleWordForLang(x, bottom);
-              }
-
-              boolean isSafeSingleWordForLang(String x, String lang) {
-                  if(x == null || lang == null) return false;
-                  if(lang.equals("hu")) {
-                      String[] hu = {"igen", "nem", "jó", "jo", "oké", "oke", "szia", "helló", "hello", "köszönöm", "koszonom", "kérem", "kerem", "mehet", "rendben", "persze", "várj", "varj", "itt", "ott"};
-                      for(String w: hu) if(x.equals(w)) return true;
-                  } else if(lang.equals("fr")) {
-                      String[] fr = {"oui", "non", "merci", "bonjour", "bonsoir", "salut", "pardon", "d'accord", "accord", "voilà", "voila", "bien", "ok", "allo"};
-                      for(String w: fr) if(x.equals(w)) return true;
-                  } else if(lang.equals("en")) {
-                      String[] en = {"yes", "no", "ok", "okay", "hello", "thanks", "thank", "please", "sorry"};
-                      for(String w: en) if(x.equals(w)) return true;
-                  } else if(lang.equals("de")) {
-                      String[] de = {"ja", "nein", "danke", "bitte", "hallo", "gut"};
-                      for(String w: de) if(x.equals(w)) return true;
-                  } else if(lang.equals("it")) {
-                      String[] it = {"si", "sì", "no", "grazie", "prego", "ciao", "bene"};
-                      for(String w: it) if(x.equals(w)) return true;
-                  } else if(lang.equals("es")) {
-                      String[] es = {"sí", "si", "no", "gracias", "hola", "bien", "vale"};
-                      for(String w: es) if(x.equals(w)) return true;
-                  }
-                  return false;
-              }
-
-              boolean selectedPairStrictInputGateEnabled() {
-                  String top = code(topLang).toLowerCase(Locale.ROOT);
-                  String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
-                  if(top.equals("auto") || bottom.equals("auto")) return false;
-                  if(top.length() == 0 || bottom.length() == 0) return false;
-                  return !top.equals(bottom);
-              }
-
-              boolean looksLikeSelectedPairSpeech(String text) {
-                  if(text == null) return false;
-                  String x = normalizeLangGateText(text);
-                  if(x.length() == 0) return false;
-                  int words = x.split("\\s+").length;
-                  if(words <= 1) return false;
-
-                  String top = code(topLang).toLowerCase(Locale.ROOT);
-                  String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
-                  int topScore = languagePositiveScore(x, top);
-                  int bottomScore = languagePositiveScore(x, bottom);
-                  int selectedScore = Math.max(topScore, bottomScore);
-
-                  // V146: rövid, de gyakori élőbeszéd-frasék ne essenek ki csak azért,
-                  // mert kevés bennük a rag vagy az ékezetes bizonyíték.
-                  if(isSafeShortPhraseForSelectedPair(x)) return true;
-
-                  // Rövid STT-töredékeknél szigorúbbak vagyunk: egyetlen gyenge jel
-                  // (pl. egy névelő vagy egy több nyelvben előforduló szó) ne engedjen át idegen zajt.
-                  // 2 pont lehet egy erős jel (pl. ő/ű vagy francia ékezet) vagy két gyengébb nyelvi jel.
-                  if(words <= 4) return selectedScore >= 2;
-
-                  // Közepes mondatoknál már több a kontextus, de továbbra is kell legalább
-                  // egy pozitív jel a kiválasztott nyelvpár egyikére.
-                  if(words <= 8) return selectedScore >= 1;
-
-                  // Hosszabb mondatot nem szabad túl agresszíven vágni: ha nem találunk jelet,
-                  // engedjük tovább, mert a fordító AI már jobb kontextust kap.
-                  return true;
-              }
-
-              boolean isSafeShortPhraseForSelectedPair(String x) {
-                  if(x == null || x.length() == 0) return false;
-                  String top = code(topLang).toLowerCase(Locale.ROOT);
-                  String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
-                  return isSafeShortPhraseForLang(x, top) || isSafeShortPhraseForLang(x, bottom);
-              }
-
-              boolean isSafeShortPhraseForLang(String x, String lang) {
-                  if(x == null || lang == null) return false;
-                  String y = " " + x + " ";
-                  if(lang.equals("hu")) {
-                      String[] hu = {" ez jó ", " ez jo ", " az jó ", " az jo ", " jól van ", " jol van ", " rendben van ", " itt vagyok ", " ott vagyok ", " mehetünk ", " mehetunk ", " indulok ", " értem ", " ertem ", " nem baj ", " igen jó ", " nem jó ", " igen jo ", " nem jo "};
-                      for(String p: hu) if(y.contains(p)) return true;
-                  } else if(lang.equals("fr")) {
-                      String[] fr = {" ça va ", " ca va ", " c'est bon ", " d'accord ", " très bien ", " tres bien ", " je vais ", " il faut ", " pas de ", " bonjour monsieur ", " bonjour madame ", " merci beaucoup ", " s'il vous plaît ", " s il vous plait "};
-                      for(String p: fr) if(y.contains(p)) return true;
-                  }
-                  return false;
-              }
-
-              String normalizeLangGateText(String text) {
-                  return text.toLowerCase(Locale.ROOT)
-                          .replace("’", "'")
-                          .replaceAll("[^a-záéíóöőúüűàâçèéêëîïôùûüÿñæœß\\s']", " ")
-                          .replaceAll("\\s+", " ").trim();
-              }
-
-              int languagePositiveScore(String x, String lang) {
-                  if(x == null || lang == null) return 0;
-                  String y = " " + x + " ";
-                  int score = 0;
-                  if(lang.equals("hu")) {
-                      // Magyar pozitív kapu V146:
-                      // - az á/é/í/ó/ö/ú/ü önmagában továbbra sem magyar bizonyíték;
-                      // - az ő/ű erős magyar jel;
-                      // - a gyakori rövid magyar élőbeszéd-szavak és ragok bővítve lettek,
-                      //   hogy ne essen ki túl sok valódi, rövid magyar mondat.
-                      if(x.matches(".*[őű].*")) score += 2;
-                      String[] strongWords = {
-                          " igen ", " nem ", " jó ", " oké ", " rendben ", " köszönöm ", " kérem ", " értem ",
-                          " működik ", " elindult ", " elindul ", " megáll ", " megállt ", " beszélek ", " fordítás ",
-                          " mikrofon ", " kijelző ", " háttér ", " magyar ", " francia ", " párizs ", " kamion "
-                      };
-                      for(String w: strongWords) if(y.contains(w)) score += 2;
-
-                      String[] words = {
-                          " a ", " az ", " egy ", " és ", " vagy ", " hogy ", " mert ", " de ", " ha ", " akkor ", " most ", " majd ",
-                          " már ", " még ", " csak ", " is ", " sem ", " mégis ", " ezt ", " azt ", " így ", " úgy ",
-                          " itt ", " ott ", " ide ", " oda ", " be ", " ki ", " le ", " fel ", " el ", " rá ", " át ", " vissza ",
-                          " van ", " nincs ", " lesz ", " volt ", " vagyok ", " vagyunk ", " kell ", " lehet ", " tudom ", " nézd ",
-                          " megy ", " jön ", " indul ", " indulok ", " megyek ", " jövök ", " rakodok ", " dolgozni ",
-                          " mondom ", " mondok ", " mondtam ", " gomb ", " menü ", " ablak ", " zaj ", " csend ", " hang ",
-                          " nyelv ", " szöveg ", " program ", " beállítás ", " ajtó ", " telefon "
-                      };
-                      for(String w: words) if(y.contains(w)) score++;
-                      String[] endings = {
-                          "ban", "ben", "nak", "nek", "val", "vel", "hoz", "hez", "höz", "ról", "ről", "tól", "től", "ból", "ből", "nál", "nél",
-                          "ként", "szer", "szor", "ször", "ra", "re", "ba", "be", "on", "en", "ön", "ot", "et", "öt", "át", "ét",
-                          "om", "em", "öm", "am", "ja", "je", "unk", "ünk", "tok", "tek", "tök", "tam", "tem", "tad", "ted", "tuk", "tük", "ni"
-                      };
-                      for(String token: x.split("\\s+")) {
-                          if(token.length() < 4) continue;
-                          for(String e: endings) {
-                              if(token.endsWith(e)) { score++; break; }
-                          }
-                      }
-                  } else if(lang.equals("fr")) {
-                      if(x.matches(".*[àâçèéêëîïôùûüÿœ].*")) score += 2;
-                      String[] strongWords = {" oui ", " non ", " merci ", " bonjour ", " monsieur ", " madame ", " d'accord ", " pardon ", " téléphone ", " traduction ", " français "};
-                      for(String w: strongWords) if(y.contains(w)) score += 2;
-                      String[] words = {" le "," la "," les "," un "," une "," des "," et "," ou "," mais "," donc "," alors "," maintenant "," bon "," avec "," pour "," que "," qui "," dans "," comme "," c'est "," j'ai "," je "," tu "," vous "," nous "," il "," elle "," pas "," plus "," très "," ça "," ce "," cette "," fonctionne "," micro "," écran "," verrouillé "," vais "," faut "," bien "," beaucoup "," voilà "};
-                      for(String w: words) if(y.contains(w)) score++;
-                  } else if(lang.equals("en")) {
-                      String[] words = {" the "," and "," or "," but "," this "," that "," with "," for "," you "," i "," we "," they "," not "," yes "," no "," is "," are "," was "," have "," microphone "," translation "};
-                      for(String w: words) if(y.contains(w)) score++;
-                  } else if(lang.equals("de")) {
-                      if(x.matches(".*[äöüß].*")) score += 2;
-                      String[] words = {" der "," die "," das "," und "," oder "," aber "," nicht "," ich "," du "," wir "," sie "," mit "," für "," ja "," nein "," danke "," bitte "," schön "};
-                      for(String w: words) if(y.contains(w)) score++;
-                  } else if(lang.equals("it")) {
-                      String[] words = {" il "," lo "," la "," gli "," le "," un "," una "," e "," o "," ma "," non "," si "," grazie "," prego "," allora "," questo "," questa "};
-                      for(String w: words) if(y.contains(w)) score++;
-                  } else if(lang.equals("es")) {
-                      if(x.matches(".*[áéíóúñü].*")) score += 2;
-                      String[] words = {" el "," la "," los "," las "," un "," una "," y "," o "," pero "," no "," sí "," gracias "," ahora "," entonces "," esto "," esta "," pantalla "};
-                      for(String w: words) if(y.contains(w)) score++;
-                  } else if(lang.equals("ro")) {
-                      if(x.matches(".*[ăâîșşțţ].*")) score += 2;
-                      String[] words = {" și "," sau "," dar "," nu "," da "," este "," sunt "," pentru "," cu "," acum "," atunci "};
-                      for(String w: words) if(y.contains(w)) score++;
-                  } else if(lang.equals("hr") || lang.equals("sk") || lang.equals("sl")) {
-                      if(x.matches(".*[čćđšžáäôľĺŕýíéúůňťď].*")) score += 2;
-                      String[] words = {" i "," a "," je "," nie "," ne "," da "," ali "," ampak "," teraz "," kako "," čo "," kaj "};
-                      for(String w: words) if(y.contains(w)) score++;
-                  }
-                  return score;
               }
 
               boolean looksLikeNonFrHuNoise(String text) {
@@ -2177,24 +1996,6 @@ jobs:
                   }
               }
 
-              boolean sameNormalizedText(String a, String b) {
-                  if(a == null || b == null) return false;
-                  String x = normalizeLiveBlockHash(a);
-                  String y = normalizeLiveBlockHash(b);
-                  return x.length() >= 6 && x.equals(y);
-              }
-
-              boolean duplicatesPreviousTranslatedBlock(int id, TextBlock current) {
-                  if(current == null || id <= 0 || id > textBlocks.size() - 1) return false;
-                  TextBlock prev = textBlocks.get(id - 1);
-                  if(prev == null || !prev.translatedOk) return false;
-                  // Csak teljesen azonos, közvetlenül egymás utáni blokkot dobunk el.
-                  // Hasonlósági becslés nincs itt, nehogy valódi ismétlést vagy javítást nyeljünk el.
-                  boolean sameTop = sameNormalizedText(prev.topText, current.topText);
-                  boolean sameBottom = sameNormalizedText(prev.bottomText, current.bottomText);
-                  return sameTop && sameBottom;
-              }
-
               void applyLiveTranslation(String out) {
                   int id = pendingLiveBlockId;
                   String speakText = null;
@@ -2232,11 +2033,6 @@ jobs:
                           // kiválasztott nyelvpárba illeszkedő választ, a blokk marad újrafordítható.
                           b.translatedOk = false;
                           b.retryCount++;
-                      }
-                      if(b.translatedOk && duplicatesPreviousTranslatedBlock(id, b)) {
-                          textBlocks.remove(id);
-                          speakText = null;
-                          speakLang = null;
                       }
                       renderBlocksKeepView();
                       enqueueSpeak(speakText, speakLang);
@@ -2765,7 +2561,6 @@ jobs:
               void applySoundProfile(String v) {
                   soundProfile = v;
                   if("truck_noisy".equals(v)) {
-                      // A kamionos profil megtartja a zajos fülkében eddig bevált, kevésbé feldolgozott mikrofonutat.
                       vadMode = "medium";
                       delayMode = "xhigh";
                       micGateMode = "gate_low";
@@ -2773,9 +2568,6 @@ jobs:
                       androidEffectsMode = "ns_only";
                       openAiNoiseMode = "off";
                   } else {
-                      // V146: a V145-ben az általános profil eltérő hangforrása és effektlánca
-                      // rontotta a felismerést. Mindkét profil visszakapja a már bevált audio-utat;
-                      // a hangprofil nem írhatja felül a stabil mikrofon-felismerési alapot.
                       vadMode = "medium";
                       delayMode = "xhigh";
                       micGateMode = "gate_low";
@@ -2812,8 +2604,8 @@ jobs:
                         vadMode = "medium";
                         delayMode = "xhigh";
                         micGateMode = "gate_low";
-                        audioSourceMode = "recognition";
-                        androidEffectsMode = "recommended";
+                        audioSourceMode = "unprocessed";
+                        androidEffectsMode = "ns_only";
                         openAiNoiseMode = "off";
                         interpreterMode = false;
                         interpreterAudioMode = "off";
@@ -3114,14 +2906,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V146.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V146.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V147.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V147.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V146
+          name: V147
           path: |
             artifact/*.apk
             artifact/*.aab
