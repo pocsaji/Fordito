@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 162; versionName = "16.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 163; versionName = "16.3" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V162" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V163" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -230,6 +230,14 @@ jobs:
               boolean systemRecognizerStarting = false;
               String lastSystemSpeechHash = "";
               long lastSystemSpeechAt = 0L;
+              WebSocket transcriptionWs = null;
+              OkHttpClient transcriptionClient = null;
+              volatile boolean transcriptionConnected = false;
+              volatile boolean transcriptionMode = false;
+              String realtimeTranscriptText = "";
+              int realtimeTranscriptEmittedWords = 0;
+              long realtimeLastCommitAt = 0L;
+              long realtimeAudioSinceCommitMs = 0L;
               String systemCurrentText = "";
               int systemEmittedWordCount = 0;
               int systemSpeechRestartToken = 0;
@@ -465,7 +473,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V162");
+                  TextView title = label("Fordito_V163");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -513,7 +521,7 @@ jobs:
                   bottomLangBtn.setOnLongClickListener(v -> { copyBox(false); return true; });
                   micBtn.setOnClickListener(v -> {
                       if(streaming) stop();
-                      else startSystemSpeechMode();
+                      else startRealtimeTranscriptionMode();
                   });
                   translateBtn.setOnClickListener(v -> manualTranslate());
                   menuBtn.setOnClickListener(v -> menu());
@@ -926,6 +934,189 @@ jobs:
 
               boolean hasKey() {
                   return apiKey != null && apiKey.trim().startsWith("sk-");
+              }
+
+              void startRealtimeTranscriptionMode() {
+                  if(!hasKey()) { showApi(); return; }
+                  if(Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reqMic(); return; }
+
+                  transcriptionMode = true;
+                  streaming = false;
+                  realtimeTranscriptText = "";
+                  realtimeTranscriptEmittedWords = 0;
+                  realtimeLastCommitAt = System.currentTimeMillis();
+                  realtimeAudioSinceCommitMs = 0L;
+                  startBackgroundForegroundServiceIfAllowed();
+                  state.setText("élő magyar felismerés");
+                  updateButtons();
+
+                  // A meglévő Realtime kapcsolat csak a kész szövegrészek fordítására marad.
+                  if(ws == null || !connected) start(false);
+                  connectRealtimeTranscription();
+              }
+
+              void connectRealtimeTranscription() {
+                  transcriptionClient = new OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build();
+                  Request req = new Request.Builder()
+                    .url("wss://api.openai.com/v1/realtime?model=gpt-realtime-whisper")
+                    .addHeader("Authorization", "Bearer " + apiKey.trim())
+                    .build();
+
+                  transcriptionWs = transcriptionClient.newWebSocket(req, new WebSocketListener() {
+                      @Override public void onOpen(WebSocket w, Response r) {
+                          transcriptionConnected = true;
+                          try {
+                              JSONObject session = new JSONObject();
+                              session.put("type", "transcription");
+
+                              JSONObject format = new JSONObject();
+                              format.put("type", "audio/pcm");
+                              format.put("rate", 24000);
+
+                              JSONObject tr = new JSONObject();
+                              tr.put("model", "gpt-realtime-whisper");
+                              tr.put("language", "hu");
+                              tr.put("delay", "medium");
+
+                              JSONObject input = new JSONObject();
+                              input.put("format", format);
+                              input.put("transcription", tr);
+                              input.put("turn_detection", JSONObject.NULL);
+
+                              JSONObject audio = new JSONObject();
+                              audio.put("input", input);
+                              session.put("audio", audio);
+
+                              JSONObject evt = new JSONObject();
+                              evt.put("type", "session.update");
+                              evt.put("session", session);
+                              w.send(evt.toString());
+                          } catch(Exception e) {
+                              runOnUiThread(() -> state.setText("átírás beállítási hiba"));
+                          }
+                      }
+
+                      @Override public void onMessage(WebSocket w, String s) {
+                          handleRealtimeTranscriptionEvent(s);
+                      }
+
+                      @Override public void onFailure(WebSocket w, Throwable e, Response r) {
+                          transcriptionConnected = false;
+                          if(transcriptionMode) runOnUiThread(() -> state.setText("átírás kapcsolat hiba"));
+                      }
+
+                      @Override public void onClosed(WebSocket w, int c, String reason) {
+                          transcriptionConnected = false;
+                      }
+                  });
+              }
+
+              void handleRealtimeTranscriptionEvent(String s) {
+                  try {
+                      JSONObject o = new JSONObject(s);
+                      String type = o.optString("type", "");
+
+                      if(type.equals("session.updated")) {
+                          runOnUiThread(() -> {
+                              state.setText("hallgat");
+                              startRealtimeTranscriptionAudio();
+                          });
+                          return;
+                      }
+
+                      if(type.equals("conversation.item.input_audio_transcription.delta")) {
+                          String d = o.optString("delta", "");
+                          if(!d.isEmpty()) runOnUiThread(() -> {
+                              realtimeTranscriptText += d;
+                              flushRealtimeTranscript(false);
+                          });
+                          return;
+                      }
+
+                      if(type.equals("conversation.item.input_audio_transcription.completed")) {
+                          String full = o.optString("transcript", "");
+                          runOnUiThread(() -> {
+                              if(!full.isEmpty()) realtimeTranscriptText = full;
+                              flushRealtimeTranscript(true);
+                              realtimeTranscriptText = "";
+                              realtimeTranscriptEmittedWords = 0;
+                          });
+                          return;
+                      }
+
+                      if(type.equals("error")) {
+                          JSONObject er=o.optJSONObject("error");
+                          String msg=er==null?o.toString():er.optString("message",er.toString());
+                          runOnUiThread(() -> state.setText("átírás hiba: "+msg));
+                      }
+                  } catch(Exception ignored) {}
+              }
+
+              void startRealtimeTranscriptionAudio() {
+                  if(!transcriptionMode || !transcriptionConnected || transcriptionWs == null) return;
+                  int sr=24000;
+                  int min=AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+                  int bs=Math.max(min, 2400);
+                  rec=makeBestAudioRecord(sr,bs);
+                  if(rec==null) { state.setText("mikrofon hiba"); return; }
+
+                  streaming=true;
+                  rec.startRecording();
+                  updateButtons();
+                  realtimeLastCommitAt=System.currentTimeMillis();
+                  realtimeAudioSinceCommitMs=0L;
+
+                  audioExec.submit(() -> {
+                      byte[] buf=new byte[bs];
+                      while(transcriptionMode && streaming && transcriptionConnected && transcriptionWs!=null && rec!=null) {
+                          int read=rec.read(buf,0,buf.length);
+                          if(read>0) {
+                              try {
+                                  JSONObject a=new JSONObject();
+                                  a.put("type","input_audio_buffer.append");
+                                  a.put("audio",Base64.encodeToString(Arrays.copyOf(buf,read),Base64.NO_WRAP));
+                                  transcriptionWs.send(a.toString());
+
+                                  realtimeAudioSinceCommitMs += (long)(read * 1000.0 / (24000.0 * 2.0));
+                                  long now=System.currentTimeMillis();
+
+                                  // A modell valódi streaming delta-kat ad; a commit csak lezár egy rövid munkablokkot.
+                                  // Nem csendet és nem mondatvéget próbálunk felismerni.
+                                  if(realtimeAudioSinceCommitMs >= 2800 && now-realtimeLastCommitAt >= 2500) {
+                                      JSONObject c=new JSONObject();
+                                      c.put("type","input_audio_buffer.commit");
+                                      transcriptionWs.send(c.toString());
+                                      realtimeLastCommitAt=now;
+                                      realtimeAudioSinceCommitMs=0L;
+                                  }
+                              } catch(Exception ignored) {}
+                          }
+                      }
+                  });
+              }
+
+              void flushRealtimeTranscript(boolean finalFlush) {
+                  String t=realtimeTranscriptText==null?"":realtimeTranscriptText.trim().replaceAll("\\s+"," ");
+                  if(t.length()==0) return;
+                  String[] words=t.split("\\s+");
+                  int wc=words.length;
+
+                  int target = finalFlush ? wc : Math.max(0,wc-2);
+                  if(!finalFlush && target-realtimeTranscriptEmittedWords < 1) return;
+                  if(target<=realtimeTranscriptEmittedWords) return;
+
+                  StringBuilder sb=new StringBuilder();
+                  for(int i=realtimeTranscriptEmittedWords;i<target && i<words.length;i++) {
+                      if(sb.length()>0) sb.append(' ');
+                      sb.append(words[i]);
+                  }
+                  String chunk=sb.toString().trim();
+                  if(chunk.length()==0) return;
+
+                  realtimeTranscriptEmittedWords=target;
+                  int id=addSourceOnlyBlock(topActive,chunk);
+                  liveTranslateQueue.add(id);
+                  processNextLiveTranslation();
               }
 
               void startSystemSpeechMode() {
@@ -1589,6 +1780,13 @@ jobs:
               }
 
               void stop() {
+                  transcriptionMode = false;
+                  transcriptionConnected = false;
+                  try { if(transcriptionWs != null) transcriptionWs.close(1000, "stop"); } catch(Exception ignored) {}
+                  transcriptionWs = null;
+                  transcriptionClient = null;
+                  realtimeTranscriptText = "";
+                  realtimeTranscriptEmittedWords = 0;
                   stopSystemRecognizerOnly();
                   streaming = false;
                   connected = false;
@@ -3318,14 +3516,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V162.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V162.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V163.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V163.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V162
+          name: V163
           path: |
             artifact/*.apk
             artifact/*.aab
