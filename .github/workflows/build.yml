@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 145; versionName = "14.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 146; versionName = "14.6" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V145" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V146" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -448,7 +448,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V145");
+                  TextView title = label("Fordito_V146");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -617,7 +617,7 @@ jobs:
                   manualTopSource = top;
                   topActive = top;
 
-                  // V145: élő mikrofon közben az ablakba kattintás vagy gépelés
+                  // V146: élő mikrofon közben az ablakba kattintás vagy gépelés
                   // NEM állítja le a mikrofont és nem bontja a live fordítási állapotot.
                   // A háttérmód és a zöld STOP gomb mellett nincs szükség a régi kényszerleállításra.
                   // Ha a felhasználó élő használat közben kézzel beleír, azt nem védjük túl:
@@ -1647,7 +1647,7 @@ jobs:
                   if(t.length() == 0) return false;
                   int words = t.split("\\s+").length;
 
-                  // V145: élő tolmácsnál az egy szavas, biztonságos válaszok fontosak
+                  // V146: élő tolmácsnál az egy szavas, biztonságos válaszok fontosak
                   // (igen/nem/jó/oui/non/merci/stb.). Ezek csak akkor mehetnek át,
                   // ha a kiválasztott két nyelv egyikéhez tartozó, előre biztonságosnak vett rövid válaszok.
                   if(words <= 1) return selectedPairStrictInputGateEnabled() && isSafeSingleWordForSelectedPair(t);
@@ -1726,7 +1726,7 @@ jobs:
                   int bottomScore = languagePositiveScore(x, bottom);
                   int selectedScore = Math.max(topScore, bottomScore);
 
-                  // V145: rövid, de gyakori élőbeszéd-frasék ne essenek ki csak azért,
+                  // V146: rövid, de gyakori élőbeszéd-frasék ne essenek ki csak azért,
                   // mert kevés bennük a rag vagy az ékezetes bizonyíték.
                   if(isSafeShortPhraseForSelectedPair(x)) return true;
 
@@ -1776,7 +1776,7 @@ jobs:
                   String y = " " + x + " ";
                   int score = 0;
                   if(lang.equals("hu")) {
-                      // Magyar pozitív kapu V145:
+                      // Magyar pozitív kapu V146:
                       // - az á/é/í/ó/ö/ú/ü önmagában továbbra sem magyar bizonyíték;
                       // - az ő/ű erős magyar jel;
                       // - a gyakori rövid magyar élőbeszéd-szavak és ragok bővítve lettek,
@@ -2177,6 +2177,24 @@ jobs:
                   }
               }
 
+              boolean sameNormalizedText(String a, String b) {
+                  if(a == null || b == null) return false;
+                  String x = normalizeLiveBlockHash(a);
+                  String y = normalizeLiveBlockHash(b);
+                  return x.length() >= 6 && x.equals(y);
+              }
+
+              boolean duplicatesPreviousTranslatedBlock(int id, TextBlock current) {
+                  if(current == null || id <= 0 || id > textBlocks.size() - 1) return false;
+                  TextBlock prev = textBlocks.get(id - 1);
+                  if(prev == null || !prev.translatedOk) return false;
+                  // Csak teljesen azonos, közvetlenül egymás utáni blokkot dobunk el.
+                  // Hasonlósági becslés nincs itt, nehogy valódi ismétlést vagy javítást nyeljünk el.
+                  boolean sameTop = sameNormalizedText(prev.topText, current.topText);
+                  boolean sameBottom = sameNormalizedText(prev.bottomText, current.bottomText);
+                  return sameTop && sameBottom;
+              }
+
               void applyLiveTranslation(String out) {
                   int id = pendingLiveBlockId;
                   String speakText = null;
@@ -2214,6 +2232,11 @@ jobs:
                           // kiválasztott nyelvpárba illeszkedő választ, a blokk marad újrafordítható.
                           b.translatedOk = false;
                           b.retryCount++;
+                      }
+                      if(b.translatedOk && duplicatesPreviousTranslatedBlock(id, b)) {
+                          textBlocks.remove(id);
+                          speakText = null;
+                          speakLang = null;
                       }
                       renderBlocksKeepView();
                       enqueueSpeak(speakText, speakLang);
@@ -2750,13 +2773,14 @@ jobs:
                       androidEffectsMode = "ns_only";
                       openAiNoiseMode = "off";
                   } else {
-                      // Általános profil: normál telefonos beszélgetéshez kicsit Android-barátabb alap,
-                      // de nem nyúl fordítási promptokhoz és nem kapcsol OpenAI zajszűrést.
+                      // V146: a V145-ben az általános profil eltérő hangforrása és effektlánca
+                      // rontotta a felismerést. Mindkét profil visszakapja a már bevált audio-utat;
+                      // a hangprofil nem írhatja felül a stabil mikrofon-felismerési alapot.
                       vadMode = "medium";
                       delayMode = "xhigh";
                       micGateMode = "gate_low";
-                      audioSourceMode = "recognition";
-                      androidEffectsMode = "recommended";
+                      audioSourceMode = "unprocessed";
+                      androidEffectsMode = "ns_only";
                       openAiNoiseMode = "off";
                   }
                   save();
@@ -3090,14 +3114,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V145.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V145.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V146.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V146.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V145
+          name: V146
           path: |
             artifact/*.apk
             artifact/*.aab
