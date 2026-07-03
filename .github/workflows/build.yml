@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 159; versionName = "15.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 160; versionName = "16.0" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V159" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V160" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -234,6 +234,9 @@ jobs:
               long firstSpeechHeardAt = 0L;
               long liveBufferStartedAt = 0L;
               int liveIdleFlushToken = 0;
+              String currentDeltaItemId = "";
+              final HashSet<String> deltaItemsAlreadyEmitted = new HashSet<>();
+              final ArrayDeque<String> deltaItemsAlreadyEmittedOrder = new ArrayDeque<>();
               boolean firstSpeechBlockReleased = false;
               int pendingLiveBlockId = -1;
               final ArrayDeque<Integer> liveTranslateQueue = new ArrayDeque<>();
@@ -452,7 +455,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V159");
+                  TextView title = label("Fordito_V160");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1108,7 +1111,7 @@ jobs:
               int vadSilenceMs() {
                   // V140: a szerver VAD mondatzárása sehol nem várhat tovább 500 ms-nál,
                   // mert a helyi küldési kapu legfeljebb 600 ms lezáró csendet enged fel.
-                  if("high".equals(vadMode)) return 300;
+                  if("high".equals(vadMode)) return 250;
                   if("medium".equals(vadMode)) return 450;
                   if("auto".equals(vadMode)) return 450;
                   return 500;
@@ -1343,6 +1346,9 @@ jobs:
                   liveBufferStartedAt = 0L;
                   liveIdleFlushToken++;
                   firstSpeechBlockReleased = false;
+                  currentDeltaItemId = "";
+                  deltaItemsAlreadyEmitted.clear();
+                  deltaItemsAlreadyEmittedOrder.clear();
                   liveTranslateMode = false;
                   pendingLiveBlockId = -1;
                   liveTranslateQueue.clear();
@@ -1394,7 +1400,11 @@ jobs:
                       }
 
                       if(type.equals("conversation.item.input_audio_transcription.delta")) {
-                          // V159 CLEAN: delta csak részleges előnézet lenne; végleges blokkot soha nem építünk belőle.
+                          // V160: delta nem fordítási végforrás önmagában, de élő tolmácsnál ebből zárunk rövid mondatblokkokat,
+                          // különben a completed csak akkor jön, amikor a beszélő hosszabban elhallgat.
+                          String d = o.optString("delta", "");
+                          String itemId = o.optString("item_id", "");
+                          if(!d.isEmpty()) runOnUiThread(() -> handleTranscriptDelta(itemId, d));
                       }
 
                       if(type.equals("conversation.item.input_audio_transcription.completed")) {
@@ -1515,28 +1525,86 @@ jobs:
                   }
               }
 
-              void handleTranscriptDelta(String delta) {
+              void handleTranscriptDelta(String itemId, String delta) {
                   if(delta == null || delta.length() == 0) return;
                   liveHadTranscriptDelta = true;
                   long now = System.currentTimeMillis();
+
+                  String id = itemId == null ? "" : itemId.trim();
+                  if(id.length() > 0 && currentDeltaItemId.length() > 0 && !id.equals(currentDeltaItemId)) {
+                      flushDeltaTranscriptBuffer(true);
+                      liveTranscriptBuffer = "";
+                      liveBufferStartedAt = 0L;
+                  }
+                  if(id.length() > 0) currentDeltaItemId = id;
+
                   if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = now;
                   if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
-                  liveTranscriptBuffer += delta;
-                  flushReadyTranscriptBlocks(false);
 
-                  // V75: ha csak 2-3 szó hangzott el és utána hosszú csend van,
-                  // ne ragadjon a pufferben. Ez nem VAD és nem beszédvégi darabolás,
-                  // csak biztonsági utóflush rövid, magára hagyott blokkokhoz.
+                  liveTranscriptBuffer += delta;
+                  liveTranscriptBuffer = liveTranscriptBuffer.replaceAll("\\s+", " ");
+
+                  flushDeltaTranscriptBuffer(false);
+
                   final int token = ++liveIdleFlushToken;
                   topBox.postDelayed(() -> {
                       if(token == liveIdleFlushToken && streaming && liveTranscriptBuffer.trim().length() > 0) {
-                          flushReadyTranscriptBlocks(true);
+                          flushDeltaTranscriptBuffer(true);
                       }
-                  }, 5200);
+                  }, 850);
+              }
+
+              void rememberDeltaItemEmitted() {
+                  if(currentDeltaItemId == null || currentDeltaItemId.trim().length() == 0) return;
+                  String id = currentDeltaItemId.trim();
+                  if(deltaItemsAlreadyEmitted.contains(id)) return;
+                  deltaItemsAlreadyEmitted.add(id);
+                  deltaItemsAlreadyEmittedOrder.add(id);
+                  while(deltaItemsAlreadyEmittedOrder.size() > 200) {
+                      String old = deltaItemsAlreadyEmittedOrder.poll();
+                      if(old != null) deltaItemsAlreadyEmitted.remove(old);
+                  }
+              }
+
+              void flushDeltaTranscriptBuffer(boolean force) {
+                  String s = liveTranscriptBuffer == null ? "" : liveTranscriptBuffer.trim();
+                  if(s.length() == 0) {
+                      liveTranscriptBuffer = "";
+                      liveBufferStartedAt = 0L;
+                      return;
+                  }
+
+                  int cut = firstHardSentenceEnd(s);
+                  if(cut < 0) cut = smartLinguisticCut(s);
+
+                  int words = s.split("\\s+").length;
+                  if(cut < 0 && !force && (s.length() >= 150 || words >= 18)) cut = s.length();
+                  if(cut < 0 && force) cut = s.length();
+                  if(cut < 0) return;
+
+                  String block = s.substring(0, cut).trim();
+                  String rest = s.substring(cut).trim();
+                  liveTranscriptBuffer = rest;
+                  liveBufferStartedAt = rest.length() > 0 ? System.currentTimeMillis() : 0L;
+
+                  block = cleanTranscriptForSelectedPair(block);
+                  block = finalizeSpeechBlockText(block);
+                  if(block.length() < 3) return;
+                  if(!passesSelectedPairInputGate(block)) return;
+                  if(!markLiveBlockQueued(block)) return;
+
+                  int id = addSourceOnlyBlock(topActive, block);
+                  firstSpeechBlockReleased = true;
+                  rememberDeltaItemEmitted();
+                  liveTranslateQueue.add(id);
+                  processNextLiveTranslation();
               }
 
               void handleTranscriptCompleted(String itemId, String transcript) {
-                  // V159 CLEAN: egyetlen hiteles végleges forrás a completed esemény.
+                  // V160: ha ebből az item_id-ből már delta-alapon kiadtunk élő blokkot,
+                  // a completed teljes szövegét nem engedjük újra, mert az pontosan duplázást okozna.
+                  if(itemId != null && deltaItemsAlreadyEmitted.contains(itemId.trim())) return;
+                  // Completed marad biztonsági végzárásnak, ha delta alapján még nem ment ki semmi.
                   if(itemId != null && itemId.trim().length() > 0) {
                       String id = itemId.trim();
                       if(processedTranscriptItemIds.contains(id)) return;
