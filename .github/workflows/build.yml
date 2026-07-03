@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 154; versionName = "15.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 155; versionName = "15.5" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V154" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V155" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -239,6 +239,8 @@ jobs:
               final ArrayDeque<Integer> liveTranslateQueue = new ArrayDeque<>();
               final HashSet<String> recentLiveBlockHashes = new HashSet<>();
               final ArrayDeque<String> recentLiveBlockHashOrder = new ArrayDeque<>();
+              final HashSet<String> processedTranscriptItemIds = new HashSet<>();
+              final ArrayDeque<String> processedTranscriptItemIdOrder = new ArrayDeque<>();
               String pendingManualText = "";
               boolean manualResponseMode = false;
               boolean programmaticChange = false;
@@ -450,7 +452,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V154");
+                  TextView title = label("Fordito_V155");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1007,12 +1009,8 @@ jobs:
 
                       JSONObject tr = new JSONObject();
                       tr.put("model", "gpt-realtime-whisper");
-                      // V153: Automatikus nyelvnél marad a laza felismerés.
-                      // Ha az aktív beviteli oldal konkrét nyelv, azt language hintként adjuk a transzkripciónak.
-                      // Ez nem fordítási prompt és nem utólagos szócsere: a beszédfelismerést tereli a kiválasztott nyelvre,
-                      // hogy a magyarban használt idegen szavak (pl. headset) ne essenek szét magyar szám/szó darabokra.
-                      String trLang = activeTranscriptionLanguageHint();
-                      if(trLang.length() > 0) tr.put("language", trLang);
+                      // V155: a Realtime transzkripció szabad automatikus felismerést kap.
+                      // A kiválasztott nyelvek a fordítási irányt szabják meg, nem kényszerítik a dekódert.
                       tr.put("delay", delayMode);
                       input.put("transcription", tr);
 
@@ -1030,36 +1028,38 @@ jobs:
                   }
               }
 
-              String activeTranscriptionLanguageHint() {
-                  // AUTO kiválasztásnál nincs nyelvi hint: ilyenkor a Realtime STT automatikusan dönt.
-                  // Konkrét nyelvnél az aktuális beviteli oldal nyelve segíti a felismerést.
-                  // topActive=true: felső ablak a beszéd forrása, topActive=false: alsó ablak.
-                  String lang = topActive ? topLang : bottomLang;
-                  String api = apiCode(lang);
-                  return api == null ? "" : api.trim().toLowerCase(Locale.ROOT);
-              }
-
               String pairRules() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
-                  return "Selected language pair is locked to exactly these two languages: TOP=" + top + ", BOTTOM=" + bottom + ". " +
-                    "Only these two languages exist for this session. Never classify, output, or translate as any third language. " +
-                    "If the rough transcript looks like any language other than the selected TOP or BOTTOM language, treat it as a recognition error or background noise. " +
-                    "Resolve meaningful speech only as " + top + " or " + bottom + ". If it cannot be reasonably repaired as one of those two selected languages, output nothing for that block. " +
-                    "If unsure between the two selected languages, choose the closer of " + top + " and " + bottom + "; do not invent a third option. ";
+                  boolean topAuto = "AUTO".equalsIgnoreCase(top);
+                  boolean bottomAuto = "AUTO".equalsIgnoreCase(bottom);
+
+                  if(topAuto && bottomAuto) {
+                      return "Detect the spoken source language naturally from the speech. AUTO is a mode, not a language name. ";
+                  }
+                  if(topAuto) {
+                      return "BOTTOM language is " + bottom + ". TOP is automatic: detect the other spoken source language naturally. AUTO is a mode, not a language name. ";
+                  }
+                  if(bottomAuto) {
+                      return "TOP language is " + top + ". BOTTOM is automatic: detect the other spoken source language naturally. AUTO is a mode, not a language name. ";
+                  }
+                  return "The conversation uses TOP=" + top + " and BOTTOM=" + bottom + ". " +
+                    "Use these as the expected translation directions, but do not distort ordinary speech, loanwords, brand names, technical terms, place names or personal names merely to force a language label. ";
               }
 
               String instructions() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
-                  return "You are a live two-language interpreter. Output text only. No explanations. " +
+                  return "You are a live interpreter for ordinary real-world conversation. Output text only. No explanations. " +
                     pairRules() +
-                    "The user may switch between TOP and BOTTOM while the microphone is running. Every completed speech block must be classified again using only the selected pair. " +
-                    "Do not turn background noise, engine hum, wind, radio, clicks or breathing into speech. If meaningful human speech is not present, output nothing. " +
-                    "Do not wait for a long monologue. Treat every complete sentence, short clause, numbered item, or list item as a finished block. " +
-                    "For every completed block return exactly three lines: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <verbatim original text in the detected selected language> then TRANSLATION: <natural translation into the other selected language>. " +
-                    "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly in ORIGINAL and TRANSLATION. Never output square-bracket category placeholders or asterisk-masked words. " +
-                    "Keep ORIGINAL short and readable. Correct only obvious speech recognition mistakes; do not invent missing facts. " +
+                    "The user may switch speaking direction while the microphone is running. Classify each completed speech block from its actual content and context. " +
+                    "Treat the speaker as an ordinary native or everyday speaker, not as an academic text. Preserve normal colloquial speech, slang, profanity, borrowed words, internationally used technical terms, brand names, product names, personal names and place names. " +
+                    "Do not turn a familiar borrowed word into unrelated native-sounding words just because its origin is foreign. Use the surrounding sentence context. " +
+                    "Translate the meaning faithfully into natural everyday language used by ordinary speakers of the target language. Do not make it academic, literary or unnecessarily formal. " +
+                    "Do not censor, mask, soften, sanitize, star out, replace or moralize profanity, vulgarity, insults, sexual wording, slang or rude wording. " +
+                    "Do not invent speech from background noise. If there is no meaningful human speech, output nothing. " +
+                    "For every completed block return exactly three lines: SOURCE_LANG: <actual source language code> then ORIGINAL: <the spoken text, with only obvious recognition mistakes corrected when context makes the correction clear> then TRANSLATION: <natural faithful translation>. " +
+                    "Do not invent missing facts and do not add commentary. " +
                     "Conversation profile: " + profilePrompt() + " " +
                     "Translation mode: " + modePrompt();
               }
@@ -1400,6 +1400,8 @@ jobs:
                   liveTranslateQueue.clear();
                   recentLiveBlockHashes.clear();
                   recentLiveBlockHashOrder.clear();
+                  processedTranscriptItemIds.clear();
+                  processedTranscriptItemIdOrder.clear();
                   try { if(ws != null) ws.close(1000, "stop"); } catch(Exception ignored) {}
                   ws = null;
                   stopBackgroundForegroundService();
@@ -1450,7 +1452,8 @@ jobs:
 
                       if(type.equals("conversation.item.input_audio_transcription.completed")) {
                           String tr = o.optString("transcript", "");
-                          if(!tr.isEmpty()) runOnUiThread(() -> handleTranscriptCompleted(tr));
+                          String itemId = o.optString("item_id", "");
+                          if(!tr.isEmpty()) runOnUiThread(() -> handleTranscriptCompleted(itemId, tr));
                       }
 
                       if(type.equals("response.text.delta") || type.equals("response.output_text.delta")) {
@@ -1585,7 +1588,19 @@ jobs:
                   }, 5200);
               }
 
-              void handleTranscriptCompleted(String transcript) {
+              void handleTranscriptCompleted(String itemId, String transcript) {
+                  // V155: ugyanaz a lezárt Realtime audio-item csak egyszer juthat tovább.
+                  // Ez eseményazonosító-alapú védelem; nem hasonló mondatokat tilt.
+                  if(itemId != null && itemId.trim().length() > 0) {
+                      String id = itemId.trim();
+                      if(processedTranscriptItemIds.contains(id)) return;
+                      processedTranscriptItemIds.add(id);
+                      processedTranscriptItemIdOrder.add(id);
+                      while(processedTranscriptItemIdOrder.size() > 200) {
+                          String old = processedTranscriptItemIdOrder.poll();
+                          if(old != null) processedTranscriptItemIds.remove(old);
+                      }
+                  }
                   // V51 duplázás-javítás:
                   // A completed esemény sokszor ugyanazt a teljes mondatot küldi újra,
                   // amit a delta eseményekből már kiírtunk és fordítottunk.
@@ -1637,7 +1652,6 @@ jobs:
                   // Ugyanakkor ha a felhasználó tényleg csak 2-3 szót mond és utána hosszú csend van,
                   // 2 mp után fordítjuk, nem nyeljük el.
                   if(age >= 2000 && words >= 2) return true;
-                  if(looksLikeObviousThirdLanguageNoise(s) && words < 5) return false;
                   if(firstHardSentenceEnd(s) >= 0 && words >= 4) return true;
                   if(s.length() >= 55 && words >= 5) return true;
                   return false;
@@ -1654,67 +1668,9 @@ jobs:
               }
 
               boolean passesSelectedPairInputGate(String block) {
-                  if(block == null) return false;
-                  String t = block.trim();
-                  if(t.length() == 0) return false;
-                  int words = t.split("\\s+").length;
-
-                  // V145: élő tolmácsnál az egy szavas, biztonságos válaszok fontosak
-                  // (igen/nem/jó/oui/non/merci/stb.). Ezek csak akkor mehetnek át,
-                  // ha a kiválasztott két nyelv egyikéhez tartozó, előre biztonságosnak vett rövid válaszok.
-                  if(words <= 1) return selectedPairStrictInputGateEnabled() && isSafeSingleWordForSelectedPair(t);
-
-                  // Ha bármelyik oldal AUTO, marad a korábbi, lazább eljárás.
-                  // Ha mindkét nyelv konkrétan ki van választva, már a BEVITELNÉL
-                  // pozitív kapuval zárunk a két kiválasztott nyelvre. Nem 80 nyelvet tiltunk,
-                  // hanem azt kérdezzük: elég valószínű-e, hogy a blokk a két kiválasztott nyelv egyike.
-                  if(selectedPairStrictInputGateEnabled() && !looksLikeSelectedPairSpeech(t)) return false;
-
-                  // A régi, óvatos harmadik-nyelv/zaj szűrő megmarad biztonsági hálónak.
-                  if(looksLikeObviousThirdLanguageNoise(t)) return false;
-                  if(isLikelyNoisyTranscriptBlock(t)) return false;
-
-                  // FR/HU párnál a korábbi gyakori kamionos zaj-hallucinációk szűrése is marad,
-                  // de nem ez a fő nyelvzár, csak kiegészítő védelem.
-                  String top = code(topLang).toLowerCase(Locale.ROOT);
-                  String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
-                  boolean frHu = (top.equals("fr") && bottom.equals("hu")) || (top.equals("hu") && bottom.equals("fr"));
-                  if(frHu && looksLikeNonFrHuNoise(t)) return false;
-
-                  return true;
-              }
-
-              boolean isSafeSingleWordForSelectedPair(String text) {
-                  if(text == null) return false;
-                  String x = normalizeLangGateText(text);
-                  if(x.length() == 0 || x.contains(" ")) return false;
-                  String top = code(topLang).toLowerCase(Locale.ROOT);
-                  String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
-                  return isSafeSingleWordForLang(x, top) || isSafeSingleWordForLang(x, bottom);
-              }
-
-              boolean isSafeSingleWordForLang(String x, String lang) {
-                  if(x == null || lang == null) return false;
-                  if(lang.equals("hu")) {
-                      String[] hu = {"igen", "nem", "jó", "jo", "oké", "oke", "szia", "helló", "hello", "köszönöm", "koszonom", "kérem", "kerem", "mehet", "rendben", "persze", "várj", "varj", "itt", "ott"};
-                      for(String w: hu) if(x.equals(w)) return true;
-                  } else if(lang.equals("fr")) {
-                      String[] fr = {"oui", "non", "merci", "bonjour", "bonsoir", "salut", "pardon", "d'accord", "accord", "voilà", "voila", "bien", "ok", "allo"};
-                      for(String w: fr) if(x.equals(w)) return true;
-                  } else if(lang.equals("en")) {
-                      String[] en = {"yes", "no", "ok", "okay", "hello", "thanks", "thank", "please", "sorry"};
-                      for(String w: en) if(x.equals(w)) return true;
-                  } else if(lang.equals("de")) {
-                      String[] de = {"ja", "nein", "danke", "bitte", "hallo", "gut"};
-                      for(String w: de) if(x.equals(w)) return true;
-                  } else if(lang.equals("it")) {
-                      String[] it = {"si", "sì", "no", "grazie", "prego", "ciao", "bene"};
-                      for(String w: it) if(x.equals(w)) return true;
-                  } else if(lang.equals("es")) {
-                      String[] es = {"sí", "si", "no", "gracias", "hola", "bien", "vale"};
-                      for(String w: es) if(x.equals(w)) return true;
-                  }
-                  return false;
+                  // V155: minimális bemeneti kapu. A már elkészült átiratot nem próbáljuk
+                  // kézi szólistákkal, karakterpontozással vagy nyelvi heurisztikával újraértelmezni.
+                  return block != null && block.trim().length() > 0;
               }
 
               boolean selectedPairStrictInputGateEnabled() {
@@ -1909,7 +1865,6 @@ jobs:
                   String h = normalizeLiveBlockHash(block);
                   if(h.length() < 3) return false;
                   if(recentLiveBlockHashes.contains(h)) return false;
-                  if(isRecentlySimilarLiveBlock(h)) return false;
                   recentLiveBlockHashes.add(h);
                   recentLiveBlockHashOrder.add(h);
                   while(recentLiveBlockHashOrder.size() > 80) {
@@ -2079,10 +2034,7 @@ jobs:
 
               String cleanTranscriptForSelectedPair(String text) {
                   if(text == null) return "";
-                  // V74: ez továbbra sem saját nagy nyelvfelismerő. Csak biztonsági tisztítás:
-                  // idegen írásrendszeres STT-szemét nem kerülhet ki az ablakokba vagy fordításba.
-                  String x = text.replaceAll("[^A-Za-z0-9\\u00C0-\\u024F\\p{Punct}\\s]", " ");
-                  return x.replaceAll("\\s+", " ").trim();
+                  return text.replaceAll("\\s+", " ").trim();
               }
 
               boolean selectedContains(String langCode) {
@@ -3162,14 +3114,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V154.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V154.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V155.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V155.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V154
+          name: V155
           path: |
             artifact/*.apk
             artifact/*.aab
