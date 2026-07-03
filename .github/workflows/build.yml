@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 155; versionName = "15.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 156; versionName = "15.6" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V155" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V156" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -452,7 +452,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V155");
+                  TextView title = label("Fordito_V156");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1008,10 +1008,34 @@ jobs:
                       }
 
                       JSONObject tr = new JSONObject();
-                      tr.put("model", "gpt-realtime-whisper");
-                      // V155: a Realtime transzkripció szabad automatikus felismerést kap.
-                      // A kiválasztott nyelvek a fordítási irányt szabják meg, nem kényszerítik a dekódert.
-                      tr.put("delay", delayMode);
+                      // V156: a pontosabb GPT-4o Transcribe végzi a beszéd -> szöveg lépést.
+                      // Ennél a modellnél a Realtime transzkripció dokumentált promptja használható.
+                      tr.put("model", "gpt-4o-transcribe");
+
+                      String topCode = code(topLang);
+                      String bottomCode = code(bottomLang);
+                      String expectedLanguages;
+                      if("AUTO".equalsIgnoreCase(topCode) && "AUTO".equalsIgnoreCase(bottomCode)) {
+                          expectedLanguages = "Detect the spoken language naturally.";
+                      } else if("AUTO".equalsIgnoreCase(topCode)) {
+                          expectedLanguages = "One expected conversation language is " + bottomCode + "; the other may be detected automatically.";
+                      } else if("AUTO".equalsIgnoreCase(bottomCode)) {
+                          expectedLanguages = "One expected conversation language is " + topCode + "; the other may be detected automatically.";
+                      } else {
+                          expectedLanguages = "The conversation normally uses " + topCode + " and " + bottomCode + ".";
+                      }
+
+                      String transcriptionPrompt =
+                          expectedLanguages + " " +
+                          "Transcribe exactly what an ordinary person says in natural everyday speech. " +
+                          "Use sentence context. Everyday speech may contain slang, profanity, colloquial expressions, borrowed foreign words, " +
+                          "international technical terms, brand names, product names, personal names and place names. " +
+                          "Keep familiar borrowed and technical words as the words actually spoken; do not force them into unrelated native-sounding words. " +
+                          "Examples of normal everyday terms include headset, Bluetooth, Samsung, Galaxy Buds, WhatsApp, hotspot, roaming, API and OpenAI. " +
+                          "Do not translate. Do not censor. Do not sanitize. Do not add explanations. Do not invent speech from background noise. " +
+                          "If speech is uncertain, prefer the interpretation that makes sense in the surrounding everyday sentence.";
+
+                      tr.put("prompt", transcriptionPrompt);
                       input.put("transcription", tr);
 
                       JSONObject audio = new JSONObject();
@@ -3114,14 +3138,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V155.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V155.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V156.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V156.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V155
+          name: V156
           path: |
             artifact/*.apk
             artifact/*.aab
