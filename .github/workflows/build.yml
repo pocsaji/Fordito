@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 160; versionName = "16.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 161; versionName = "16.1" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V160" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V161" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -161,6 +161,9 @@ jobs:
           import android.media.*;
           import android.media.audiofx.*;
           import android.speech.tts.TextToSpeech;
+          import android.speech.SpeechRecognizer;
+          import android.speech.RecognitionListener;
+          import android.speech.RecognizerIntent;
           import android.speech.tts.UtteranceProgressListener;
           import android.os.*;
           import android.text.*;
@@ -220,6 +223,12 @@ jobs:
               volatile boolean trailingSilenceOpen = false;
               volatile boolean voiceSendActive = false;
               volatile boolean pendingAudioStartAfterSessionUpdate = false;
+              SpeechRecognizer systemRecognizer = null;
+              Intent systemRecognizerIntent = null;
+              boolean systemSpeechMode = false;
+              boolean systemRecognizerStarting = false;
+              String lastSystemSpeechHash = "";
+              long lastSystemSpeechAt = 0L;
               final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
               int preRollAudioBytes = 0;
               boolean mirrorBottomMode = false;
@@ -234,9 +243,6 @@ jobs:
               long firstSpeechHeardAt = 0L;
               long liveBufferStartedAt = 0L;
               int liveIdleFlushToken = 0;
-              String currentDeltaItemId = "";
-              final HashSet<String> deltaItemsAlreadyEmitted = new HashSet<>();
-              final ArrayDeque<String> deltaItemsAlreadyEmittedOrder = new ArrayDeque<>();
               boolean firstSpeechBlockReleased = false;
               int pendingLiveBlockId = -1;
               final ArrayDeque<Integer> liveTranslateQueue = new ArrayDeque<>();
@@ -455,7 +461,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V160");
+                  TextView title = label("Fordito_V161");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -503,7 +509,7 @@ jobs:
                   bottomLangBtn.setOnLongClickListener(v -> { copyBox(false); return true; });
                   micBtn.setOnClickListener(v -> {
                       if(streaming) stop();
-                      else start(true);
+                      else startSystemSpeechMode();
                   });
                   translateBtn.setOnClickListener(v -> manualTranslate());
                   menuBtn.setOnClickListener(v -> menu());
@@ -918,6 +924,156 @@ jobs:
                   return apiKey != null && apiKey.trim().startsWith("sk-");
               }
 
+              void startSystemSpeechMode() {
+                  if(!hasKey()) { showApi(); return; }
+                  if(Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reqMic(); return; }
+
+                  // V161: új bemeneti út. Nem küldünk OpenAI audiót.
+                  // A telefon Android/Samsung/Google beszédfelismerője ad kész szöveget,
+                  // az OpenAI csak fordítja a kész szöveget.
+                  systemSpeechMode = true;
+                  streaming = true;
+                  liveTranscriptBuffer = "";
+                  liveHadTranscriptDelta = false;
+                  firstSpeechHeardAt = 0L;
+                  liveBufferStartedAt = 0L;
+                  liveIdleFlushToken++;
+                  firstSpeechBlockReleased = false;
+                  recentLiveBlockHashes.clear();
+                  recentLiveBlockHashOrder.clear();
+                  processedTranscriptItemIds.clear();
+                  processedTranscriptItemIdOrder.clear();
+                  lastSystemSpeechHash = "";
+                  lastSystemSpeechAt = 0L;
+
+                  startBackgroundForegroundServiceIfAllowed();
+                  state.setText("rendszer beszédfelismerés");
+                  updateButtons();
+
+                  // WebSocket csak szövegfordításhoz kell. A start(false) nem indít mikrofon-audió streamet.
+                  if(ws == null || !connected) start(false);
+                  ensureSystemRecognizer();
+                  restartSystemRecognizerSoon(150);
+              }
+
+              void ensureSystemRecognizer() {
+                  if(systemRecognizer != null) return;
+                  if(!SpeechRecognizer.isRecognitionAvailable(this)) {
+                      Toast.makeText(this, "Nincs elérhető Android beszédfelismerő szolgáltatás.", Toast.LENGTH_LONG).show();
+                      streaming = false;
+                      systemSpeechMode = false;
+                      updateButtons();
+                      return;
+                  }
+
+                  systemRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+                  systemRecognizer.setRecognitionListener(new RecognitionListener() {
+                      public void onReadyForSpeech(Bundle params) {
+                          systemRecognizerStarting = false;
+                          state.setText("hallgat");
+                      }
+                      public void onBeginningOfSpeech() {
+                          state.setText("beszéd");
+                      }
+                      public void onRmsChanged(float rmsdB) {}
+                      public void onBufferReceived(byte[] buffer) {}
+                      public void onEndOfSpeech() {
+                          state.setText("feldolgozás");
+                      }
+                      public void onError(int error) {
+                          systemRecognizerStarting = false;
+                          if(!systemSpeechMode || !streaming) return;
+                          // Normál folyamatos diktálás: csend / timeout / no-match után újraindítjuk.
+                          long d = error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ? 450 : 160;
+                          restartSystemRecognizerSoon(d);
+                      }
+                      public void onResults(Bundle results) {
+                          systemRecognizerStarting = false;
+                          handleSystemSpeechBundle(results);
+                          if(systemSpeechMode && streaming) restartSystemRecognizerSoon(120);
+                      }
+                      public void onPartialResults(Bundle partialResults) {
+                          // Nem fordítunk partial alapján. A rendszer final eredményét használjuk,
+                          // így nincs saját delta-darabolás és nincs OpenAI audio-költség.
+                      }
+                      public void onEvent(int eventType, Bundle params) {}
+                  });
+              }
+
+              Intent buildSystemRecognizerIntent() {
+                  Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                  i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                  i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+                  i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+                  i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getPackageName());
+
+                  String lang = code(topActive ? topLang : bottomLang);
+                  if(lang != null && lang.length() > 0 && !"AUTO".equalsIgnoreCase(lang)) {
+                      i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang.toLowerCase(Locale.ROOT));
+                  }
+
+                  // A szolgáltató figyelmen kívül hagyhatja, de ha támogatja, rövidebb lezárást ad.
+                  i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 700);
+                  i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 450);
+                  i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1200);
+                  return i;
+              }
+
+              void restartSystemRecognizerSoon(long delayMs) {
+                  if(!systemSpeechMode || !streaming) return;
+                  new Handler().postDelayed(() -> {
+                      if(!systemSpeechMode || !streaming) return;
+                      try {
+                          ensureSystemRecognizer();
+                          if(systemRecognizer == null) return;
+                          try { systemRecognizer.cancel(); } catch(Exception ignored) {}
+                          systemRecognizerIntent = buildSystemRecognizerIntent();
+                          systemRecognizerStarting = true;
+                          systemRecognizer.startListening(systemRecognizerIntent);
+                          state.setText("hallgat");
+                      } catch(Exception e) {
+                          systemRecognizerStarting = false;
+                          if(systemSpeechMode && streaming) restartSystemRecognizerSoon(700);
+                      }
+                  }, delayMs);
+              }
+
+              void stopSystemRecognizerOnly() {
+                  systemSpeechMode = false;
+                  systemRecognizerStarting = false;
+                  try {
+                      if(systemRecognizer != null) {
+                          systemRecognizer.cancel();
+                          systemRecognizer.destroy();
+                      }
+                  } catch(Exception ignored) {}
+                  systemRecognizer = null;
+                  systemRecognizerIntent = null;
+              }
+
+              void handleSystemSpeechBundle(Bundle b) {
+                  if(b == null) return;
+                  ArrayList<String> list = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                  if(list == null || list.isEmpty()) return;
+                  handleSystemSpeechText(list.get(0));
+              }
+
+              void handleSystemSpeechText(String s) {
+                  if(s == null) return;
+                  String t = s.trim().replaceAll("\\s+", " ");
+                  if(t.length() == 0) return;
+
+                  String h = normalizeLiveBlockHash(t);
+                  long now = System.currentTimeMillis();
+                  if(h.length() > 0 && h.equals(lastSystemSpeechHash) && now - lastSystemSpeechAt < 2500) return;
+                  lastSystemSpeechHash = h;
+                  lastSystemSpeechAt = now;
+
+                  int id = addSourceOnlyBlock(topActive, t);
+                  liveTranslateQueue.add(id);
+                  processNextLiveTranslation();
+              }
+
               void start(boolean withAudio) {
                   if(!hasKey()) { showApi(); return; }
                   if(withAudio && Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reqMic(); return; }
@@ -954,6 +1110,9 @@ jobs:
                                   String p = pendingManualText;
                                   pendingManualText = "";
                                   new Handler().postDelayed(() -> sendManualText(p), 500);
+                              }
+                              if(!withAudio && !liveTranslateQueue.isEmpty()) {
+                                  new Handler().postDelayed(() -> processNextLiveTranslation(), 250);
                               }
                           });
                       }
@@ -1111,7 +1270,7 @@ jobs:
               int vadSilenceMs() {
                   // V140: a szerver VAD mondatzárása sehol nem várhat tovább 500 ms-nál,
                   // mert a helyi küldési kapu legfeljebb 600 ms lezáró csendet enged fel.
-                  if("high".equals(vadMode)) return 250;
+                  if("high".equals(vadMode)) return 300;
                   if("medium".equals(vadMode)) return 450;
                   if("auto".equals(vadMode)) return 450;
                   return 500;
@@ -1329,8 +1488,10 @@ jobs:
               }
 
               void stop() {
+                  stopSystemRecognizerOnly();
                   streaming = false;
                   connected = false;
+                  systemSpeechMode = false;
                   ttsMuteUntilMs = 0L;
                   lastVoiceChunkSentAtMs = 0L;
                   trailingSilenceOpen = false;
@@ -1346,9 +1507,6 @@ jobs:
                   liveBufferStartedAt = 0L;
                   liveIdleFlushToken++;
                   firstSpeechBlockReleased = false;
-                  currentDeltaItemId = "";
-                  deltaItemsAlreadyEmitted.clear();
-                  deltaItemsAlreadyEmittedOrder.clear();
                   liveTranslateMode = false;
                   pendingLiveBlockId = -1;
                   liveTranslateQueue.clear();
@@ -1400,11 +1558,7 @@ jobs:
                       }
 
                       if(type.equals("conversation.item.input_audio_transcription.delta")) {
-                          // V160: delta nem fordítási végforrás önmagában, de élő tolmácsnál ebből zárunk rövid mondatblokkokat,
-                          // különben a completed csak akkor jön, amikor a beszélő hosszabban elhallgat.
-                          String d = o.optString("delta", "");
-                          String itemId = o.optString("item_id", "");
-                          if(!d.isEmpty()) runOnUiThread(() -> handleTranscriptDelta(itemId, d));
+                          // V159 CLEAN: delta csak részleges előnézet lenne; végleges blokkot soha nem építünk belőle.
                       }
 
                       if(type.equals("conversation.item.input_audio_transcription.completed")) {
@@ -1525,86 +1679,28 @@ jobs:
                   }
               }
 
-              void handleTranscriptDelta(String itemId, String delta) {
+              void handleTranscriptDelta(String delta) {
                   if(delta == null || delta.length() == 0) return;
                   liveHadTranscriptDelta = true;
                   long now = System.currentTimeMillis();
-
-                  String id = itemId == null ? "" : itemId.trim();
-                  if(id.length() > 0 && currentDeltaItemId.length() > 0 && !id.equals(currentDeltaItemId)) {
-                      flushDeltaTranscriptBuffer(true);
-                      liveTranscriptBuffer = "";
-                      liveBufferStartedAt = 0L;
-                  }
-                  if(id.length() > 0) currentDeltaItemId = id;
-
                   if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = now;
                   if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
-
                   liveTranscriptBuffer += delta;
-                  liveTranscriptBuffer = liveTranscriptBuffer.replaceAll("\\s+", " ");
+                  flushReadyTranscriptBlocks(false);
 
-                  flushDeltaTranscriptBuffer(false);
-
+                  // V75: ha csak 2-3 szó hangzott el és utána hosszú csend van,
+                  // ne ragadjon a pufferben. Ez nem VAD és nem beszédvégi darabolás,
+                  // csak biztonsági utóflush rövid, magára hagyott blokkokhoz.
                   final int token = ++liveIdleFlushToken;
                   topBox.postDelayed(() -> {
                       if(token == liveIdleFlushToken && streaming && liveTranscriptBuffer.trim().length() > 0) {
-                          flushDeltaTranscriptBuffer(true);
+                          flushReadyTranscriptBlocks(true);
                       }
-                  }, 850);
-              }
-
-              void rememberDeltaItemEmitted() {
-                  if(currentDeltaItemId == null || currentDeltaItemId.trim().length() == 0) return;
-                  String id = currentDeltaItemId.trim();
-                  if(deltaItemsAlreadyEmitted.contains(id)) return;
-                  deltaItemsAlreadyEmitted.add(id);
-                  deltaItemsAlreadyEmittedOrder.add(id);
-                  while(deltaItemsAlreadyEmittedOrder.size() > 200) {
-                      String old = deltaItemsAlreadyEmittedOrder.poll();
-                      if(old != null) deltaItemsAlreadyEmitted.remove(old);
-                  }
-              }
-
-              void flushDeltaTranscriptBuffer(boolean force) {
-                  String s = liveTranscriptBuffer == null ? "" : liveTranscriptBuffer.trim();
-                  if(s.length() == 0) {
-                      liveTranscriptBuffer = "";
-                      liveBufferStartedAt = 0L;
-                      return;
-                  }
-
-                  int cut = firstHardSentenceEnd(s);
-                  if(cut < 0) cut = smartLinguisticCut(s);
-
-                  int words = s.split("\\s+").length;
-                  if(cut < 0 && !force && (s.length() >= 150 || words >= 18)) cut = s.length();
-                  if(cut < 0 && force) cut = s.length();
-                  if(cut < 0) return;
-
-                  String block = s.substring(0, cut).trim();
-                  String rest = s.substring(cut).trim();
-                  liveTranscriptBuffer = rest;
-                  liveBufferStartedAt = rest.length() > 0 ? System.currentTimeMillis() : 0L;
-
-                  block = cleanTranscriptForSelectedPair(block);
-                  block = finalizeSpeechBlockText(block);
-                  if(block.length() < 3) return;
-                  if(!passesSelectedPairInputGate(block)) return;
-                  if(!markLiveBlockQueued(block)) return;
-
-                  int id = addSourceOnlyBlock(topActive, block);
-                  firstSpeechBlockReleased = true;
-                  rememberDeltaItemEmitted();
-                  liveTranslateQueue.add(id);
-                  processNextLiveTranslation();
+                  }, 5200);
               }
 
               void handleTranscriptCompleted(String itemId, String transcript) {
-                  // V160: ha ebből az item_id-ből már delta-alapon kiadtunk élő blokkot,
-                  // a completed teljes szövegét nem engedjük újra, mert az pontosan duplázást okozna.
-                  if(itemId != null && deltaItemsAlreadyEmitted.contains(itemId.trim())) return;
-                  // Completed marad biztonsági végzárásnak, ha delta alapján még nem ment ki semmi.
+                  // V159 CLEAN: egyetlen hiteles végleges forrás a completed esemény.
                   if(itemId != null && itemId.trim().length() > 0) {
                       String id = itemId.trim();
                       if(processedTranscriptItemIds.contains(id)) return;
@@ -3121,14 +3217,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V158.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V158.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V161.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V161.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V158
+          name: V161
           path: |
             artifact/*.apk
             artifact/*.aab
