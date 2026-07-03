@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 166; versionName = "16.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 168; versionName = "16.8" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V166" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V168" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -473,7 +473,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V166");
+                  TextView title = label("Fordito_V168");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -958,9 +958,8 @@ jobs:
               void connectRealtimeTranscription() {
                   transcriptionClient = new OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build();
                   Request req = new Request.Builder()
-                    .url("wss://api.openai.com/v1/realtime?intent=transcription")
+                    .url("wss://api.openai.com/v1/realtime?model=gpt-realtime-2")
                     .addHeader("Authorization", "Bearer " + apiKey.trim())
-                    .addHeader("OpenAI-Beta", "realtime=v1")
                     .build();
 
                   transcriptionWs = transcriptionClient.newWebSocket(req, new WebSocketListener() {
@@ -977,7 +976,12 @@ jobs:
                               JSONObject tr = new JSONObject();
                               tr.put("model", "gpt-realtime-whisper");
                               tr.put("language", "hu");
-                              tr.put("delay", "medium");
+                              tr.put("delay", "low");
+                              tr.put("prompt",
+                                  "Magyar hétköznapi élő beszédet írj át. " +
+                                  "Kamionos, munkahelyi, logisztikai beszélgetés, headset, telefon, csend, zaj, márkanevek előfordulhatnak. " +
+                                  "Ne fordíts, ne javíts túl, ne cenzúrázz. " +
+                                  "A részleges átirat legyen értelmesen darabolható rövid beszédegységekre; ha félmondat már természetesen fordítható, add ki.");
 
                               JSONObject input = new JSONObject();
                               input.put("format", format);
@@ -1083,7 +1087,7 @@ jobs:
 
                                   // A modell valódi streaming delta-kat ad; a commit csak lezár egy rövid munkablokkot.
                                   // Nem csendet és nem mondatvéget próbálunk felismerni.
-                                  if(realtimeAudioSinceCommitMs >= 2800 && now-realtimeLastCommitAt >= 2500) {
+                                  if(realtimeAudioSinceCommitMs >= 1900 && now-realtimeLastCommitAt >= 1700) {
                                       JSONObject c=new JSONObject();
                                       c.put("type","input_audio_buffer.commit");
                                       transcriptionWs.send(c.toString());
@@ -1099,11 +1103,34 @@ jobs:
               void flushRealtimeTranscript(boolean finalFlush) {
                   String t=realtimeTranscriptText==null?"":realtimeTranscriptText.trim().replaceAll("\\s+"," ");
                   if(t.length()==0) return;
+
                   String[] words=t.split("\\s+");
                   int wc=words.length;
 
-                  int target = finalFlush ? wc : Math.max(0,wc-2);
-                  if(!finalFlush && target-realtimeTranscriptEmittedWords < 1) return;
+                  // V168: blokkosítás/darabolás.
+                  // Nem várunk tökéletes mondatvégre. Félmondat is mehet, ha már fordítható.
+                  // Az utolsó 2 szó marad pufferben, mert a streaming átirat vége gyakran még változik.
+                  int target = finalFlush ? wc : Math.max(0, wc-2);
+
+                  // Ha van erős írásjel az eddig stabil részben, ott vágunk.
+                  if(!finalFlush && target > realtimeTranscriptEmittedWords) {
+                      int punctCut = realtimeTranscriptEmittedWords;
+                      for(int i=realtimeTranscriptEmittedWords; i<target && i<words.length; i++) {
+                          String w = words[i];
+                          if(w.endsWith(".") || w.endsWith("?") || w.endsWith("!") || w.endsWith(";")) punctCut = i+1;
+                      }
+                      if(punctCut > realtimeTranscriptEmittedWords) target = punctCut;
+                  }
+
+                  int newWords = target - realtimeTranscriptEmittedWords;
+                  if(!finalFlush) {
+                      // Minimum: 2 új stabil szó, kivéve ha rövid önálló válasz.
+                      if(newWords < 2) return;
+
+                      // Túl hosszúra nem hagyjuk nőni: 5-8 szó körül már menjen ki egy félmondat.
+                      if(newWords > 8) target = realtimeTranscriptEmittedWords + 8;
+                  }
+
                   if(target<=realtimeTranscriptEmittedWords) return;
 
                   StringBuilder sb=new StringBuilder();
@@ -1114,11 +1141,22 @@ jobs:
                   String chunk=sb.toString().trim();
                   if(chunk.length()==0) return;
 
+                  // Ne küldjünk nyilvánvaló ismétlést.
+                  String h = normalizeLiveBlockHash(chunk);
+                  long now = System.currentTimeMillis();
+                  if(h.length()>0 && h.equals(lastSystemSpeechHash) && now-lastSystemSpeechAt < 3500) {
+                      realtimeTranscriptEmittedWords=target;
+                      return;
+                  }
+                  lastSystemSpeechHash=h;
+                  lastSystemSpeechAt=now;
+
                   realtimeTranscriptEmittedWords=target;
                   int id=addSourceOnlyBlock(topActive,chunk);
                   liveTranslateQueue.add(id);
                   processNextLiveTranslation();
               }
+
 
               void startSystemSpeechMode() {
                   if(!hasKey()) { showApi(); return; }
@@ -3517,14 +3555,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V166.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V166.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V168.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V168.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V166
+          name: V168
           path: |
             artifact/*.apk
             artifact/*.aab
