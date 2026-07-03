@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 163; versionName = "16.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 164; versionName = "16.4" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V163" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V164" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -473,7 +473,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V163");
+                  TextView title = label("Fordito_V164");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -958,7 +958,7 @@ jobs:
               void connectRealtimeTranscription() {
                   transcriptionClient = new OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build();
                   Request req = new Request.Builder()
-                    .url("wss://api.openai.com/v1/realtime?model=gpt-realtime-whisper")
+                    .url("wss://api.openai.com/v1/realtime?model=gpt-realtime-2")
                     .addHeader("Authorization", "Bearer " + apiKey.trim())
                     .build();
 
@@ -3516,14 +3516,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V163.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V163.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V164.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V164.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V163
+          name: V164
           path: |
             artifact/*.apk
             artifact/*.aab
