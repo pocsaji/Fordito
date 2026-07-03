@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 161; versionName = "16.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 162; versionName = "16.2" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V161" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V162" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -164,6 +164,7 @@ jobs:
           import android.speech.SpeechRecognizer;
           import android.speech.RecognitionListener;
           import android.speech.RecognizerIntent;
+          import android.speech.RecognitionService;
           import android.speech.tts.UtteranceProgressListener;
           import android.os.*;
           import android.text.*;
@@ -229,6 +230,9 @@ jobs:
               boolean systemRecognizerStarting = false;
               String lastSystemSpeechHash = "";
               long lastSystemSpeechAt = 0L;
+              String systemCurrentText = "";
+              int systemEmittedWordCount = 0;
+              int systemSpeechRestartToken = 0;
               final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
               int preRollAudioBytes = 0;
               boolean mirrorBottomMode = false;
@@ -461,7 +465,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V161");
+                  TextView title = label("Fordito_V162");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -945,6 +949,9 @@ jobs:
                   processedTranscriptItemIdOrder.clear();
                   lastSystemSpeechHash = "";
                   lastSystemSpeechAt = 0L;
+                  systemCurrentText = "";
+                  systemEmittedWordCount = 0;
+                  systemSpeechRestartToken++;
 
                   startBackgroundForegroundServiceIfAllowed();
                   state.setText("rendszer beszédfelismerés");
@@ -966,7 +973,15 @@ jobs:
                       return;
                   }
 
-                  systemRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+                  ComponentName google = googleRecognitionComponent();
+                  if(google != null) {
+                      systemRecognizer = SpeechRecognizer.createSpeechRecognizer(this, google);
+                      state.setText("Google beszédfelismerés");
+                  } else {
+                      systemRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+                      state.setText("rendszer beszédfelismerés");
+                  }
+
                   systemRecognizer.setRecognitionListener(new RecognitionListener() {
                       public void onReadyForSpeech(Bundle params) {
                           systemRecognizerStarting = false;
@@ -982,22 +997,61 @@ jobs:
                       }
                       public void onError(int error) {
                           systemRecognizerStarting = false;
+                          // Ha volt részleges szöveg, ne vesszen el csak azért, mert a Google ciklus timeoutolt.
+                          flushSystemSpeechStream(true);
                           if(!systemSpeechMode || !streaming) return;
-                          // Normál folyamatos diktálás: csend / timeout / no-match után újraindítjuk.
-                          long d = error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ? 450 : 160;
+
+                          long d;
+                          if(error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) d = 1100;
+                          else if(error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) d = 250;
+                          else d = 500;
                           restartSystemRecognizerSoon(d);
                       }
                       public void onResults(Bundle results) {
                           systemRecognizerStarting = false;
-                          handleSystemSpeechBundle(results);
-                          if(systemSpeechMode && streaming) restartSystemRecognizerSoon(120);
+                          handleSystemSpeechBundle(results, true);
+                          flushSystemSpeechStream(true);
+                          systemCurrentText = "";
+                          systemEmittedWordCount = 0;
+                          if(systemSpeechMode && streaming) restartSystemRecognizerSoon(250);
                       }
                       public void onPartialResults(Bundle partialResults) {
-                          // Nem fordítunk partial alapján. A rendszer final eredményét használjuk,
-                          // így nincs saját delta-darabolás és nincs OpenAI audio-költség.
+                          handleSystemSpeechBundle(partialResults, false);
                       }
                       public void onEvent(int eventType, Bundle params) {}
                   });
+              }
+
+              ComponentName googleRecognitionComponent() {
+                  try {
+                      Intent si = new Intent(RecognitionService.SERVICE_INTERFACE);
+                      List<android.content.pm.ResolveInfo> services = getPackageManager().queryIntentServices(si, 0);
+                      if(services == null) return null;
+
+                      String[] preferred = new String[]{
+                          "com.google.android.googlequicksearchbox",
+                          "com.google.android.tts"
+                      };
+
+                      for(String pkg: preferred) {
+                          for(android.content.pm.ResolveInfo ri: services) {
+                              if(ri == null || ri.serviceInfo == null) continue;
+                              if(pkg.equals(ri.serviceInfo.packageName)) {
+                                  return new ComponentName(ri.serviceInfo.packageName, ri.serviceInfo.name);
+                              }
+                          }
+                      }
+
+                      for(android.content.pm.ResolveInfo ri: services) {
+                          if(ri == null || ri.serviceInfo == null) continue;
+                          String p = ri.serviceInfo.packageName == null ? "" : ri.serviceInfo.packageName.toLowerCase(Locale.ROOT);
+                          String n = ri.serviceInfo.name == null ? "" : ri.serviceInfo.name.toLowerCase(Locale.ROOT);
+                          if(p.contains("google") || n.contains("google")) {
+                              return new ComponentName(ri.serviceInfo.packageName, ri.serviceInfo.name);
+                          }
+                      }
+                  } catch(Exception ignored) {}
+                  return null;
               }
 
               Intent buildSystemRecognizerIntent() {
@@ -1006,34 +1060,39 @@ jobs:
                   i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
                   i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
                   i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getPackageName());
+                  i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
 
                   String lang = code(topActive ? topLang : bottomLang);
                   if(lang != null && lang.length() > 0 && !"AUTO".equalsIgnoreCase(lang)) {
-                      i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang.toLowerCase(Locale.ROOT));
+                      String lc = lang.toLowerCase(Locale.ROOT);
+                      i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lc);
+                      i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, lc);
                   }
 
-                  // A szolgáltató figyelmen kívül hagyhatja, de ha támogatja, rövidebb lezárást ad.
-                  i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 700);
-                  i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 450);
-                  i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1200);
+                  // V162: a csend-hossz extrákat nem erőltetjük. A Google szolgáltató saját ciklusát használjuk,
+                  // a folyamatos működést részleges eredmények + nyugodt újraindítás adja.
                   return i;
               }
 
               void restartSystemRecognizerSoon(long delayMs) {
                   if(!systemSpeechMode || !streaming) return;
+                  final int token = ++systemSpeechRestartToken;
                   new Handler().postDelayed(() -> {
+                      if(token != systemSpeechRestartToken) return;
                       if(!systemSpeechMode || !streaming) return;
+                      if(systemRecognizerStarting) return;
                       try {
                           ensureSystemRecognizer();
                           if(systemRecognizer == null) return;
-                          try { systemRecognizer.cancel(); } catch(Exception ignored) {}
                           systemRecognizerIntent = buildSystemRecognizerIntent();
                           systemRecognizerStarting = true;
+                          systemCurrentText = "";
+                          systemEmittedWordCount = 0;
                           systemRecognizer.startListening(systemRecognizerIntent);
                           state.setText("hallgat");
                       } catch(Exception e) {
                           systemRecognizerStarting = false;
-                          if(systemSpeechMode && streaming) restartSystemRecognizerSoon(700);
+                          if(systemSpeechMode && streaming) restartSystemRecognizerSoon(900);
                       }
                   }, delayMs);
               }
@@ -1041,6 +1100,9 @@ jobs:
               void stopSystemRecognizerOnly() {
                   systemSpeechMode = false;
                   systemRecognizerStarting = false;
+                  systemSpeechRestartToken++;
+                  systemCurrentText = "";
+                  systemEmittedWordCount = 0;
                   try {
                       if(systemRecognizer != null) {
                           systemRecognizer.cancel();
@@ -1051,25 +1113,64 @@ jobs:
                   systemRecognizerIntent = null;
               }
 
-              void handleSystemSpeechBundle(Bundle b) {
+              void handleSystemSpeechBundle(Bundle b, boolean finalResult) {
                   if(b == null) return;
                   ArrayList<String> list = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                   if(list == null || list.isEmpty()) return;
-                  handleSystemSpeechText(list.get(0));
+                  handleSystemSpeechText(list.get(0), finalResult);
               }
 
-              void handleSystemSpeechText(String s) {
+              void handleSystemSpeechText(String s, boolean finalResult) {
                   if(s == null) return;
                   String t = s.trim().replaceAll("\\s+", " ");
                   if(t.length() == 0) return;
 
-                  String h = normalizeLiveBlockHash(t);
+                  systemCurrentText = t;
+
+                  // V162: Google diktálás szövegfolyam. Nem várunk teljes mondatra.
+                  // 3 új szó körül vizsgálunk, de az utolsó 2 szót visszatartjuk,
+                  // mert a diktálómotor gyakran még javítja a végét.
+                  flushSystemSpeechStream(finalResult);
+              }
+
+              void flushSystemSpeechStream(boolean finalFlush) {
+                  String t = systemCurrentText == null ? "" : systemCurrentText.trim().replaceAll("\\s+", " ");
+                  if(t.length() == 0) return;
+
+                  String[] words = t.split("\\s+");
+                  int wc = words.length;
+                  int targetCount;
+
+                  if(finalFlush) {
+                      targetCount = wc;
+                  } else {
+                      targetCount = Math.max(0, wc - 2);
+                      if(targetCount - systemEmittedWordCount < 2) return;
+                  }
+
+                  if(targetCount <= systemEmittedWordCount) return;
+
+                  StringBuilder sb = new StringBuilder();
+                  for(int i=systemEmittedWordCount; i<targetCount && i<words.length; i++) {
+                      if(sb.length() > 0) sb.append(' ');
+                      sb.append(words[i]);
+                  }
+
+                  String chunk = sb.toString().trim();
+                  if(chunk.length() == 0) return;
+
+                  String h = normalizeLiveBlockHash(chunk);
                   long now = System.currentTimeMillis();
-                  if(h.length() > 0 && h.equals(lastSystemSpeechHash) && now - lastSystemSpeechAt < 2500) return;
+                  if(h.length() > 0 && h.equals(lastSystemSpeechHash) && now - lastSystemSpeechAt < 2500) {
+                      systemEmittedWordCount = targetCount;
+                      return;
+                  }
+
                   lastSystemSpeechHash = h;
                   lastSystemSpeechAt = now;
+                  systemEmittedWordCount = targetCount;
 
-                  int id = addSourceOnlyBlock(topActive, t);
+                  int id = addSourceOnlyBlock(topActive, chunk);
                   liveTranslateQueue.add(id);
                   processNextLiveTranslation();
               }
@@ -3217,14 +3318,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V161.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V161.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V162.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V162.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V161
+          name: V162
           path: |
             artifact/*.apk
             artifact/*.aab
