@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 169; versionName = "16.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 141; versionName = "14.1" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,8 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V169" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+              <application android:allowBackup="false" android:label="Fordito_V141" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -92,7 +93,7 @@ jobs:
                   <service
                       android:name=".VoiceForegroundService"
                       android:exported="false"
-                      android:foregroundServiceType="microphone" />
+                      android:foregroundServiceType="microphone|mediaPlayback" />
               </application>
           </manifest>
           EOF
@@ -161,10 +162,6 @@ jobs:
           import android.media.*;
           import android.media.audiofx.*;
           import android.speech.tts.TextToSpeech;
-          import android.speech.SpeechRecognizer;
-          import android.speech.RecognitionListener;
-          import android.speech.RecognizerIntent;
-          import android.speech.RecognitionService;
           import android.speech.tts.UtteranceProgressListener;
           import android.os.*;
           import android.text.*;
@@ -216,7 +213,6 @@ jobs:
               boolean finalizingStop = false;
               boolean interpreterMode = false;
               String interpreterAudioMode = "off";
-              String lastInterpreterAudioMode = "headset";
               volatile long ttsMuteUntilMs = 0L;
               static final int MAX_TRAILING_SILENCE_SEND_MS = 600;
               static final int PRE_ROLL_AUDIO_MS = 500;
@@ -224,23 +220,6 @@ jobs:
               volatile boolean trailingSilenceOpen = false;
               volatile boolean voiceSendActive = false;
               volatile boolean pendingAudioStartAfterSessionUpdate = false;
-              SpeechRecognizer systemRecognizer = null;
-              Intent systemRecognizerIntent = null;
-              boolean systemSpeechMode = false;
-              boolean systemRecognizerStarting = false;
-              String lastSystemSpeechHash = "";
-              long lastSystemSpeechAt = 0L;
-              WebSocket transcriptionWs = null;
-              OkHttpClient transcriptionClient = null;
-              volatile boolean transcriptionConnected = false;
-              volatile boolean transcriptionMode = false;
-              String realtimeTranscriptText = "";
-              int realtimeTranscriptEmittedWords = 0;
-              long realtimeLastCommitAt = 0L;
-              long realtimeAudioSinceCommitMs = 0L;
-              String systemCurrentText = "";
-              int systemEmittedWordCount = 0;
-              int systemSpeechRestartToken = 0;
               final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
               int preRollAudioBytes = 0;
               boolean mirrorBottomMode = false;
@@ -260,8 +239,6 @@ jobs:
               final ArrayDeque<Integer> liveTranslateQueue = new ArrayDeque<>();
               final HashSet<String> recentLiveBlockHashes = new HashSet<>();
               final ArrayDeque<String> recentLiveBlockHashOrder = new ArrayDeque<>();
-              final HashSet<String> processedTranscriptItemIds = new HashSet<>();
-              final ArrayDeque<String> processedTranscriptItemIdOrder = new ArrayDeque<>();
               String pendingManualText = "";
               boolean manualResponseMode = false;
               boolean programmaticChange = false;
@@ -288,8 +265,8 @@ jobs:
               String profile = "general";
               String soundProfile = "general";
               String mode = "natural";
-              String vadMode = "high";
-              String delayMode = "low";
+              String vadMode = "low";
+              String delayMode = "medium";
               String micGateMode = "gate_low";
               String audioSourceMode = "recognition";
               String androidEffectsMode = "ns_only";
@@ -362,8 +339,9 @@ jobs:
               };
 
               final String[][] androidEffectsModes = {
-                  {"Csak zajszűrés","ns_only"},
-                  {"Kikapcsolva","off"}
+                  {"Ajánlott: NS+AGC, AEC ki","recommended"},
+                  {"Teljes: NS+AGC+AEC","full"},
+                  {"Csak zajszűrés","ns_only"}
               };
 
               final String[][] openAiNoiseModes = {
@@ -402,17 +380,16 @@ jobs:
                   profile = sp.getString("profile", "general");
                   soundProfile = sp.getString("soundProfile", "general");
                   mode = sp.getString("mode", "natural");
-                  vadMode = sp.getString("vadMode", "high");
-                  delayMode = sp.getString("delayMode", "low");
+                  vadMode = sp.getString("vadMode", "medium");
+                  delayMode = sp.getString("delayMode", "xhigh");
                   micGateMode = sp.getString("micGateMode", "gate_low");
-                  audioSourceMode = sp.getString("audioSourceMode", "recognition");
+                  audioSourceMode = sp.getString("audioSourceMode", "unprocessed");
                   androidEffectsMode = sp.getString("androidEffectsMode", "ns_only");
-                  if("full".equals(androidEffectsMode) || "recommended".equals(androidEffectsMode)) androidEffectsMode = "ns_only"; // V158: AGC/AEC ágak kerülése
                   openAiNoiseMode = "off"; // V117: OpenAI zajszűrés fixen kikapcsolva
-                  lastInterpreterAudioMode = sp.getString("lastInterpreterAudioMode", sp.getString("interpreterAudioMode", "headset"));
-                  if(!"speaker".equals(lastInterpreterAudioMode) && !"headset".equals(lastInterpreterAudioMode)) lastInterpreterAudioMode = "headset";
-                  interpreterMode = false;
-                  interpreterAudioMode = "off";
+                  interpreterMode = sp.getBoolean("interpreterMode", false);
+                  interpreterAudioMode = sp.getString("interpreterAudioMode", interpreterMode ? "headset" : "off");
+                  if("off".equals(interpreterAudioMode)) interpreterMode = false;
+                  else interpreterMode = true;
                   mirrorBottomMode = sp.getBoolean("mirrorBottomMode", false);
                   topLang = sp.getString("topLang", "fr");
                   bottomLang = sp.getString("bottomLang", "hu");
@@ -429,9 +406,9 @@ jobs:
                       mode = "natural";
                       vadMode = "medium";
                       delayMode = "xhigh";
-                      micGateMode = "sensitive";
-                      audioSourceMode = "recognition";
-                      androidEffectsMode = "off";
+                      micGateMode = "gate_low";
+                      audioSourceMode = "unprocessed";
+                      androidEffectsMode = "ns_only";
                       openAiNoiseMode = "off";
                       interpreterMode = false;
                       interpreterAudioMode = "off";
@@ -458,7 +435,6 @@ jobs:
                     .putString("openAiNoiseMode", openAiNoiseMode)
                     .putBoolean("interpreterMode", interpreterMode)
                     .putString("interpreterAudioMode", interpreterAudioMode)
-                    .putString("lastInterpreterAudioMode", lastInterpreterAudioMode)
                     .putBoolean("mirrorBottomMode", mirrorBottomMode)
                     .putString("topLang", topLang)
                     .putString("bottomLang", bottomLang)
@@ -473,7 +449,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V169");
+                  TextView title = label("Fordito_V141");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -521,7 +497,7 @@ jobs:
                   bottomLangBtn.setOnLongClickListener(v -> { copyBox(false); return true; });
                   micBtn.setOnClickListener(v -> {
                       if(streaming) stop();
-                      else startRealtimeTranscriptionMode();
+                      else start(true);
                   });
                   translateBtn.setOnClickListener(v -> manualTranslate());
                   menuBtn.setOnClickListener(v -> menu());
@@ -606,9 +582,9 @@ jobs:
                   setManualEditMode(!manualEditMode);
                   if(manualEditMode) {
                       if(streaming) stop();
-                      Toast.makeText(getApplicationContext(), "Manuális bevitel aktív", Toast.LENGTH_SHORT).show();
+                      Toast.makeText(this, "Manuális bevitel aktív", Toast.LENGTH_SHORT).show();
                   } else {
-                      Toast.makeText(getApplicationContext(), "Ablakok lezárva", Toast.LENGTH_SHORT).show();
+                      Toast.makeText(this, "Ablakok lezárva", Toast.LENGTH_SHORT).show();
                   }
               }
 
@@ -642,13 +618,12 @@ jobs:
                   manualTopSource = top;
                   topActive = top;
 
-                  // V144: élő mikrofon közben az ablakba kattintás vagy gépelés
-                  // NEM állítja le a mikrofont és nem bontja a live fordítási állapotot.
-                  // A háttérmód és a zöld STOP gomb mellett nincs szükség a régi kényszerleállításra.
-                  // Ha a felhasználó élő használat közben kézzel beleír, azt nem védjük túl:
-                  // a mikrofon megy tovább, a következő live blokk a szokott módon érkezik.
+                  // V98: kézi szerkesztés és live mikrofon nem futhat egyszerre.
+                  // Ha a felhasználó bármelyik ablakba kattint vagy írni kezd,
+                  // a mikrofon és minden függő live fordítás leáll. Így a kézi
+                  // teljes ablakos fordításba nem írhat vissza későn érkező live válasz.
                   if(streaming) {
-                      updateButtons();
+                      stop();
                       return;
                   }
 
@@ -923,7 +898,7 @@ jobs:
                       if(Build.VERSION.SDK_INT >= 26) startForegroundService(i);
                       else startService(i);
                   } catch(Exception e) {
-                      Toast.makeText(getApplicationContext(), "Háttér mód nem indult: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                      Toast.makeText(this, "Háttér mód nem indult: " + e.getMessage(), Toast.LENGTH_LONG).show();
                       backgroundScreenAllowed = false;
                   }
               }
@@ -934,470 +909,6 @@ jobs:
 
               boolean hasKey() {
                   return apiKey != null && apiKey.trim().startsWith("sk-");
-              }
-
-              void startRealtimeTranscriptionMode() {
-                  if(!hasKey()) { showApi(); return; }
-                  if(Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reqMic(); return; }
-
-                  transcriptionMode = true;
-                  streaming = false;
-                  realtimeTranscriptText = "";
-                  realtimeTranscriptEmittedWords = 0;
-                  realtimeLastCommitAt = System.currentTimeMillis();
-                  realtimeAudioSinceCommitMs = 0L;
-                  startBackgroundForegroundServiceIfAllowed();
-                  state.setText("élő magyar felismerés");
-                  updateButtons();
-
-                  // A meglévő Realtime kapcsolat csak a kész szövegrészek fordítására marad.
-                  if(ws == null || !connected) start(false);
-                  connectRealtimeTranscription();
-              }
-
-              void connectRealtimeTranscription() {
-                  transcriptionClient = new OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build();
-                  Request req = new Request.Builder()
-                    .url("wss://api.openai.com/v1/realtime?model=gpt-realtime-2")
-                    .addHeader("Authorization", "Bearer " + apiKey.trim())
-                    .build();
-
-                  transcriptionWs = transcriptionClient.newWebSocket(req, new WebSocketListener() {
-                      @Override public void onOpen(WebSocket w, Response r) {
-                          transcriptionConnected = true;
-                          try {
-                              JSONObject session = new JSONObject();
-                              session.put("type", "transcription");
-
-                              JSONObject format = new JSONObject();
-                              format.put("type", "audio/pcm");
-                              format.put("rate", 24000);
-
-                              JSONObject tr = new JSONObject();
-                              tr.put("model", "gpt-realtime-whisper");
-                              tr.put("language", "hu");
-                              tr.put("delay", "low");
-
-                              JSONObject input = new JSONObject();
-                              input.put("format", format);
-                              input.put("transcription", tr);
-                              input.put("turn_detection", JSONObject.NULL);
-
-                              JSONObject audio = new JSONObject();
-                              audio.put("input", input);
-                              session.put("audio", audio);
-
-                              JSONObject evt = new JSONObject();
-                              evt.put("type", "session.update");
-                              evt.put("session", session);
-                              w.send(evt.toString());
-                          } catch(Exception e) {
-                              runOnUiThread(() -> state.setText("átírás beállítási hiba"));
-                          }
-                      }
-
-                      @Override public void onMessage(WebSocket w, String s) {
-                          handleRealtimeTranscriptionEvent(s);
-                      }
-
-                      @Override public void onFailure(WebSocket w, Throwable e, Response r) {
-                          transcriptionConnected = false;
-                          if(transcriptionMode) runOnUiThread(() -> { String m = e == null ? "ismeretlen" : String.valueOf(e.getMessage()); state.setText("átírás kapcsolat hiba: " + m); Toast.makeText(getApplicationContext(), "Átírás kapcsolat hiba: " + m, Toast.LENGTH_LONG).show(); });
-                      }
-
-                      @Override public void onClosed(WebSocket w, int c, String reason) {
-                          transcriptionConnected = false;
-                      }
-                  });
-              }
-
-              void handleRealtimeTranscriptionEvent(String s) {
-                  try {
-                      JSONObject o = new JSONObject(s);
-                      String type = o.optString("type", "");
-
-                      if(type.equals("session.updated")) {
-                          runOnUiThread(() -> {
-                              state.setText("hallgat");
-                              startRealtimeTranscriptionAudio();
-                          });
-                          return;
-                      }
-
-                      if(type.equals("conversation.item.input_audio_transcription.delta")) {
-                          String d = o.optString("delta", "");
-                          if(!d.isEmpty()) runOnUiThread(() -> {
-                              realtimeTranscriptText += d;
-                              flushRealtimeTranscript(false);
-                          });
-                          return;
-                      }
-
-                      if(type.equals("conversation.item.input_audio_transcription.completed")) {
-                          String full = o.optString("transcript", "");
-                          runOnUiThread(() -> {
-                              if(!full.isEmpty()) realtimeTranscriptText = full;
-                              flushRealtimeTranscript(true);
-                              realtimeTranscriptText = "";
-                              realtimeTranscriptEmittedWords = 0;
-                          });
-                          return;
-                      }
-
-                      if(type.equals("error")) {
-                          JSONObject er=o.optJSONObject("error");
-                          String msg=er==null?o.toString():er.optString("message",er.toString());
-                          runOnUiThread(() -> { state.setText("átírás hiba: " + msg); Toast.makeText(getApplicationContext(), "Átírás hiba: " + msg, Toast.LENGTH_LONG).show(); });
-                      }
-                  } catch(Exception ignored) {}
-              }
-
-              void startRealtimeTranscriptionAudio() {
-                  if(!transcriptionMode || !transcriptionConnected || transcriptionWs == null) return;
-                  int sr=24000;
-                  int min=AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-                  int bs=Math.max(min, 2400);
-                  rec=makeBestAudioRecord(sr,bs);
-                  if(rec==null) { state.setText("mikrofon hiba"); return; }
-
-                  streaming=true;
-                  rec.startRecording();
-                  updateButtons();
-                  realtimeLastCommitAt=System.currentTimeMillis();
-                  realtimeAudioSinceCommitMs=0L;
-
-                  audioExec.submit(() -> {
-                      byte[] buf=new byte[bs];
-                      while(transcriptionMode && streaming && transcriptionConnected && transcriptionWs!=null && rec!=null) {
-                          int read=rec.read(buf,0,buf.length);
-                          if(read>0) {
-                              try {
-                                  JSONObject a=new JSONObject();
-                                  a.put("type","input_audio_buffer.append");
-                                  a.put("audio",Base64.encodeToString(Arrays.copyOf(buf,read),Base64.NO_WRAP));
-                                  transcriptionWs.send(a.toString());
-
-                                  realtimeAudioSinceCommitMs += (long)(read * 1000.0 / (24000.0 * 2.0));
-                                  long now=System.currentTimeMillis();
-
-                                  // A modell valódi streaming delta-kat ad; a commit csak lezár egy rövid munkablokkot.
-                                  // Nem csendet és nem mondatvéget próbálunk felismerni.
-                                  if(realtimeAudioSinceCommitMs >= 1900 && now-realtimeLastCommitAt >= 1700) {
-                                      JSONObject c=new JSONObject();
-                                      c.put("type","input_audio_buffer.commit");
-                                      transcriptionWs.send(c.toString());
-                                      realtimeLastCommitAt=now;
-                                      realtimeAudioSinceCommitMs=0L;
-                                  }
-                              } catch(Exception ignored) {}
-                          }
-                      }
-                  });
-              }
-
-              void flushRealtimeTranscript(boolean finalFlush) {
-                  String t=realtimeTranscriptText==null?"":realtimeTranscriptText.trim().replaceAll("\\s+"," ");
-                  if(t.length()==0) return;
-
-                  String[] words=t.split("\\s+");
-                  int wc=words.length;
-
-                  // V168: blokkosítás/darabolás.
-                  // Nem várunk tökéletes mondatvégre. Félmondat is mehet, ha már fordítható.
-                  // Az utolsó 2 szó marad pufferben, mert a streaming átirat vége gyakran még változik.
-                  int target = finalFlush ? wc : Math.max(0, wc-2);
-
-                  // Ha van erős írásjel az eddig stabil részben, ott vágunk.
-                  if(!finalFlush && target > realtimeTranscriptEmittedWords) {
-                      int punctCut = realtimeTranscriptEmittedWords;
-                      for(int i=realtimeTranscriptEmittedWords; i<target && i<words.length; i++) {
-                          String w = words[i];
-                          if(w.endsWith(".") || w.endsWith("?") || w.endsWith("!") || w.endsWith(";")) punctCut = i+1;
-                      }
-                      if(punctCut > realtimeTranscriptEmittedWords) target = punctCut;
-                  }
-
-                  int newWords = target - realtimeTranscriptEmittedWords;
-                  if(!finalFlush) {
-                      // Minimum: 2 új stabil szó, kivéve ha rövid önálló válasz.
-                      if(newWords < 2) return;
-
-                      // Túl hosszúra nem hagyjuk nőni: 5-8 szó körül már menjen ki egy félmondat.
-                      if(newWords > 8) target = realtimeTranscriptEmittedWords + 8;
-                  }
-
-                  if(target<=realtimeTranscriptEmittedWords) return;
-
-                  StringBuilder sb=new StringBuilder();
-                  for(int i=realtimeTranscriptEmittedWords;i<target && i<words.length;i++) {
-                      if(sb.length()>0) sb.append(' ');
-                      sb.append(words[i]);
-                  }
-                  String chunk=sb.toString().trim();
-                  if(chunk.length()==0) return;
-
-                  // Ne küldjünk nyilvánvaló ismétlést.
-                  String h = normalizeLiveBlockHash(chunk);
-                  long now = System.currentTimeMillis();
-                  if(h.length()>0 && h.equals(lastSystemSpeechHash) && now-lastSystemSpeechAt < 3500) {
-                      realtimeTranscriptEmittedWords=target;
-                      return;
-                  }
-                  lastSystemSpeechHash=h;
-                  lastSystemSpeechAt=now;
-
-                  realtimeTranscriptEmittedWords=target;
-                  int id=addSourceOnlyBlock(topActive,chunk);
-                  liveTranslateQueue.add(id);
-                  processNextLiveTranslation();
-              }
-
-
-              void startSystemSpeechMode() {
-                  if(!hasKey()) { showApi(); return; }
-                  if(Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reqMic(); return; }
-
-                  // V161: új bemeneti út. Nem küldünk OpenAI audiót.
-                  // A telefon Android/Samsung/Google beszédfelismerője ad kész szöveget,
-                  // az OpenAI csak fordítja a kész szöveget.
-                  systemSpeechMode = true;
-                  streaming = true;
-                  liveTranscriptBuffer = "";
-                  liveHadTranscriptDelta = false;
-                  firstSpeechHeardAt = 0L;
-                  liveBufferStartedAt = 0L;
-                  liveIdleFlushToken++;
-                  firstSpeechBlockReleased = false;
-                  recentLiveBlockHashes.clear();
-                  recentLiveBlockHashOrder.clear();
-                  processedTranscriptItemIds.clear();
-                  processedTranscriptItemIdOrder.clear();
-                  lastSystemSpeechHash = "";
-                  lastSystemSpeechAt = 0L;
-                  systemCurrentText = "";
-                  systemEmittedWordCount = 0;
-                  systemSpeechRestartToken++;
-
-                  startBackgroundForegroundServiceIfAllowed();
-                  state.setText("rendszer beszédfelismerés");
-                  updateButtons();
-
-                  // WebSocket csak szövegfordításhoz kell. A start(false) nem indít mikrofon-audió streamet.
-                  if(ws == null || !connected) start(false);
-                  ensureSystemRecognizer();
-                  restartSystemRecognizerSoon(150);
-              }
-
-              void ensureSystemRecognizer() {
-                  if(systemRecognizer != null) return;
-                  if(!SpeechRecognizer.isRecognitionAvailable(this)) {
-                      Toast.makeText(getApplicationContext(), "Nincs elérhető Android beszédfelismerő szolgáltatás.", Toast.LENGTH_LONG).show();
-                      streaming = false;
-                      systemSpeechMode = false;
-                      updateButtons();
-                      return;
-                  }
-
-                  ComponentName google = googleRecognitionComponent();
-                  if(google != null) {
-                      systemRecognizer = SpeechRecognizer.createSpeechRecognizer(this, google);
-                      state.setText("Google beszédfelismerés");
-                  } else {
-                      systemRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
-                      state.setText("rendszer beszédfelismerés");
-                  }
-
-                  systemRecognizer.setRecognitionListener(new RecognitionListener() {
-                      public void onReadyForSpeech(Bundle params) {
-                          systemRecognizerStarting = false;
-                          state.setText("hallgat");
-                      }
-                      public void onBeginningOfSpeech() {
-                          state.setText("beszéd");
-                      }
-                      public void onRmsChanged(float rmsdB) {}
-                      public void onBufferReceived(byte[] buffer) {}
-                      public void onEndOfSpeech() {
-                          state.setText("feldolgozás");
-                      }
-                      public void onError(int error) {
-                          systemRecognizerStarting = false;
-                          // Ha volt részleges szöveg, ne vesszen el csak azért, mert a Google ciklus timeoutolt.
-                          flushSystemSpeechStream(true);
-                          if(!systemSpeechMode || !streaming) return;
-
-                          long d;
-                          if(error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) d = 1100;
-                          else if(error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) d = 250;
-                          else d = 500;
-                          restartSystemRecognizerSoon(d);
-                      }
-                      public void onResults(Bundle results) {
-                          systemRecognizerStarting = false;
-                          handleSystemSpeechBundle(results, true);
-                          flushSystemSpeechStream(true);
-                          systemCurrentText = "";
-                          systemEmittedWordCount = 0;
-                          if(systemSpeechMode && streaming) restartSystemRecognizerSoon(250);
-                      }
-                      public void onPartialResults(Bundle partialResults) {
-                          handleSystemSpeechBundle(partialResults, false);
-                      }
-                      public void onEvent(int eventType, Bundle params) {}
-                  });
-              }
-
-              ComponentName googleRecognitionComponent() {
-                  try {
-                      Intent si = new Intent(RecognitionService.SERVICE_INTERFACE);
-                      List<android.content.pm.ResolveInfo> services = getPackageManager().queryIntentServices(si, 0);
-                      if(services == null) return null;
-
-                      String[] preferred = new String[]{
-                          "com.google.android.googlequicksearchbox",
-                          "com.google.android.tts"
-                      };
-
-                      for(String pkg: preferred) {
-                          for(android.content.pm.ResolveInfo ri: services) {
-                              if(ri == null || ri.serviceInfo == null) continue;
-                              if(pkg.equals(ri.serviceInfo.packageName)) {
-                                  return new ComponentName(ri.serviceInfo.packageName, ri.serviceInfo.name);
-                              }
-                          }
-                      }
-
-                      for(android.content.pm.ResolveInfo ri: services) {
-                          if(ri == null || ri.serviceInfo == null) continue;
-                          String p = ri.serviceInfo.packageName == null ? "" : ri.serviceInfo.packageName.toLowerCase(Locale.ROOT);
-                          String n = ri.serviceInfo.name == null ? "" : ri.serviceInfo.name.toLowerCase(Locale.ROOT);
-                          if(p.contains("google") || n.contains("google")) {
-                              return new ComponentName(ri.serviceInfo.packageName, ri.serviceInfo.name);
-                          }
-                      }
-                  } catch(Exception ignored) {}
-                  return null;
-              }
-
-              Intent buildSystemRecognizerIntent() {
-                  Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-                  i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-                  i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-                  i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
-                  i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getPackageName());
-                  i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
-
-                  String lang = code(topActive ? topLang : bottomLang);
-                  if(lang != null && lang.length() > 0 && !"AUTO".equalsIgnoreCase(lang)) {
-                      String lc = lang.toLowerCase(Locale.ROOT);
-                      i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lc);
-                      i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, lc);
-                  }
-
-                  // V162: a csend-hossz extrákat nem erőltetjük. A Google szolgáltató saját ciklusát használjuk,
-                  // a folyamatos működést részleges eredmények + nyugodt újraindítás adja.
-                  return i;
-              }
-
-              void restartSystemRecognizerSoon(long delayMs) {
-                  if(!systemSpeechMode || !streaming) return;
-                  final int token = ++systemSpeechRestartToken;
-                  new Handler().postDelayed(() -> {
-                      if(token != systemSpeechRestartToken) return;
-                      if(!systemSpeechMode || !streaming) return;
-                      if(systemRecognizerStarting) return;
-                      try {
-                          ensureSystemRecognizer();
-                          if(systemRecognizer == null) return;
-                          systemRecognizerIntent = buildSystemRecognizerIntent();
-                          systemRecognizerStarting = true;
-                          systemCurrentText = "";
-                          systemEmittedWordCount = 0;
-                          systemRecognizer.startListening(systemRecognizerIntent);
-                          state.setText("hallgat");
-                      } catch(Exception e) {
-                          systemRecognizerStarting = false;
-                          if(systemSpeechMode && streaming) restartSystemRecognizerSoon(900);
-                      }
-                  }, delayMs);
-              }
-
-              void stopSystemRecognizerOnly() {
-                  systemSpeechMode = false;
-                  systemRecognizerStarting = false;
-                  systemSpeechRestartToken++;
-                  systemCurrentText = "";
-                  systemEmittedWordCount = 0;
-                  try {
-                      if(systemRecognizer != null) {
-                          systemRecognizer.cancel();
-                          systemRecognizer.destroy();
-                      }
-                  } catch(Exception ignored) {}
-                  systemRecognizer = null;
-                  systemRecognizerIntent = null;
-              }
-
-              void handleSystemSpeechBundle(Bundle b, boolean finalResult) {
-                  if(b == null) return;
-                  ArrayList<String> list = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                  if(list == null || list.isEmpty()) return;
-                  handleSystemSpeechText(list.get(0), finalResult);
-              }
-
-              void handleSystemSpeechText(String s, boolean finalResult) {
-                  if(s == null) return;
-                  String t = s.trim().replaceAll("\\s+", " ");
-                  if(t.length() == 0) return;
-
-                  systemCurrentText = t;
-
-                  // V162: Google diktálás szövegfolyam. Nem várunk teljes mondatra.
-                  // 3 új szó körül vizsgálunk, de az utolsó 2 szót visszatartjuk,
-                  // mert a diktálómotor gyakran még javítja a végét.
-                  flushSystemSpeechStream(finalResult);
-              }
-
-              void flushSystemSpeechStream(boolean finalFlush) {
-                  String t = systemCurrentText == null ? "" : systemCurrentText.trim().replaceAll("\\s+", " ");
-                  if(t.length() == 0) return;
-
-                  String[] words = t.split("\\s+");
-                  int wc = words.length;
-                  int targetCount;
-
-                  if(finalFlush) {
-                      targetCount = wc;
-                  } else {
-                      targetCount = Math.max(0, wc - 2);
-                      if(targetCount - systemEmittedWordCount < 2) return;
-                  }
-
-                  if(targetCount <= systemEmittedWordCount) return;
-
-                  StringBuilder sb = new StringBuilder();
-                  for(int i=systemEmittedWordCount; i<targetCount && i<words.length; i++) {
-                      if(sb.length() > 0) sb.append(' ');
-                      sb.append(words[i]);
-                  }
-
-                  String chunk = sb.toString().trim();
-                  if(chunk.length() == 0) return;
-
-                  String h = normalizeLiveBlockHash(chunk);
-                  long now = System.currentTimeMillis();
-                  if(h.length() > 0 && h.equals(lastSystemSpeechHash) && now - lastSystemSpeechAt < 2500) {
-                      systemEmittedWordCount = targetCount;
-                      return;
-                  }
-
-                  lastSystemSpeechHash = h;
-                  lastSystemSpeechAt = now;
-                  systemEmittedWordCount = targetCount;
-
-                  int id = addSourceOnlyBlock(topActive, chunk);
-                  liveTranslateQueue.add(id);
-                  processNextLiveTranslation();
               }
 
               void start(boolean withAudio) {
@@ -1436,9 +947,6 @@ jobs:
                                   String p = pendingManualText;
                                   pendingManualText = "";
                                   new Handler().postDelayed(() -> sendManualText(p), 500);
-                              }
-                              if(!withAudio && !liveTranslateQueue.isEmpty()) {
-                                  new Handler().postDelayed(() -> processNextLiveTranslation(), 250);
                               }
                           });
                       }
@@ -1487,17 +995,22 @@ jobs:
                       input.put("format", format);
                       input.put("turn_detection", vad);
 
-                      // V159 CLEAN: nincs külön OpenAI zajszűrés. Először egyetlen tiszta hangláncot mérünk.
+                      // V109: OpenAI Realtime oldali zajszűrés menüből.
+                      // near_field: telefon/headset közeli beszéd. far_field: távolabb lévő mikrofon.
+                      if(!"off".equals(openAiNoiseMode)) {
+                          JSONObject nr = new JSONObject();
+                          nr.put("type", openAiNoiseMode);
+                          input.put("noise_reduction", nr);
+                      }
 
                       JSONObject tr = new JSONObject();
-                      // V157: gyors élő mód. A V156 pontosabb, de túl lassú és túl nagy blokkokban záró modelljét kivesszük.
-                      // Nincs fix language kényszer és nincs transzkripciós prompt; a kiválasztott nyelvek a fordítási irányt szabják meg.
                       tr.put("model", "gpt-realtime-whisper");
+                      // V117: gpt-realtime-whisper GA alatt promptot nem használunk, és language hintet sem állítunk fixre,
+                      // mert a mikrofon egy munkameneten belül TOP és BOTTOM nyelven is megszólalhat.
+                      // A kiválasztott nyelvpárt a BEVITEL után, még fordítás előtt zárjuk:
+                      // csak TOP/BOTTOM nyelvpárba illő, tisztított transcript blokk mehet tovább.
+                      // Így a fordító már nem kap holland/angol/spanyol/német zaj-hallucinációt.
                       tr.put("delay", delayMode);
-                      String expectedInputLang = code(topActive ? topLang : bottomLang);
-                      if(expectedInputLang != null && !"AUTO".equalsIgnoreCase(expectedInputLang)) {
-                          tr.put("language", expectedInputLang.toLowerCase(Locale.ROOT));
-                      }
                       input.put("transcription", tr);
 
                       JSONObject audio = new JSONObject();
@@ -1517,35 +1030,24 @@ jobs:
               String pairRules() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
-                  boolean topAuto = "AUTO".equalsIgnoreCase(top);
-                  boolean bottomAuto = "AUTO".equalsIgnoreCase(bottom);
-
-                  if(topAuto && bottomAuto) {
-                      return "Detect the spoken source language naturally from the speech. AUTO is a mode, not a language name. ";
-                  }
-                  if(topAuto) {
-                      return "BOTTOM language is " + bottom + ". TOP is automatic: detect the other spoken source language naturally. AUTO is a mode, not a language name. ";
-                  }
-                  if(bottomAuto) {
-                      return "TOP language is " + top + ". BOTTOM is automatic: detect the other spoken source language naturally. AUTO is a mode, not a language name. ";
-                  }
-                  return "The conversation uses TOP=" + top + " and BOTTOM=" + bottom + ". " +
-                    "Use these as the expected translation directions, but do not distort ordinary speech, loanwords, brand names, technical terms, place names or personal names merely to force a language label. ";
+                  return "Selected language pair is locked to exactly these two languages: TOP=" + top + ", BOTTOM=" + bottom + ". " +
+                    "Only these two languages exist for this session. Never classify, output, or translate as any third language. " +
+                    "If the rough transcript looks like any language other than the selected TOP or BOTTOM language, treat it as a recognition error or background noise. " +
+                    "Resolve meaningful speech only as " + top + " or " + bottom + ". If it cannot be reasonably repaired as one of those two selected languages, output nothing for that block. " +
+                    "If unsure between the two selected languages, choose the closer of " + top + " and " + bottom + "; do not invent a third option. ";
               }
 
               String instructions() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
-                  return "You are a live interpreter for ordinary real-world conversation. Output text only. No explanations. " +
+                  return "You are a live two-language interpreter. Output text only. No explanations. " +
                     pairRules() +
-                    "The user may switch speaking direction while the microphone is running. Classify each completed speech block from its actual content and context. " +
-                    "Treat the speaker as an ordinary native or everyday speaker, not as an academic text. Preserve normal colloquial speech, slang, profanity, borrowed words, internationally used technical terms, brand names, product names, personal names and place names. " +
-                    "Do not turn a familiar borrowed word into unrelated native-sounding words just because its origin is foreign. Use the surrounding sentence context. " +
-                    "Translate the meaning faithfully into natural everyday language used by ordinary speakers of the target language. Do not make it academic, literary or unnecessarily formal. " +
-                    "Do not censor, mask, soften, sanitize, star out, replace or moralize profanity, vulgarity, insults, sexual wording, slang or rude wording. " +
-                    "Do not invent speech from background noise. If there is no meaningful human speech, output nothing. " +
-                    "For every completed block return exactly three lines: SOURCE_LANG: <actual source language code> then ORIGINAL: <the spoken text, with only obvious recognition mistakes corrected when context makes the correction clear> then TRANSLATION: <natural faithful translation>. " +
-                    "Do not invent missing facts and do not add commentary. " +
+                    "The user may switch between TOP and BOTTOM while the microphone is running. Every completed speech block must be classified again using only the selected pair. " +
+                    "Do not turn background noise, engine hum, wind, radio, clicks or breathing into speech. If meaningful human speech is not present, output nothing. " +
+                    "Do not wait for a long monologue. Treat every complete sentence, short clause, numbered item, or list item as a finished block. " +
+                    "For every completed block return exactly three lines: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <verbatim original text in the detected selected language> then TRANSLATION: <natural translation into the other selected language>. " +
+                    "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly in ORIGINAL and TRANSLATION. Never output square-bracket category placeholders or asterisk-masked words. " +
+                    "Keep ORIGINAL short and readable. Correct only obvious speech recognition mistakes; do not invent missing facts. " +
                     "Conversation profile: " + profilePrompt() + " " +
                     "Translation mode: " + modePrompt();
               }
@@ -1564,14 +1066,16 @@ jobs:
                     "Keep meaning, context and tone. " + modePrompt();
               }
 
-              String liveBlockInstructions(boolean sourceIsTop) {
-                  String source = code(sourceIsTop ? topLang : bottomLang);
-                  String target = code(sourceIsTop ? bottomLang : topLang);
-                  return "Translate one completed speech transcript from " + source + " to " + target + ". " +
-                    "The transcript is ordinary everyday speech. Preserve loanwords, brand names, names, slang and profanity. " +
-                    "Do not reinterpret, correct, expand or rewrite the source text. " +
-                    "Return EXACTLY three lines: SOURCE_LANG: " + source + " then ORIGINAL: the source text verbatim then TRANSLATION: the natural everyday translation. " +
-                    "No explanation, no markdown, no extra text. " + modePrompt();
+              String liveBlockInstructions(boolean ignoredSourceIsTop) {
+                  String top = code(topLang);
+                  String bottom = code(bottomLang);
+                  return "You are translating ONE already segmented speech transcript block. " +
+                    "The input has already been filtered on the input side to the selected language pair only. " +
+                    "Use ONLY these two languages: TOP=" + top + ", BOTTOM=" + bottom + ". " +
+                    "Do not search for or preserve any third language. " +
+                    "Return EXACTLY three lines and nothing else: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <verbatim original text> then TRANSLATION: <natural translation into the other selected language>. " +
+                    "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly in ORIGINAL and TRANSLATION. Never output square-bracket category placeholders or asterisk-masked words. " +
+                    "Do not merge this block with earlier or later speech. Do not invent information. " + modePrompt();
               }
 
               String modePrompt() {
@@ -1700,7 +1204,7 @@ jobs:
                           delayMode = vals[which];
                           save();
                           d.dismiss();
-                          Toast.makeText(getApplicationContext(), "Új kapcsolatnál érvényesül: " + names[which], Toast.LENGTH_SHORT).show();
+                          Toast.makeText(this, "Új kapcsolatnál érvényesül: " + names[which], Toast.LENGTH_SHORT).show();
                       })
                       .setNegativeButton("Mégse", null)
                       .show();
@@ -1711,9 +1215,9 @@ jobs:
                       if(rec == null || "off".equals(androidEffectsMode)) return;
                       int sid = rec.getAudioSessionId();
 
-                      boolean useNs = "ns_only".equals(androidEffectsMode);
-                      boolean useAgc = false;
-                      boolean useAec = false;
+                      boolean useNs = "recommended".equals(androidEffectsMode) || "full".equals(androidEffectsMode) || "ns_only".equals(androidEffectsMode);
+                      boolean useAgc = "recommended".equals(androidEffectsMode) || "full".equals(androidEffectsMode);
+                      boolean useAec = "full".equals(androidEffectsMode);
 
                       if(useNs && NoiseSuppressor.isAvailable()) {
                           noiseSuppressor = NoiseSuppressor.create(sid);
@@ -1765,8 +1269,13 @@ jobs:
               }
 
               AudioRecord makeBestAudioRecord(int sr, int bs) {
-                  // V159 CLEAN: nincs titkos fallback. A kiválasztott hangforrás vagy elindul, vagy látható hibát ad.
-                  return makeAudioRecord(selectedAudioSource(), sr, bs);
+                  AudioRecord r = makeAudioRecord(selectedAudioSource(), sr, bs);
+                  if(r != null) return r;
+                  r = makeAudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sr, bs);
+                  if(r != null) return r;
+                  r = makeAudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sr, bs);
+                  if(r != null) return r;
+                  return makeAudioRecord(MediaRecorder.AudioSource.MIC, sr, bs);
               }
 
               void audioLoop() {
@@ -1774,9 +1283,11 @@ jobs:
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4800);
 
+                  // V109: 24 kHz PCM16 mono marad. Buffer cél kb. 100 ms.
+                  // Hangforrás és Android/OpenAI zajszűrés menüből tesztelhető.
                   rec = makeBestAudioRecord(sr, bs);
-                  if(rec == null) { runOnUiThread(() -> state.setText("mikrofon hiba: " + audioSourceLabel())); return; }
-                  // V159 CLEAN: nincs Android NS/AGC/AEC, nincs saját kapu, pre-roll vagy utócsend.
+                  if(rec == null) { runOnUiThread(() -> state.setText("mikrofon hiba")); return; }
+                  enableAndroidAudioEffects();
                   streaming = true;
                   setLiveUiLocked(false);
                   rec.startRecording();
@@ -1784,12 +1295,53 @@ jobs:
 
                   audioExec.submit(() -> {
                       byte[] buf = new byte[bs];
+                      clearPreRollAudio();
+                      voiceSendActive = false;
+                      trailingSilenceOpen = false;
+                      lastVoiceChunkSentAtMs = 0L;
                       while(streaming && connected && ws != null && rec != null) {
                           int read = rec.read(buf, 0, buf.length);
                           if(read > 0) {
                               try {
-                                  if("speaker".equals(interpreterAudioMode) && (ttsSpeaking || System.currentTimeMillis() < ttsMuteUntilMs)) continue;
-                                  sendAudioChunk(Arrays.copyOf(buf, read));
+                                  if("speaker".equals(interpreterAudioMode) && (ttsSpeaking || System.currentTimeMillis() < ttsMuteUntilMs)) {
+                                      trailingSilenceOpen = false;
+                                      voiceSendActive = false;
+                                      clearPreRollAudio();
+                                      continue;
+                                  }
+
+                                  int threshold = micGateThreshold();
+                                  long now = System.currentTimeMillis();
+                                  if(threshold <= 0) {
+                                      clearPreRollAudio();
+                                      voiceSendActive = true;
+                                      trailingSilenceOpen = true;
+                                      lastVoiceChunkSentAtMs = now;
+                                      sendAudioChunk(Arrays.copyOf(buf, read));
+                                      continue;
+                                  }
+
+                                  boolean overGate = avgAbsPcm16(buf, read) >= threshold;
+                                  if(overGate) {
+                                      if(!voiceSendActive) {
+                                          for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr);
+                                      }
+                                      voiceSendActive = true;
+                                      trailingSilenceOpen = true;
+                                      lastVoiceChunkSentAtMs = now;
+                                      sendAudioChunk(Arrays.copyOf(buf, read));
+                                      continue;
+                                  }
+
+                                  if(voiceSendActive) {
+                                      byte[] tail = prepareTrailingSilenceChunk(buf, read);
+                                      if(tail != null) {
+                                          sendAudioChunk(tail);
+                                          continue;
+                                      }
+                                  }
+
+                                  rememberPreRollAudio(buf, read);
                               } catch(Exception ignored) {}
                           }
                       }
@@ -1803,28 +1355,19 @@ jobs:
                   if(manualResponseMode) {
                       manualResponseMode = false;
                       pendingManualText = "";
-                      Toast.makeText(getApplicationContext(), "Kapcsolat hiba kézi fordítás közben. Próbáld újra a FORDÍT gombbal.", Toast.LENGTH_LONG).show();
+                      Toast.makeText(this, "Kapcsolat hiba kézi fordítás közben. Próbáld újra a FORDÍT gombbal.", Toast.LENGTH_LONG).show();
                       stop();
                       return;
                   }
 
                   // Normál beszéd/élő fordításnál se írjunk hibaüzenetet a fordítási ablakba.
-                  Toast.makeText(getApplicationContext(), "Kapcsolat hiba: " + msg, Toast.LENGTH_LONG).show();
+                  Toast.makeText(this, "Kapcsolat hiba: " + msg, Toast.LENGTH_LONG).show();
                   stop();
               }
 
               void stop() {
-                  transcriptionMode = false;
-                  transcriptionConnected = false;
-                  try { if(transcriptionWs != null) transcriptionWs.close(1000, "stop"); } catch(Exception ignored) {}
-                  transcriptionWs = null;
-                  transcriptionClient = null;
-                  realtimeTranscriptText = "";
-                  realtimeTranscriptEmittedWords = 0;
-                  stopSystemRecognizerOnly();
                   streaming = false;
                   connected = false;
-                  systemSpeechMode = false;
                   ttsMuteUntilMs = 0L;
                   lastVoiceChunkSentAtMs = 0L;
                   trailingSilenceOpen = false;
@@ -1845,8 +1388,6 @@ jobs:
                   liveTranslateQueue.clear();
                   recentLiveBlockHashes.clear();
                   recentLiveBlockHashOrder.clear();
-                  processedTranscriptItemIds.clear();
-                  processedTranscriptItemIdOrder.clear();
                   try { if(ws != null) ws.close(1000, "stop"); } catch(Exception ignored) {}
                   ws = null;
                   stopBackgroundForegroundService();
@@ -1891,13 +1432,13 @@ jobs:
                       }
 
                       if(type.equals("conversation.item.input_audio_transcription.delta")) {
-                          // V159 CLEAN: delta csak részleges előnézet lenne; végleges blokkot soha nem építünk belőle.
+                          String d = o.optString("delta", "");
+                          if(!d.isEmpty()) runOnUiThread(() -> handleTranscriptDelta(d));
                       }
 
                       if(type.equals("conversation.item.input_audio_transcription.completed")) {
                           String tr = o.optString("transcript", "");
-                          String itemId = o.optString("item_id", "");
-                          if(!tr.isEmpty()) runOnUiThread(() -> handleTranscriptCompleted(itemId, tr));
+                          if(!tr.isEmpty()) runOnUiThread(() -> handleTranscriptCompleted(tr));
                       }
 
                       if(type.equals("response.text.delta") || type.equals("response.output_text.delta")) {
@@ -1929,7 +1470,7 @@ jobs:
                           if(manualResponseMode) {
                               runOnUiThread(() -> handleConnectionFailure(new RuntimeException(msg)));
                           } else {
-                              runOnUiThread(() -> Toast.makeText(getApplicationContext(), "API hiba: " + msg, Toast.LENGTH_LONG).show());
+                              runOnUiThread(() -> Toast.makeText(this, "API hiba: " + msg, Toast.LENGTH_LONG).show());
                           }
                       }
                   } catch(Exception e) {
@@ -1948,7 +1489,7 @@ jobs:
 
                   String sourceText = source.getText().toString().trim();
                   if(sourceText.length() == 0) {
-                      Toast.makeText(getApplicationContext(), manualTopSource ? "A felső ablak üres." : "Az alsó ablak üres.", Toast.LENGTH_LONG).show();
+                      Toast.makeText(this, manualTopSource ? "A felső ablak üres." : "Az alsó ablak üres.", Toast.LENGTH_LONG).show();
                       return;
                   }
 
@@ -2008,7 +1549,7 @@ jobs:
                       ws.send(resp.toString());
                   } catch(Exception e) {
                       manualResponseMode = false;
-                      Toast.makeText(getApplicationContext(), "Kézi fordítás hiba. Próbáld újra.", Toast.LENGTH_LONG).show();
+                      Toast.makeText(this, "Kézi fordítás hiba. Próbáld újra.", Toast.LENGTH_LONG).show();
                   }
               }
 
@@ -2032,23 +1573,19 @@ jobs:
                   }, 5200);
               }
 
-              void handleTranscriptCompleted(String itemId, String transcript) {
-                  // V159 CLEAN: egyetlen hiteles végleges forrás a completed esemény.
-                  if(itemId != null && itemId.trim().length() > 0) {
-                      String id = itemId.trim();
-                      if(processedTranscriptItemIds.contains(id)) return;
-                      processedTranscriptItemIds.add(id);
-                      processedTranscriptItemIdOrder.add(id);
-                      while(processedTranscriptItemIdOrder.size() > 200) {
-                          String old = processedTranscriptItemIdOrder.poll();
-                          if(old != null) processedTranscriptItemIds.remove(old);
-                      }
+              void handleTranscriptCompleted(String transcript) {
+                  // V51 duplázás-javítás:
+                  // A completed esemény sokszor ugyanazt a teljes mondatot küldi újra,
+                  // amit a delta eseményekből már kiírtunk és fordítottunk.
+                  // Ha volt delta ebben a körben, NEM töltjük vissza a teljes transcriptet,
+                  // csak a bufferben maradt befejezetlen részt zárjuk le.
+                  if(!liveHadTranscriptDelta && liveTranscriptBuffer.trim().length() == 0 && transcript != null && transcript.trim().length() > 0) {
+                      liveBufferStartedAt = System.currentTimeMillis();
+                      liveTranscriptBuffer = transcript;
                   }
-                  String b = transcript == null ? "" : transcript.trim();
-                  if(b.length() == 0) return;
-                  int id = addSourceOnlyBlock(topActive, b);
-                  liveTranslateQueue.add(id);
-                  processNextLiveTranslation();
+                  flushReadyTranscriptBlocks(true);
+                  liveIdleFlushToken++;
+                  liveHadTranscriptDelta = false;
               }
 
               void flushReadyTranscriptBlocks(boolean flushAll) {
@@ -2088,6 +1625,7 @@ jobs:
                   // Ugyanakkor ha a felhasználó tényleg csak 2-3 szót mond és utána hosszú csend van,
                   // 2 mp után fordítjuk, nem nyeljük el.
                   if(age >= 2000 && words >= 2) return true;
+                  if(looksLikeObviousThirdLanguageNoise(s) && words < 5) return false;
                   if(firstHardSentenceEnd(s) >= 0 && words >= 4) return true;
                   if(s.length() >= 55 && words >= 5) return true;
                   return false;
@@ -2104,146 +1642,24 @@ jobs:
               }
 
               boolean passesSelectedPairInputGate(String block) {
-                  // V155: minimális bemeneti kapu. A már elkészült átiratot nem próbáljuk
-                  // kézi szólistákkal, karakterpontozással vagy nyelvi heurisztikával újraértelmezni.
-                  return block != null && block.trim().length() > 0;
-              }
-
-              boolean selectedPairStrictInputGateEnabled() {
-                  String top = code(topLang).toLowerCase(Locale.ROOT);
-                  String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
-                  if(top.equals("auto") || bottom.equals("auto")) return false;
-                  if(top.length() == 0 || bottom.length() == 0) return false;
-                  return !top.equals(bottom);
-              }
-
-              boolean looksLikeSelectedPairSpeech(String text) {
-                  if(text == null) return false;
-                  String x = normalizeLangGateText(text);
-                  if(x.length() == 0) return false;
-                  int words = x.split("\\s+").length;
+                  if(block == null) return false;
+                  String t = block.trim();
+                  if(t.length() == 0) return false;
+                  int words = t.split("\\s+").length;
                   if(words <= 1) return false;
 
+                  // Először a régi, óvatos harmadik-nyelv/zaj szűrő.
+                  if(looksLikeObviousThirdLanguageNoise(t)) return false;
+                  if(isLikelyNoisyTranscriptBlock(t)) return false;
+
+                  // V117: ha FR/HU pár fut, a leggyakoribb kamionos zaj-hallucinációkat
+                  // már a bevitelnél eldobjuk. Ez nem teljes nyelvdetektor, csak kapu.
                   String top = code(topLang).toLowerCase(Locale.ROOT);
                   String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
-                  int topScore = languagePositiveScore(x, top);
-                  int bottomScore = languagePositiveScore(x, bottom);
-                  int selectedScore = Math.max(topScore, bottomScore);
+                  boolean frHu = (top.equals("fr") && bottom.equals("hu")) || (top.equals("hu") && bottom.equals("fr"));
+                  if(frHu && looksLikeNonFrHuNoise(t)) return false;
 
-                  // V145: rövid, de gyakori élőbeszéd-frasék ne essenek ki csak azért,
-                  // mert kevés bennük a rag vagy az ékezetes bizonyíték.
-                  if(isSafeShortPhraseForSelectedPair(x)) return true;
-
-                  // Rövid STT-töredékeknél szigorúbbak vagyunk: egyetlen gyenge jel
-                  // (pl. egy névelő vagy egy több nyelvben előforduló szó) ne engedjen át idegen zajt.
-                  // 2 pont lehet egy erős jel (pl. ő/ű vagy francia ékezet) vagy két gyengébb nyelvi jel.
-                  if(words <= 4) return selectedScore >= 2;
-
-                  // Közepes mondatoknál már több a kontextus, de továbbra is kell legalább
-                  // egy pozitív jel a kiválasztott nyelvpár egyikére.
-                  if(words <= 8) return selectedScore >= 1;
-
-                  // Hosszabb mondatot nem szabad túl agresszíven vágni: ha nem találunk jelet,
-                  // engedjük tovább, mert a fordító AI már jobb kontextust kap.
                   return true;
-              }
-
-              boolean isSafeShortPhraseForSelectedPair(String x) {
-                  if(x == null || x.length() == 0) return false;
-                  String top = code(topLang).toLowerCase(Locale.ROOT);
-                  String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
-                  return isSafeShortPhraseForLang(x, top) || isSafeShortPhraseForLang(x, bottom);
-              }
-
-              boolean isSafeShortPhraseForLang(String x, String lang) {
-                  if(x == null || lang == null) return false;
-                  String y = " " + x + " ";
-                  if(lang.equals("hu")) {
-                      String[] hu = {" ez jó ", " ez jo ", " az jó ", " az jo ", " jól van ", " jol van ", " rendben van ", " itt vagyok ", " ott vagyok ", " mehetünk ", " mehetunk ", " indulok ", " értem ", " ertem ", " nem baj ", " igen jó ", " nem jó ", " igen jo ", " nem jo "};
-                      for(String p: hu) if(y.contains(p)) return true;
-                  } else if(lang.equals("fr")) {
-                      String[] fr = {" ça va ", " ca va ", " c'est bon ", " d'accord ", " très bien ", " tres bien ", " je vais ", " il faut ", " pas de ", " bonjour monsieur ", " bonjour madame ", " merci beaucoup ", " s'il vous plaît ", " s il vous plait "};
-                      for(String p: fr) if(y.contains(p)) return true;
-                  }
-                  return false;
-              }
-
-              String normalizeLangGateText(String text) {
-                  return text.toLowerCase(Locale.ROOT)
-                          .replace("’", "'")
-                          .replaceAll("[^a-záéíóöőúüűàâçèéêëîïôùûüÿñæœß\\s']", " ")
-                          .replaceAll("\\s+", " ").trim();
-              }
-
-              int languagePositiveScore(String x, String lang) {
-                  if(x == null || lang == null) return 0;
-                  String y = " " + x + " ";
-                  int score = 0;
-                  if(lang.equals("hu")) {
-                      // Magyar pozitív kapu V145:
-                      // - az á/é/í/ó/ö/ú/ü önmagában továbbra sem magyar bizonyíték;
-                      // - az ő/ű erős magyar jel;
-                      // - a gyakori rövid magyar élőbeszéd-szavak és ragok bővítve lettek,
-                      //   hogy ne essen ki túl sok valódi, rövid magyar mondat.
-                      if(x.matches(".*[őű].*")) score += 2;
-                      String[] strongWords = {
-                          " igen ", " nem ", " jó ", " oké ", " rendben ", " köszönöm ", " kérem ", " értem ",
-                          " működik ", " elindult ", " elindul ", " megáll ", " megállt ", " beszélek ", " fordítás ",
-                          " mikrofon ", " kijelző ", " háttér ", " magyar ", " francia ", " párizs ", " kamion "
-                      };
-                      for(String w: strongWords) if(y.contains(w)) score += 2;
-
-                      String[] words = {
-                          " a ", " az ", " egy ", " és ", " vagy ", " hogy ", " mert ", " de ", " ha ", " akkor ", " most ", " majd ",
-                          " már ", " még ", " csak ", " is ", " sem ", " mégis ", " ezt ", " azt ", " így ", " úgy ",
-                          " itt ", " ott ", " ide ", " oda ", " be ", " ki ", " le ", " fel ", " el ", " rá ", " át ", " vissza ",
-                          " van ", " nincs ", " lesz ", " volt ", " vagyok ", " vagyunk ", " kell ", " lehet ", " tudom ", " nézd ",
-                          " megy ", " jön ", " indul ", " indulok ", " megyek ", " jövök ", " rakodok ", " dolgozni ",
-                          " mondom ", " mondok ", " mondtam ", " gomb ", " menü ", " ablak ", " zaj ", " csend ", " hang ",
-                          " nyelv ", " szöveg ", " program ", " beállítás ", " ajtó ", " telefon "
-                      };
-                      for(String w: words) if(y.contains(w)) score++;
-                      String[] endings = {
-                          "ban", "ben", "nak", "nek", "val", "vel", "hoz", "hez", "höz", "ról", "ről", "tól", "től", "ból", "ből", "nál", "nél",
-                          "ként", "szer", "szor", "ször", "ra", "re", "ba", "be", "on", "en", "ön", "ot", "et", "öt", "át", "ét",
-                          "om", "em", "öm", "am", "ja", "je", "unk", "ünk", "tok", "tek", "tök", "tam", "tem", "tad", "ted", "tuk", "tük", "ni"
-                      };
-                      for(String token: x.split("\\s+")) {
-                          if(token.length() < 4) continue;
-                          for(String e: endings) {
-                              if(token.endsWith(e)) { score++; break; }
-                          }
-                      }
-                  } else if(lang.equals("fr")) {
-                      if(x.matches(".*[àâçèéêëîïôùûüÿœ].*")) score += 2;
-                      String[] strongWords = {" oui ", " non ", " merci ", " bonjour ", " monsieur ", " madame ", " d'accord ", " pardon ", " téléphone ", " traduction ", " français "};
-                      for(String w: strongWords) if(y.contains(w)) score += 2;
-                      String[] words = {" le "," la "," les "," un "," une "," des "," et "," ou "," mais "," donc "," alors "," maintenant "," bon "," avec "," pour "," que "," qui "," dans "," comme "," c'est "," j'ai "," je "," tu "," vous "," nous "," il "," elle "," pas "," plus "," très "," ça "," ce "," cette "," fonctionne "," micro "," écran "," verrouillé "," vais "," faut "," bien "," beaucoup "," voilà "};
-                      for(String w: words) if(y.contains(w)) score++;
-                  } else if(lang.equals("en")) {
-                      String[] words = {" the "," and "," or "," but "," this "," that "," with "," for "," you "," i "," we "," they "," not "," yes "," no "," is "," are "," was "," have "," microphone "," translation "};
-                      for(String w: words) if(y.contains(w)) score++;
-                  } else if(lang.equals("de")) {
-                      if(x.matches(".*[äöüß].*")) score += 2;
-                      String[] words = {" der "," die "," das "," und "," oder "," aber "," nicht "," ich "," du "," wir "," sie "," mit "," für "," ja "," nein "," danke "," bitte "," schön "};
-                      for(String w: words) if(y.contains(w)) score++;
-                  } else if(lang.equals("it")) {
-                      String[] words = {" il "," lo "," la "," gli "," le "," un "," una "," e "," o "," ma "," non "," si "," grazie "," prego "," allora "," questo "," questa "};
-                      for(String w: words) if(y.contains(w)) score++;
-                  } else if(lang.equals("es")) {
-                      if(x.matches(".*[áéíóúñü].*")) score += 2;
-                      String[] words = {" el "," la "," los "," las "," un "," una "," y "," o "," pero "," no "," sí "," gracias "," ahora "," entonces "," esto "," esta "," pantalla "};
-                      for(String w: words) if(y.contains(w)) score++;
-                  } else if(lang.equals("ro")) {
-                      if(x.matches(".*[ăâîșşțţ].*")) score += 2;
-                      String[] words = {" și "," sau "," dar "," nu "," da "," este "," sunt "," pentru "," cu "," acum "," atunci "};
-                      for(String w: words) if(y.contains(w)) score++;
-                  } else if(lang.equals("hr") || lang.equals("sk") || lang.equals("sl")) {
-                      if(x.matches(".*[čćđšžáäôľĺŕýíéúůňťď].*")) score += 2;
-                      String[] words = {" i "," a "," je "," nie "," ne "," da "," ali "," ampak "," teraz "," kako "," čo "," kaj "};
-                      for(String w: words) if(y.contains(w)) score++;
-                  }
-                  return score;
               }
 
               boolean looksLikeNonFrHuNoise(String text) {
@@ -2301,6 +1717,7 @@ jobs:
                   String h = normalizeLiveBlockHash(block);
                   if(h.length() < 3) return false;
                   if(recentLiveBlockHashes.contains(h)) return false;
+                  if(isRecentlySimilarLiveBlock(h)) return false;
                   recentLiveBlockHashes.add(h);
                   recentLiveBlockHashOrder.add(h);
                   while(recentLiveBlockHashOrder.size() > 80) {
@@ -2470,7 +1887,10 @@ jobs:
 
               String cleanTranscriptForSelectedPair(String text) {
                   if(text == null) return "";
-                  return text.replaceAll("\\s+", " ").trim();
+                  // V74: ez továbbra sem saját nagy nyelvfelismerő. Csak biztonsági tisztítás:
+                  // idegen írásrendszeres STT-szemét nem kerülhet ki az ablakokba vagy fordításba.
+                  String x = text.replaceAll("[^A-Za-z0-9\\u00C0-\\u024F\\p{Punct}\\s]", " ");
+                  return x.replaceAll("\\s+", " ").trim();
               }
 
               boolean selectedContains(String langCode) {
@@ -2558,7 +1978,7 @@ jobs:
                       c.put("type", "input_text");
                       String topCode = code(topLang);
                       String bottomCode = code(bottomLang);
-                      c.put("text", src.trim());
+                      c.put("text", "LIVE_PAIR_CLASSIFY_AND_TRANSLATE\nSELECTED_TOP_LANG: " + topCode + "\nSELECTED_BOTTOM_LANG: " + bottomCode + "\nTEXT:\n" + src.trim());
                       content.put(c);
                       item.put("content", content);
                       msg.put("item", item);
@@ -2656,7 +2076,7 @@ jobs:
 
                   // V74: nincs laza fallback új blokkra. Címke nélküli vagy rossz nyelvű válasz
                   // nem kerülhet be, mert ez hozta vissza korábban a káoszt.
-                  Toast.makeText(getApplicationContext(), "Nem szabályos AI-válasz érkezett, a blokk újrafordítható.", Toast.LENGTH_SHORT).show();
+                  Toast.makeText(this, "Nem szabályos AI-válasz érkezett, a blokk újrafordítható.", Toast.LENGTH_SHORT).show();
               }
 
               boolean isCleanManualTranslation(String tr) {
@@ -2674,7 +2094,7 @@ jobs:
                   try {
                       String tr = cleanOneBlockTranslation(out);
                       if(!isCleanManualTranslation(tr)) {
-                          Toast.makeText(getApplicationContext(), "Nem tiszta fordítás érkezett. Nyomd meg újra a FORDÍT gombot.", Toast.LENGTH_LONG).show();
+                          Toast.makeText(this, "Nem tiszta fordítás érkezett. Nyomd meg újra a FORDÍT gombot.", Toast.LENGTH_LONG).show();
                           return;
                       }
 
@@ -2689,9 +2109,9 @@ jobs:
                       rebuildBlocksFromCurrentBoxes();
                       renderBlocksKeepView();
                       enqueueSpeak(tr, manualTopSource ? bottomLang : topLang);
-                      Toast.makeText(getApplicationContext(), "Teljes ablak újrafordítva.", Toast.LENGTH_SHORT).show();
+                      Toast.makeText(this, "Teljes ablak újrafordítva.", Toast.LENGTH_SHORT).show();
                   } catch(Exception e) {
-                      Toast.makeText(getApplicationContext(), "Kézi fordítás feldolgozási hiba. Próbáld újra.", Toast.LENGTH_LONG).show();
+                      Toast.makeText(this, "Kézi fordítás feldolgozási hiba. Próbáld újra.", Toast.LENGTH_LONG).show();
                   }
               }
 
@@ -2815,16 +2235,20 @@ jobs:
                       refreshMenuButton((Button)v, "Háttér / lezárt kijelző", backgroundScreenLabel(), backgroundScreenAllowed);
                       updateButtons();
                   });
-                  addInterpreterOutputMenuButton(box);
+                  addMenuButton(box, "Tolmács felolvasás", interpreterQuickLabel(), interpreterMode, v -> {
+                      toggleInterpreterQuick();
+                      refreshMenuButton((Button)v, "Tolmács felolvasás", interpreterQuickLabel(), interpreterMode);
+                      updateButtons();
+                  });
                   addMenuButton(box, "Tükör mód", displayModeLabel(), mirrorBottomMode, v -> {
                       toggleDisplayModeQuick();
                       refreshMenuButton((Button)v, "Tükör mód", displayModeLabel(), mirrorBottomMode);
                       updateButtons();
                   });
+                  addMenuButton(box, "OpenAI API kulcs", hasKey() ? "kulcs mentve – megnyitáskor kijelölve" : "nincs megadva", hasKey(), v -> showApi());
                   addMenuButton(box, "Fordítási beállítások", translationMenuLabel(), false, v -> translationMenu());
                   addMenuButton(box, "Szakértői beállítások", "beszédfelismerés, hang / zajszűrés", false, v -> advancedMenu());
                   addMenuButton(box, "Ablakkezelés", "másolás, teljes törlés", false, v -> windowMenu());
-                  addMenuButton(box, "OpenAI API kulcs", hasKey() ? "kulcs mentve – megnyitáskor kijelölve" : "nincs megadva", hasKey(), v -> showApi());
                   addMenuButton(box, "Alapbeállítások", "nyelvpár marad, fordítás/bevitel visszaáll", false, v -> { resetCoreSettings(); updateButtons(); });
 
                   AlertDialog dlg = new AlertDialog.Builder(this).setView(box).create();
@@ -2867,10 +2291,6 @@ jobs:
               }
 
               void refreshMenuButton(Button b, String title, String subtitle, boolean active) {
-                  refreshMenuButtonColor(b, title, subtitle, active ? Color.rgb(30,140,70) : Color.rgb(95,95,95));
-              }
-
-              void refreshMenuButtonColor(Button b, String title, String subtitle, int bgColor) {
                   String sub = subtitle == null ? "" : subtitle.trim();
                   String text = title + (sub.length() == 0 ? "" : "\n" + sub);
                   SpannableString ss = new SpannableString(text);
@@ -2882,50 +2302,7 @@ jobs:
                       ss.setSpan(new ForegroundColorSpan(Color.rgb(230,230,230)), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   }
                   b.setText(ss);
-                  b.setBackgroundColor(bgColor);
-              }
-
-              void addInterpreterOutputMenuButton(LinearLayout box) {
-                  Button b = new Button(this);
-                  b.setAllCaps(false);
-                  b.setTextColor(Color.WHITE);
-                  b.setGravity(Gravity.CENTER);
-                  b.setPadding(8, 8, 8, 8);
-                  b.setSingleLine(false);
-                  b.setMaxLines(2);
-                  b.setLineSpacing(0, 1.0f);
-                  b.setIncludeFontPadding(false);
-                  b.setMinHeight(0);
-                  b.setMinimumHeight(0);
-                  b.setMinWidth(0);
-                  b.setMinimumWidth(0);
-                  b.setOnClickListener(v -> {
-                      toggleInterpreterOutputMode();
-                      refreshInterpreterOutputButton((Button)v);
-                      updateButtons();
-                  });
-                  b.setOnLongClickListener(v -> {
-                      if(!interpreterMode) {
-                          Toast.makeText(getApplicationContext(), "A tolmács felolvasás már ki van kapcsolva.", Toast.LENGTH_SHORT).show();
-                          return true;
-                      }
-                      disableInterpreterOutput();
-                      refreshInterpreterOutputButton((Button)v);
-                      updateButtons();
-                      return true;
-                  });
-                  refreshInterpreterOutputButton(b);
-                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, 130);
-                  lp.setMargins(0, 5, 0, 5);
-                  box.addView(b, lp);
-              }
-
-              void refreshInterpreterOutputButton(Button b) {
-                  int bg;
-                  if(!interpreterMode) bg = Color.rgb(95,95,95);
-                  else if("speaker".equals(interpreterAudioMode)) bg = Color.rgb(30,140,70);
-                  else bg = Color.rgb(60,95,150);
-                  refreshMenuButtonColor(b, "Tolmács hangkimenet", interpreterOutputLabel(), bg);
+                  b.setBackgroundColor(active ? Color.rgb(30,140,70) : Color.rgb(95,95,95));
               }
 
               String translationMenuLabel() {
@@ -3015,7 +2392,7 @@ jobs:
                   showCenteredMenu("Háttér / lezárt kijelző", items, (d,w) -> {
                       backgroundScreenAllowed = (w == 1);
                       if(!backgroundScreenAllowed) stopBackgroundForegroundService();
-                      Toast.makeText(getApplicationContext(), backgroundScreenAllowed ? "Háttér mód engedélyezve erre az indításra." : "Háttér mód kikapcsolva.", Toast.LENGTH_SHORT).show();
+                      Toast.makeText(this, backgroundScreenAllowed ? "Háttér mód engedélyezve erre az indításra." : "Háttér mód kikapcsolva.", Toast.LENGTH_SHORT).show();
                       updateButtons();
                   });
               }
@@ -3024,56 +2401,36 @@ jobs:
               void toggleBackgroundScreenMode() {
                   backgroundScreenAllowed = !backgroundScreenAllowed;
                   if(!backgroundScreenAllowed) stopBackgroundForegroundService();
-                  Toast.makeText(getApplicationContext(), backgroundScreenAllowed ? "Háttér mód aktív erre az indításra." : "Háttér mód kikapcsolva.", Toast.LENGTH_SHORT).show();
+                  Toast.makeText(this, backgroundScreenAllowed ? "Háttér mód aktív erre az indításra." : "Háttér mód kikapcsolva.", Toast.LENGTH_SHORT).show();
                   updateButtons();
               }
 
-              String interpreterOutputLabel() {
-                  if(!interpreterMode) {
-                      if("speaker".equals(lastInterpreterAudioMode)) return "kikapcsolva – indítás: kihangosított telefon";
-                      return "kikapcsolva – indítás: Bluetooth/headset";
-                  }
-                  if("speaker".equals(interpreterAudioMode)) return "kihangosított telefon – TTS közben mikrofon tiltva";
-                  return "Bluetooth/headset – folyamatos mikrofon";
+              String interpreterQuickLabel() {
+                  return interpreterMode ? "aktív – csak a következő újraindításig" : "inaktív – csak szöveges fordítás";
               }
 
-              void toggleInterpreterOutputMode() {
-                  if(!interpreterMode) {
-                      interpreterMode = true;
-                      if(!"speaker".equals(lastInterpreterAudioMode) && !"headset".equals(lastInterpreterAudioMode)) lastInterpreterAudioMode = "headset";
-                      interpreterAudioMode = lastInterpreterAudioMode;
-                      if("speaker".equals(interpreterAudioMode) && ttsSpeaking) ttsMuteUntilMs = System.currentTimeMillis() + 500L;
-                      else ttsMuteUntilMs = 0L;
-                  } else if("speaker".equals(interpreterAudioMode)) {
-                      interpreterAudioMode = "headset";
-                      lastInterpreterAudioMode = "headset";
+              void toggleInterpreterQuick() {
+                  if(interpreterMode) {
+                      interpreterMode = false;
+                      interpreterAudioMode = "off";
                       ttsMuteUntilMs = 0L;
+                      speakQueue.clear();
+                      ttsSpeaking = false;
+                      try { if(tts != null) tts.stop(); } catch(Exception ignored) {}
                   } else {
-                      interpreterAudioMode = "speaker";
-                      lastInterpreterAudioMode = "speaker";
-                      if(ttsSpeaking) ttsMuteUntilMs = System.currentTimeMillis() + 500L;
+                      interpreterMode = true;
+                      interpreterAudioMode = "headset";
                   }
                   save();
-                  Toast.makeText(getApplicationContext(), interpreterOutputLabel(), Toast.LENGTH_SHORT).show();
-              }
-
-              void disableInterpreterOutput() {
-                  if("speaker".equals(interpreterAudioMode) || "headset".equals(interpreterAudioMode)) lastInterpreterAudioMode = interpreterAudioMode;
-                  interpreterMode = false;
-                  interpreterAudioMode = "off";
-                  ttsMuteUntilMs = 0L;
-                  speakQueue.clear();
-                  ttsSpeaking = false;
-                  try { if(tts != null) tts.stop(); } catch(Exception ignored) {}
-                  save();
-                  Toast.makeText(getApplicationContext(), "Tolmács felolvasás kikapcsolva.", Toast.LENGTH_SHORT).show();
+                  Toast.makeText(this, interpreterQuickLabel(), Toast.LENGTH_SHORT).show();
+                  updateButtons();
               }
 
               void toggleDisplayModeQuick() {
                   mirrorBottomMode = !mirrorBottomMode;
                   applyDisplayMode();
                   save();
-                  Toast.makeText(getApplicationContext(), displayModeLabel(), Toast.LENGTH_SHORT).show();
+                  Toast.makeText(this, displayModeLabel(), Toast.LENGTH_SHORT).show();
                   updateButtons();
               }
 
@@ -3101,7 +2458,7 @@ jobs:
                   programmaticChange=false;
                   topManualStart=-1;
                   textBlocks.clear();
-                  Toast.makeText(getApplicationContext(), "Felső ablak törölve.", Toast.LENGTH_SHORT).show();
+                  Toast.makeText(this, "Felső ablak törölve.", Toast.LENGTH_SHORT).show();
               }
 
               void clearBottomBox() {
@@ -3110,7 +2467,7 @@ jobs:
                   programmaticChange=false;
                   bottomManualStart=-1;
                   textBlocks.clear();
-                  Toast.makeText(getApplicationContext(), "Alsó ablak törölve.", Toast.LENGTH_SHORT).show();
+                  Toast.makeText(this, "Alsó ablak törölve.", Toast.LENGTH_SHORT).show();
               }
 
               void clearBothBoxes() {
@@ -3122,20 +2479,20 @@ jobs:
                   topManualStart=-1;
                   bottomManualStart=-1;
                   textBlocks.clear();
-                  Toast.makeText(getApplicationContext(), "Mindkét ablak törölve.", Toast.LENGTH_SHORT).show();
+                  Toast.makeText(this, "Mindkét ablak törölve.", Toast.LENGTH_SHORT).show();
               }
 
               void copyBox(boolean top) {
                   EditText source = top ? topBox : bottomBox;
                   String text = source.getText().toString();
                   if(text.trim().isEmpty()) {
-                      Toast.makeText(getApplicationContext(), top ? "A felső ablak üres." : "Az alsó ablak üres.", Toast.LENGTH_SHORT).show();
+                      Toast.makeText(this, top ? "A felső ablak üres." : "Az alsó ablak üres.", Toast.LENGTH_SHORT).show();
                       return;
                   }
                   android.content.ClipboardManager cm = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
                   if(cm != null) {
                       cm.setPrimaryClip(android.content.ClipData.newPlainText(top ? "Felső ablak" : "Alsó ablak", text));
-                      Toast.makeText(getApplicationContext(), top ? "Felső ablak másolva." : "Alsó ablak másolva.", Toast.LENGTH_SHORT).show();
+                      Toast.makeText(this, top ? "Felső ablak másolva." : "Alsó ablak másolva.", Toast.LENGTH_SHORT).show();
                   }
               }
 
@@ -3180,7 +2537,7 @@ jobs:
                           apiKey = "";
                           save();
                           updateButtons();
-                          Toast.makeText(getApplicationContext(), "API kulcs törölve.", Toast.LENGTH_SHORT).show();
+                          Toast.makeText(this, "API kulcs törölve.", Toast.LENGTH_SHORT).show();
                       });
                   });
                   dlg.show();
@@ -3205,24 +2562,24 @@ jobs:
               void applySoundProfile(String v) {
                   soundProfile = v;
                   if("truck_noisy".equals(v)) {
-                      vadMode = "high";
-                      delayMode = "low";
-                      micGateMode = "sensitive";
-                      audioSourceMode = "recognition";
-                      androidEffectsMode = "off";
+                      vadMode = "medium";
+                      delayMode = "xhigh";
+                      micGateMode = "gate_low";
+                      audioSourceMode = "unprocessed";
+                      androidEffectsMode = "ns_only";
                       openAiNoiseMode = "off";
                   } else {
-                      vadMode = "high";
-                      delayMode = "low";
-                      micGateMode = "sensitive";
-                      audioSourceMode = "recognition";
-                      androidEffectsMode = "off";
+                      vadMode = "medium";
+                      delayMode = "xhigh";
+                      micGateMode = "gate_low";
+                      audioSourceMode = "unprocessed";
+                      androidEffectsMode = "ns_only";
                       openAiNoiseMode = "off";
                   }
                   save();
                   sessionUpdateIfConnected();
                   restartIfNeeded();
-                  Toast.makeText(getApplicationContext(), "Hangprofil: " + soundProfileLabel(), Toast.LENGTH_SHORT).show();
+                  Toast.makeText(this, "Hangprofil: " + soundProfileLabel(), Toast.LENGTH_SHORT).show();
               }
 
               String soundProfileLabel() {
@@ -3245,11 +2602,11 @@ jobs:
                         profile = "general";
                         soundProfile = "general";
                         mode = "natural";
-                        vadMode = "high";
-                        delayMode = "low";
-                        micGateMode = "sensitive";
-                        audioSourceMode = "recognition";
-                        androidEffectsMode = "off";
+                        vadMode = "medium";
+                        delayMode = "xhigh";
+                        micGateMode = "gate_low";
+                        audioSourceMode = "unprocessed";
+                        androidEffectsMode = "ns_only";
                         openAiNoiseMode = "off";
                         interpreterMode = false;
                         interpreterAudioMode = "off";
@@ -3258,7 +2615,7 @@ jobs:
                         save();
                         sessionUpdateIfConnected();
                         applyDisplayMode();
-                        Toast.makeText(getApplicationContext(), "Alapbeállítások visszaállítva.", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(this, "Alapbeállítások visszaállítva.", Toast.LENGTH_SHORT).show();
                         updateButtons();
                     })
                     .setNegativeButton("Mégse", null)
@@ -3292,7 +2649,7 @@ jobs:
                           try { if(tts != null) tts.stop(); } catch(Exception ignored) {}
                       }
                       save();
-                      Toast.makeText(getApplicationContext(), interpreterLabel(), Toast.LENGTH_SHORT).show();
+                      Toast.makeText(this, interpreterLabel(), Toast.LENGTH_SHORT).show();
                       updateButtons();
                   });
               }
@@ -3550,14 +2907,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V169.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V169.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V141.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V141.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V169
+          name: V141
           path: |
             artifact/*.apk
             artifact/*.aab
