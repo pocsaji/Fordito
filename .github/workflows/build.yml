@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 164; versionName = "16.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 164; versionName = "16.5" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V164" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V165" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -477,7 +477,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V164");
+                  TextView title = label("Fordito_V165");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1389,7 +1389,7 @@ jobs:
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
 
-                  // V164: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+                  // V165: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
                   if(clipboardResponseMode) {
                       clipboardResponseMode = false;
                       pendingClipboardText = "";
@@ -2896,10 +2896,7 @@ jobs:
                   }
                   showClipboardTranslatorPanel(text, "Fordítás folyamatban…");
                   String target = clipboardTargetCode(text);
-                  String payload = "SOURCE_LANG: AUTO
-TARGET_LANG: " + target + "
-TEXT:
-" + text;
+                  String payload = "SOURCE_LANG: AUTO\nTARGET_LANG: " + target + "\nTEXT:\n" + text;
                   if(ws == null || !connected) {
                       pendingClipboardText = payload;
                       start(false);
@@ -2939,7 +2936,7 @@ TEXT:
                   }
               }
               String clipboardTargetCode(String text) {
-                  // V164: vágólapos iránylogika. Ha a szöveg már az alsó ablak nyelvének tűnik,
+                  // V165: vágólapos iránylogika. Ha a szöveg már az alsó ablak nyelvének tűnik,
                   // akkor a felső nyelvre fordítunk. Egyébként az alsó nyelvre.
                   String bottom = code(bottomLang);
                   String top = code(topLang);
@@ -3775,14 +3772,14 @@ TEXT:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V164.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V164.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V165.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V165.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V164
+          name: V165
           path: |
             artifact/*.apk
             artifact/*.aab
