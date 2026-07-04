@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 143; versionName = "14.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 144; versionName = "14.4" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V143" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V144" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -456,7 +456,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V143");
+                  TextView title = label("Fordito_V144");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1761,14 +1761,37 @@ jobs:
 
               boolean isRecentlySimilarLiveBlock(String h) {
                   if(h == null || h.length() < 8) return false;
+                  String[] a = h.split("\\s+");
+
                   for(String old : recentLiveBlockHashOrder) {
                       if(old == null || old.length() < 8) continue;
                       int min = Math.min(h.length(), old.length());
                       int max = Math.max(h.length(), old.length());
-                      if(min >= 12 && (h.contains(old) || old.contains(h)) && (min * 100 / Math.max(1, max)) >= 70) return true;
 
-                      String[] a = h.split("\\s+");
+                      // V144: gyors mondatzárásnál a delta és a completed/flush sokszor átfedő blokkot ad.
+                      // Nem hanghoz nyúlunk, csak az utolsó blokkokkal való szöveg-átfedést fogjuk meg.
+                      if(min >= 12 && (h.contains(old) || old.contains(h)) && (min * 100 / Math.max(1, max)) >= 62) return true;
+
                       String[] b = old.split("\\s+");
+
+                      // Az új blokk eleje sokszor az előző blokk vége. Ez tipikus duplázási minta.
+                      if(a.length >= 2 && b.length >= 2) {
+                          int maxN = Math.min(5, Math.min(a.length, b.length));
+                          for(int n=maxN; n>=2; n--) {
+                              boolean suffixPrefix = true;
+                              for(int i=0; i<n; i++) {
+                                  if(!b[b.length-n+i].equals(a[i])) { suffixPrefix = false; break; }
+                              }
+                              if(suffixPrefix) return true;
+
+                              boolean prefixSuffix = true;
+                              for(int i=0; i<n; i++) {
+                                  if(!a[a.length-n+i].equals(b[i])) { prefixSuffix = false; break; }
+                              }
+                              if(prefixSuffix) return true;
+                          }
+                      }
+
                       if(a.length >= 3 && b.length >= 3) {
                           HashSet<String> sa = new HashSet<>(Arrays.asList(a));
                           HashSet<String> sb = new HashSet<>(Arrays.asList(b));
@@ -1776,7 +1799,7 @@ jobs:
                           for(String w : sa) if(sb.contains(w)) common++;
                           int small = Math.min(sa.size(), sb.size());
                           int large = Math.max(sa.size(), sb.size());
-                          if(small >= 3 && common * 100 / Math.max(1, small) >= 85 && small * 100 / Math.max(1, large) >= 70) return true;
+                          if(small >= 3 && common * 100 / Math.max(1, small) >= 80 && small * 100 / Math.max(1, large) >= 65) return true;
                       }
                   }
                   return false;
@@ -2345,19 +2368,31 @@ jobs:
               }
 
               void refreshInterpreterMenuButton(Button b) {
-                  String title = "Tolmács mód";
+                  String title = "Tolmács";
                   String sub = interpreterQuickLabel();
                   String text = title + "\n" + sub;
                   SpannableString ss = new SpannableString(text);
-                  ss.setSpan(new AbsoluteSizeSpan(15, true), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+
+                  // V144: olvashatóbb tolmács mód gomb.
+                  // A felső sor kisebb, az állapot nagyobb és félkövér.
+                  ss.setSpan(new AbsoluteSizeSpan(13, true), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   ss.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   int st = title.length() + 1;
-                  ss.setSpan(new AbsoluteSizeSpan(12, true), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                  ss.setSpan(new ForegroundColorSpan(Color.RED), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                  ss.setSpan(new AbsoluteSizeSpan(14, true), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                  ss.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+
+                  if(!interpreterMode) {
+                      ss.setSpan(new ForegroundColorSpan(Color.rgb(245,245,245)), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                      b.setBackgroundColor(Color.rgb(85,85,85));
+                  } else if("speaker".equals(interpreterAudioMode)) {
+                      ss.setSpan(new ForegroundColorSpan(Color.WHITE), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                      b.setBackgroundColor(Color.rgb(10,115,55));
+                  } else {
+                      ss.setSpan(new ForegroundColorSpan(Color.WHITE), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                      b.setBackgroundColor(Color.rgb(15,75,145));
+                  }
+
                   b.setText(ss);
-                  if(!interpreterMode) b.setBackgroundColor(Color.rgb(95,95,95));
-                  else if("speaker".equals(interpreterAudioMode)) b.setBackgroundColor(Color.rgb(30,140,70));
-                  else b.setBackgroundColor(Color.rgb(35,85,150));
               }
 
 
@@ -2974,14 +3009,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V143.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V143.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V144.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V144.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V143
+          name: V144
           path: |
             artifact/*.apk
             artifact/*.aab
