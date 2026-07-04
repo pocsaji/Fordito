@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 174; versionName = "17.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 175; versionName = "17.5" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V174" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V175" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -486,7 +486,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V174");
+                  TextView title = label("Fordito_V175");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1105,7 +1105,7 @@ jobs:
                     "Never include labels such as SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT or TRANSLATION. " +
                     "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly in the translation. Never output square-bracket category placeholders or asterisk-masked words. " +
                     "No markdown, no quotes, no explanation. " +
-                    "Keep meaning, context and tone. " + modePrompt();
+                    "Keep meaning, context and tone.";
               }
 
               String liveBlockInstructions(boolean ignoredSourceIsTop) {
@@ -1394,7 +1394,7 @@ jobs:
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
 
-                  // V174: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+                  // V175: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
                   if(clipboardResponseMode) {
                       clipboardResponseMode = false;
                       pendingClipboardText = "";
@@ -2836,7 +2836,7 @@ jobs:
                       Button b = btn("⇄");
                       b.setTextSize(30);
                       b.setTextColor(Color.WHITE);
-                      // V174: a nyíl optikailag lejjebb ült, ezért erősebben középre/feljebb igazítjuk.
+                      // V175: a nyíl optikailag lejjebb ült, ezért erősebben középre/feljebb igazítjuk.
                       b.setGravity(Gravity.CENTER);
                       b.setIncludeFontPadding(false);
                       b.setPadding(0, 0, 0, 18);
@@ -3171,7 +3171,7 @@ jobs:
                   if(huInput) {
                       if(prepared.length() == 0) prepared = source == null ? "" : source.trim();
                   } else {
-                      // V174: idegen nyelvű bemenetnél a középső mező üres marad; csak a magyar fordítás kell.
+                      // V175: idegen nyelvű bemenetnél a középső mező üres marad; csak a magyar fordítás kell.
                       prepared = "";
                   }
                   if(translation.length() == 0) {
@@ -3187,12 +3187,18 @@ jobs:
 
               void applyClipboardTranslationOnly(String prepared, String tr) {
                   String clean = cleanClipboardApiText(tr);
+                  String displayPrepared = prepared == null ? "" : prepared.trim();
                   if(clean.length() == 0) {
-                      showClipboardTranslatorPanel(clipboardCurrentSource, prepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
+                      clipboardForceFieldUpdate = true;
+                      showClipboardTranslatorPanel(clipboardCurrentSource, displayPrepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
                       return;
                   }
                   setClipboardText(clean);
-                  showClipboardTranslatorPanel(clipboardCurrentSource, prepared, clean);
+                  // Idegen -> HU ágnál a középső mező szándékosan üres. Ilyenkor is erővel frissítünk,
+                  // különben egy korábbi szerkesztett középső mező fókusz miatt bent maradhat.
+                  clipboardCurrentPrepared = displayPrepared;
+                  clipboardForceFieldUpdate = true;
+                  showClipboardTranslatorPanel(clipboardCurrentSource, displayPrepared, clean);
                   Toast.makeText(this, "Fordítás a vágólapra másolva.", Toast.LENGTH_SHORT).show();
               }
 
@@ -3231,7 +3237,7 @@ jobs:
               }
 
               String clipboardTargetCode(String text) {
-                  // V174: vágólapos iránylogika.
+                  // V175: vágólapos iránylogika.
                   // Magyar bemenet: a másik kiválasztott nyelvre fordít.
                   // Idegen bemenet: magyarra fordít, a középső mező üres marad.
                   String bottom = code(bottomLang);
@@ -3330,7 +3336,7 @@ jobs:
 
               String clipboardTranslationInstructions() {
                   return "You are a clipboard translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. " +
-                    "If SOURCE_LANG is AUTO, detect the source language from TEXT. Translate the entire TEXT to TARGET_LANG. If TARGET_LANG is Hungarian, the answer must be Hungarian. " +
+                    "If SOURCE_LANG is AUTO, detect the source language from TEXT. Translate the entire TEXT strictly to TARGET_LANG. If TARGET_LANG is HU, the answer must be Hungarian, never French/English/German/Italian. If TARGET_LANG is Hungarian, the answer must be Hungarian. " +
                     "Return ONLY the translated text. Preserve paragraphs where reasonable. No labels, no markdown, no quotes, no explanation. Preserve the original style, register and emotional tone: friendly stays friendly, official stays official, intimate or sexual stays intimate or sexual, and practical work messages stay natural and direct. " +
                     "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. " +
                     "Keep meaning, context and tone.";
@@ -3447,9 +3453,14 @@ jobs:
                           clipboardDialog.setContentView(lay);
                       }
                       boolean force = clipboardForceFieldUpdate;
-                      if(clipboardRawEdit != null && (force || !clipboardRawEdit.hasFocus())) clipboardRawEdit.setText(source == null || source.trim().length() == 0 ? "" : source.trim());
-                      if(clipboardPreparedEdit != null && (force || !clipboardPreparedEdit.hasFocus())) clipboardPreparedEdit.setText(prepared == null ? "" : prepared.trim());
-                      if(clipboardTranslationEdit != null && (force || !clipboardTranslationEdit.hasFocus())) clipboardTranslationEdit.setText(translation == null ? "" : translation.trim());
+                      String srcText = source == null || source.trim().length() == 0 ? "" : source.trim();
+                      String prepText = prepared == null ? "" : prepared.trim();
+                      String trText = translation == null ? "" : translation.trim();
+                      if(clipboardRawEdit != null && (force || !clipboardRawEdit.hasFocus())) clipboardRawEdit.setText(srcText);
+                      // Ha az idegen bemenet miatt a középső mezőnek üresnek kell lennie, akkor ne tartsa meg
+                      // fókusz miatt a korábbi szöveget.
+                      if(clipboardPreparedEdit != null && (force || prepText.length() == 0 || !clipboardPreparedEdit.hasFocus())) clipboardPreparedEdit.setText(prepText);
+                      if(clipboardTranslationEdit != null && (force || !clipboardTranslationEdit.hasFocus())) clipboardTranslationEdit.setText(trText);
                       clipboardForceFieldUpdate = false;
                       if(!clipboardDialog.isShowing()) clipboardDialog.show();
                       android.view.Window w = clipboardDialog.getWindow();
@@ -4146,14 +4157,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V174.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V174.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V175.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V175.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V174
+          name: V175
           path: |
             artifact/*.apk
             artifact/*.aab
