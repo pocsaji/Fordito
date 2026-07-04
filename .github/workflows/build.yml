@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 156; versionName = "15.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 157; versionName = "15.7" }
 
               signingConfigs {
                   create("release") {
@@ -80,10 +80,11 @@ jobs:
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V156" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V157" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -164,6 +165,8 @@ jobs:
           import android.speech.tts.TextToSpeech;
           import android.speech.tts.UtteranceProgressListener;
           import android.os.*;
+          import android.net.Uri;
+          import android.provider.Settings;
           import android.text.*;
           import android.text.style.*;
           import android.util.Base64;
@@ -225,6 +228,12 @@ jobs:
               int preRollAudioBytes = 0;
               boolean mirrorBottomMode = false;
               boolean backgroundScreenAllowed = false;
+              boolean floatingTranslatorEnabled = false;
+              android.view.WindowManager floatingWindowManager;
+              android.view.View floatingButtonView;
+              android.view.View floatingResultView;
+              String pendingClipboardText = "";
+              boolean clipboardResponseMode = false;
               boolean manualTopSource = true;
               boolean responseInProgress = false;
               long sessionStart = 0L;
@@ -375,6 +384,7 @@ jobs:
                   reqMic();
                   reqNotifications();
                   initTts();
+                  new Handler().postDelayed(() -> { if(floatingTranslatorEnabled) ensureFloatingTranslator(); }, 600);
               }
 
               void load() {
@@ -403,6 +413,7 @@ jobs:
                       if("speaker".equals(interpreterAudioMode) || "headset".equals(interpreterAudioMode)) lastInterpreterAudioMode = interpreterAudioMode;
                   }
                   mirrorBottomMode = sp.getBoolean("mirrorBottomMode", false);
+                  floatingTranslatorEnabled = sp.getBoolean("floatingTranslatorEnabled", false);
                   topLang = sp.getString("topLang", "fr");
                   bottomLang = sp.getString("bottomLang", "hu");
                   if("normal".equals(vadMode)) vadMode = "medium";
@@ -449,6 +460,7 @@ jobs:
                     .putString("interpreterAudioMode", interpreterAudioMode)
                     .putString("lastInterpreterAudioMode", lastInterpreterAudioMode)
                     .putBoolean("mirrorBottomMode", mirrorBottomMode)
+                    .putBoolean("floatingTranslatorEnabled", floatingTranslatorEnabled)
                     .putString("topLang", topLang)
                     .putString("bottomLang", bottomLang)
                     .apply();
@@ -462,7 +474,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V156");
+                  TextView title = label("Fordito_V157");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -965,6 +977,10 @@ jobs:
                                   String p = pendingManualText;
                                   pendingManualText = "";
                                   new Handler().postDelayed(() -> sendManualText(p), 500);
+                              } else if(!withAudio && pendingClipboardText.length() > 0) {
+                                  String p = pendingClipboardText;
+                                  pendingClipboardText = "";
+                                  new Handler().postDelayed(() -> sendClipboardTextToTranslate(p), 500);
                               }
                           });
                       }
@@ -1369,6 +1385,15 @@ jobs:
 
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
+
+                  // V157: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+                  if(clipboardResponseMode) {
+                      clipboardResponseMode = false;
+                      pendingClipboardText = "";
+                      Toast.makeText(this, "Kapcsolat hiba vágólap-fordítás közben.", Toast.LENGTH_LONG).show();
+                      stop();
+                      return;
+                  }
 
                   // V77: kézi fordításnál nincs blokkállapot. Hiba esetén nem írunk semmit az ablakokba.
                   if(manualResponseMode) {
@@ -2464,6 +2489,12 @@ jobs:
               }
 
               void routeAiOutput(String out) {
+                  if(clipboardResponseMode) {
+                      clipboardResponseMode = false;
+                      applyClipboardTranslation(out);
+                      return;
+                  }
+
                   if(manualResponseMode) {
                       manualResponseMode = false;
                       applyManualFullWindowTranslation(out);
@@ -2664,6 +2695,11 @@ jobs:
                       return true;
                   });
                   refreshInterpreterMenuButton(interpreterBtn);
+                  addMenuButton(box, "Lebegő gomb", floatingTranslatorLabel(), floatingTranslatorEnabled, v -> {
+                      toggleFloatingTranslator();
+                      refreshMenuButton((Button)v, "Lebegő gomb", floatingTranslatorLabel(), floatingTranslatorEnabled);
+                      updateButtons();
+                  });
                   addMenuButton(box, "Tükör mód", displayModeLabel(), mirrorBottomMode, v -> {
                       toggleDisplayModeQuick();
                       refreshMenuButton((Button)v, "Tükör mód", displayModeLabel(), mirrorBottomMode);
@@ -2755,6 +2791,221 @@ jobs:
                   }
 
                   b.setText(ss);
+              }
+
+
+              String floatingTranslatorLabel() {
+                  return floatingTranslatorEnabled ? "vágólap fordítása mini ablakban" : "kikapcsolva – csak menüből indítható";
+              }
+
+              boolean canDrawOverlayNow() {
+                  return Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this);
+              }
+
+              void requestOverlayPermission() {
+                  try {
+                      Intent i = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
+                      startActivity(i);
+                      Toast.makeText(this, "Engedélyezd: Megjelenítés más alkalmazások felett.", Toast.LENGTH_LONG).show();
+                  } catch(Exception e) {
+                      Toast.makeText(this, "Overlay engedély nem nyitható meg.", Toast.LENGTH_LONG).show();
+                  }
+              }
+
+              void toggleFloatingTranslator() {
+                  floatingTranslatorEnabled = !floatingTranslatorEnabled;
+                  save();
+                  if(floatingTranslatorEnabled) ensureFloatingTranslator();
+                  else hideFloatingTranslator();
+              }
+
+              void ensureFloatingTranslator() {
+                  if(!floatingTranslatorEnabled) return;
+                  if(!canDrawOverlayNow()) { requestOverlayPermission(); return; }
+                  if(floatingButtonView != null) return;
+                  try {
+                      floatingWindowManager = (android.view.WindowManager)getSystemService(WINDOW_SERVICE);
+                      Button b = btn("↔");
+                      b.setTextSize(22);
+                      b.setTextColor(Color.WHITE);
+                      b.setBackgroundColor(Color.rgb(30,120,75));
+                      b.setOnClickListener(v -> translateClipboardFromFloatingButton());
+                      b.setOnLongClickListener(v -> { hideFloatingTranslator(); floatingTranslatorEnabled = false; save(); return true; });
+                      final android.view.WindowManager.LayoutParams lp = floatingParams(72, 72, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+                      final int[] down = new int[4];
+                      b.setOnTouchListener((v, ev) -> {
+                          if(ev.getAction() == android.view.MotionEvent.ACTION_DOWN) {
+                              down[0] = lp.x; down[1] = lp.y; down[2] = (int)ev.getRawX(); down[3] = (int)ev.getRawY();
+                              return false;
+                          }
+                          if(ev.getAction() == android.view.MotionEvent.ACTION_MOVE) {
+                              lp.x = down[0] - ((int)ev.getRawX() - down[2]);
+                              lp.y = down[1] + ((int)ev.getRawY() - down[3]);
+                              try { floatingWindowManager.updateViewLayout(b, lp); } catch(Exception ignored) {}
+                              return true;
+                          }
+                          return false;
+                      });
+                      floatingButtonView = b;
+                      floatingWindowManager.addView(floatingButtonView, lp);
+                  } catch(Exception e) {
+                      floatingButtonView = null;
+                      Toast.makeText(this, "Lebegő gomb hiba: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                  }
+              }
+
+              android.view.WindowManager.LayoutParams floatingParams(int w, int h, int gravity) {
+                  int type = Build.VERSION.SDK_INT >= 26 ? android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : android.view.WindowManager.LayoutParams.TYPE_PHONE;
+                  android.view.WindowManager.LayoutParams lp = new android.view.WindowManager.LayoutParams(w, h, type,
+                      android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                      android.graphics.PixelFormat.TRANSLUCENT);
+                  lp.gravity = gravity;
+                  lp.x = 18;
+                  lp.y = 0;
+                  return lp;
+              }
+
+              void hideFloatingTranslator() {
+                  try { if(floatingWindowManager != null && floatingButtonView != null) floatingWindowManager.removeView(floatingButtonView); } catch(Exception ignored) {}
+                  floatingButtonView = null;
+                  hideFloatingResultWindow();
+              }
+
+              void translateClipboardFromFloatingButton() {
+                  if(!hasKey()) { showApi(); return; }
+                  String text = getClipboardText();
+                  if(text.trim().length() == 0) {
+                      showFloatingResultWindow("Nincs fordítható szöveg a vágólapon.");
+                      return;
+                  }
+                  showFloatingResultWindow("Fordítás folyamatban…");
+                  String target = code(bottomLang);
+                  String payload = "SOURCE_LANG: AUTO\nTARGET_LANG: " + target + "\nTEXT:\n" + text.trim();
+                  if(ws == null || !connected) {
+                      pendingClipboardText = payload;
+                      start(false);
+                  } else {
+                      sendClipboardTextToTranslate(payload);
+                  }
+              }
+
+              String getClipboardText() {
+                  try {
+                      ClipboardManager cm = (ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+                      if(cm == null || !cm.hasPrimaryClip()) return "";
+                      ClipData cd = cm.getPrimaryClip();
+                      if(cd == null || cd.getItemCount() == 0) return "";
+                      CharSequence cs = cd.getItemAt(0).coerceToText(this);
+                      return cs == null ? "" : cs.toString();
+                  } catch(Exception e) {
+                      return "";
+                  }
+              }
+
+              void sendClipboardTextToTranslate(String text) {
+                  clipboardResponseMode = true;
+                  manualResponseMode = false;
+                  liveTranslateMode = false;
+                  pendingLiveBlockId = -1;
+                  liveTranslateQueue.clear();
+                  pendingOutput = "";
+                  updateButtons();
+                  if(responseInProgress && ws != null) {
+                      try {
+                          JSONObject cancel = new JSONObject();
+                          cancel.put("type", "response.cancel");
+                          ws.send(cancel.toString());
+                          responseInProgress = false;
+                      } catch(Exception ignored) {}
+                  }
+                  try {
+                      JSONObject msg = new JSONObject();
+                      msg.put("type", "conversation.item.create");
+                      JSONObject item = new JSONObject();
+                      item.put("type", "message");
+                      item.put("role", "user");
+                      JSONArray content = new JSONArray();
+                      JSONObject c = new JSONObject();
+                      c.put("type", "input_text");
+                      c.put("text", "CLIPBOARD_FLOATING_TRANSLATION\n" + text + "\n\nReturn ONLY the translated text. Preserve practical meaning and tone. Do not write labels, markdown, quotes or explanation.");
+                      content.put(c);
+                      item.put("content", content);
+                      msg.put("item", item);
+                      ws.send(msg.toString());
+
+                      JSONObject resp = new JSONObject();
+                      resp.put("type", "response.create");
+                      JSONObject response = new JSONObject();
+                      response.put("instructions", clipboardTranslationInstructions());
+                      resp.put("response", response);
+                      responseInProgress = true;
+                      ws.send(resp.toString());
+                  } catch(Exception e) {
+                      clipboardResponseMode = false;
+                      showFloatingResultWindow("Vágólap-fordítás hiba. Próbáld újra.");
+                  }
+              }
+
+              String clipboardTranslationInstructions() {
+                  return "You are a clipboard translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. " +
+                    "If SOURCE_LANG is AUTO, detect the source language from TEXT. Translate the entire TEXT to TARGET_LANG. " +
+                    "Return ONLY the translated text. Preserve paragraphs where reasonable. No labels, no markdown, no quotes, no explanation. " +
+                    "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. " +
+                    "Keep meaning, context and tone. " + modePrompt();
+              }
+
+              void applyClipboardTranslation(String out) {
+                  String tr = cleanOneBlockTranslation(out);
+                  if(!isCleanManualTranslation(tr)) {
+                      showFloatingResultWindow("Nem tiszta fordítás érkezett. Próbáld újra.");
+                      return;
+                  }
+                  setClipboardText(tr);
+                  showFloatingResultWindow(tr);
+                  Toast.makeText(this, "Fordítás a vágólapra másolva.", Toast.LENGTH_SHORT).show();
+              }
+
+              void setClipboardText(String text) {
+                  try {
+                      ClipboardManager cm = (ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+                      if(cm != null) cm.setPrimaryClip(ClipData.newPlainText("Fordito fordítás", text));
+                  } catch(Exception ignored) {}
+              }
+
+              void showFloatingResultWindow(String text) {
+                  if(!canDrawOverlayNow()) { Toast.makeText(this, text, Toast.LENGTH_LONG).show(); return; }
+                  try {
+                      if(floatingWindowManager == null) floatingWindowManager = (android.view.WindowManager)getSystemService(WINDOW_SERVICE);
+                      hideFloatingResultWindow();
+                      LinearLayout lay = new LinearLayout(this);
+                      lay.setOrientation(LinearLayout.VERTICAL);
+                      lay.setPadding(18, 14, 18, 14);
+                      lay.setBackgroundColor(Color.rgb(35,38,44));
+                      TextView tv = label(text);
+                      tv.setTextSize(16);
+                      tv.setTextColor(Color.WHITE);
+                      tv.setMaxLines(12);
+                      lay.addView(tv, new LinearLayout.LayoutParams(-1, -2));
+                      LinearLayout row = row();
+                      Button copy = btn("MÁSOL");
+                      Button close = btn("BEZÁR");
+                      copy.setOnClickListener(v -> { setClipboardText(tv.getText().toString()); Toast.makeText(this, "Vágólapra másolva.", Toast.LENGTH_SHORT).show(); });
+                      close.setOnClickListener(v -> hideFloatingResultWindow());
+                      row.addView(copy, new LinearLayout.LayoutParams(0,70,1));
+                      row.addView(close, new LinearLayout.LayoutParams(0,70,1));
+                      lay.addView(row);
+                      floatingResultView = lay;
+                      android.view.WindowManager.LayoutParams lp = floatingParams(-1, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+                      lp.x = 0; lp.y = 60;
+                      floatingWindowManager.addView(floatingResultView, lp);
+                  } catch(Exception e) {
+                      Toast.makeText(this, text, Toast.LENGTH_LONG).show();
+                  }
+              }
+
+              void hideFloatingResultWindow() {
+                  try { if(floatingWindowManager != null && floatingResultView != null) floatingWindowManager.removeView(floatingResultView); } catch(Exception ignored) {}
+                  floatingResultView = null;
               }
 
 
@@ -3318,9 +3569,11 @@ jobs:
                       setLiveUiLocked(false);
                       updateButtons();
                   }
+                  if(floatingTranslatorEnabled) new Handler().postDelayed(() -> ensureFloatingTranslator(), 250);
               }
 
               @Override public void onDestroy() {
+                  hideFloatingTranslator();
                   if(streaming) stop();
                   else stopBackgroundForegroundService();
                   try {
@@ -3371,14 +3624,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V156.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V156.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V157.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V157.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V156
+          name: V157
           path: |
             artifact/*.apk
             artifact/*.aab
