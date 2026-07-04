@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 148; versionName = "14.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 149; versionName = "14.9" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V148" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V149" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -456,7 +456,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V148");
+                  TextView title = label("Fordito_V149");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -490,7 +490,7 @@ jobs:
                   controls.addView(menuBtn, new LinearLayout.LayoutParams(0,85,1));
                   root.addView(controls);
 
-                  // V147: sima kattintás / fókuszváltás ne állítsa le a mikrofont.
+                  // V149: sima kattintás / fókuszváltás ne állítsa le a mikrofont.
                   // Az aktív oldalt továbbra is átállítjuk, de live munkát nem törlünk.
                   topBox.setOnClickListener(v -> selectActiveBox(true));
                   bottomBox.setOnClickListener(v -> selectActiveBox(false));
@@ -634,7 +634,7 @@ jobs:
                   manualTopSource = top;
                   topActive = top;
 
-                  // V147: kattintás, fókusz és gépelés miatt nem állítjuk le a mikrofont.
+                  // V149: kattintás, fókusz és gépelés miatt nem állítjuk le a mikrofont.
                   // Kézi FORDÍT gombnál külön útvonal dolgozik, ezért nem kell itt élő
                   // mikrofon-stop. Csak a régi kézi válasz maradékát takarítjuk, ha volt.
                   if(!streaming) {
@@ -1595,10 +1595,10 @@ jobs:
                       liveBufferStartedAt = System.currentTimeMillis();
                       liveTranscriptBuffer = transcript;
                   }
-                  // V147: a completed technikai audio-blokk végét jelentheti, nem biztos mondatvéget.
-                  // Ezért csak őrzött lezárást engedünk: valódi mondatzárás, rövid önálló
-                  // közlés vagy stabil, nem lógó hosszabb maradék mehet ki.
-                  flushReadyTranscriptBlocks(true);
+                  // V149: a completed technikai audio-blokk végét jelentheti, nem biztos mondatvéget.
+                  // Nem kényszerítjük ki a teljes maradékot; csak azt engedjük ki,
+                  // amit a meglévő mondat/gondolathatár-logika már amúgy is késznek lát.
+                  flushReadyTranscriptBlocks(false);
                   liveIdleFlushToken++;
                   liveHadTranscriptDelta = false;
               }
@@ -1612,6 +1612,7 @@ jobs:
                       String b = popReadySpeechBlock(flushAll);
                       if(b == null || b.trim().length() == 0) break;
                       b = cleanTranscriptForSelectedPair(b);
+                      b = collapseImmediateRepeatedOpeningPhrase(b);
                       b = finalizeSpeechBlockText(b);
                       b = applyTinyHungarianTermFixes(b);
                       b = trimRecentLiveBlockOverlap(b);
@@ -1649,12 +1650,43 @@ jobs:
                   return false;
               }
 
+              String collapseImmediateRepeatedOpeningPhrase(String raw) {
+                  if(raw == null) return "";
+                  String t = raw.trim().replaceAll("\\s+", " ");
+                  if(t.length() == 0) return t;
+                  String[] w = t.split("\\s+");
+                  // V149: a Realtime néha ugyanazt a 3-7 szavas indítást kétszer adja
+                  // ugyanazon blokkon belül. Nem új blokklogika: csak közvetlen, szó szerinti
+                  // belső ismétlést húzunk össze a blokk elején.
+                  for(int n=Math.min(7, w.length/2); n>=3; n--) {
+                      boolean same = true;
+                      for(int i=0; i<n; i++) {
+                          String a = normalizeLiveBlockHash(w[i]);
+                          String b = normalizeLiveBlockHash(w[i+n]);
+                          if(a.length() == 0 || !a.equals(b)) { same = false; break; }
+                      }
+                      if(same) {
+                          StringBuilder sb = new StringBuilder();
+                          for(int i=0; i<n; i++) {
+                              if(sb.length() > 0) sb.append(' ');
+                              sb.append(w[i]);
+                          }
+                          for(int i=n*2; i<w.length; i++) {
+                              if(sb.length() > 0) sb.append(' ');
+                              sb.append(w[i]);
+                          }
+                          return sb.toString().trim();
+                      }
+                  }
+                  return t;
+              }
+
               String finalizeSpeechBlockText(String raw) {
                   if(raw == null) return "";
                   String t = raw.trim().replaceAll("\\s+", " ");
                   while(t.startsWith(",") || t.startsWith(";") || t.startsWith(":")) t = t.substring(1).trim();
                   if(t.length() == 0) return "";
-                  // V147: vesszőből / pontosvesszőből / kettőspontból nem gyártunk pontot.
+                  // V149: vesszőből / pontosvesszőből / kettőspontból nem gyártunk pontot.
                   // Ezek sokszor folytatást jelölnek, a hamis pont pedig rossz blokk- és
                   // nagybetűs mondatkezdést okozott.
                   return t;
@@ -1798,7 +1830,7 @@ jobs:
                               if(!ow[ow.length-n+i].equals(nw[i])) { suffixPrefix = false; break; }
                           }
                           if(suffixPrefix) {
-                              // V146: nem dobjuk el az egész új blokkot, csak az előző blokk végéből
+                              // V149: nem dobjuk el az egész új blokkot, csak az előző blokk végéből
                               // áthúzódó elejét vágjuk le. Ez fogja a csonkolt átfedéseket.
                               if(n >= rawWords.length) return "";
                               StringBuilder sb = new StringBuilder();
@@ -1908,7 +1940,7 @@ jobs:
                   int words = t.split("\\s+").length;
                   long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
                   long age = started > 0L ? System.currentTimeMillis() - started : 0L;
-                  // V147: tényleg csak rövid, önálló közlés legyen időzített utóflush.
+                  // V149: tényleg csak rövid, önálló közlés legyen időzített utóflush.
                   // Korábban minden 2+ szavas töredéket kiengedett 2 mp után, ez vágta félbe
                   // a folytatódó mondatokat és néha a szavakat is.
                   if(age < 2200 || words < 2 || words > 5) return false;
@@ -1923,10 +1955,10 @@ jobs:
                   if(t.length() == 0) return false;
                   if(firstHardSentenceEnd(t) >= 0) return true;
                   if(shouldFlushShortIdleBlock(t)) return true;
-                  // Stop / végső takarítás esetére: hosszabb, önmagában olvasható maradékot
-                  // kiengedünk, de tipikus félbemaradt kötőszavas vagy ragos részt nem.
-                  int words = t.split("\\s+").length;
-                  return words >= 6 && t.length() >= 45 && !looksLikeDanglingSpeechFragment(t);
+                  // V149: itt nem zárunk le hosszú maradékot egészben.
+                  // A hosszú beszédet a smartLinguisticCut darabolja, különben a completed/idle
+                  // újra óriás blokkokat gyártana.
+                  return false;
               }
 
               boolean looksLikeDanglingSpeechFragment(String text) {
@@ -1958,11 +1990,11 @@ jobs:
 
               int smartLinguisticCut(String s) {
                   int len = s.length();
-                  if(len < 105) return -1;
+                  if(len < 85) return -1;
 
                   String lower = s.toLowerCase(Locale.ROOT);
-                  int preferredEnd = Math.min(len, 220);
-                  int preferredStart = Math.min(len, 95);
+                  int preferredEnd = Math.min(len, 185);
+                  int preferredStart = Math.min(len, 75);
 
                   // V56: V55 alap, de kevésbé engedékeny hosszú blokkoknál.
                   // Nem audio, nem VAD, nem időzítő. Csak a már beérkezett szöveg stabil elejét vágjuk le,
@@ -1977,7 +2009,7 @@ jobs:
 
                   // 2) Feltételes / következő gondolat kezdete. V52-höz képest kicsit bátrabb,
                   // mert a beszélt nyelvben sokszor nincs pont, csak új gondolat kezdődik.
-                  cut = lastConnectorCut(lower, 115, preferredEnd, new String[]{
+                  cut = lastConnectorCut(lower, 90, preferredEnd, new String[]{
                           ", és akkor ", ", akkor ", ", hogyha ", ", ha ", ", amikor ",
                           ", ahol ", ", amíg ", ", miközben ", ", vagy ", ", illetve "
                   });
@@ -1985,12 +2017,12 @@ jobs:
 
                   // 3) Felsorolás vagy hosszú mellékmondat. Vágás vessző után, de csak akkor,
                   // ha már van érdemi hosszúságú, önmagában is olvasható blokk.
-                  cut = lastCommaCut(s, 115, Math.min(len, 205));
+                  cut = lastCommaCut(s, 90, Math.min(len, 175));
                   if(cut > 0) return cut;
 
                   // 4) Ha nincs vessző, de már hosszú a blokk, természetes kötőszavaknál is vágunk.
                   // Ez javítja a hosszú folyamatos monológokat, de továbbra sem időalapú.
-                  cut = lastSoftWordCut(lower, 145, Math.min(len, 220), new String[]{
+                  cut = lastSoftWordCut(lower, 110, Math.min(len, 185), new String[]{
                           " de ", " viszont ", " akkor ", " utána ", " majd ",
                           " és akkor ", " hogyha ", " ha ", " amikor ", " illetve ",
                           " mindenhol ", " szinte ", " na most ", " pedig "
@@ -2000,9 +2032,9 @@ jobs:
                   // 5) Stabil prefix vágás: ha a beszéd hosszúra nő és nincs biztos írásjel,
                   // a puffer elejét lezárjuk szóhatáron. A maradék a pufferben marad tovább épülni.
                   // Ez szöveg-alapú biztonsági szelep, nem másodperc- vagy szünetalapú döntés.
-                  if(len >= 220) {
-                      int spc = s.lastIndexOf(' ', Math.min(len, 200));
-                      if(spc >= 145) return spc + 1;
+                  if(len >= 190) {
+                      int spc = s.lastIndexOf(' ', Math.min(len, 170));
+                      if(spc >= 115) return spc + 1;
                   }
 
                   return -1;
@@ -2096,7 +2128,7 @@ jobs:
               }
 
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
-                  // V148: végső, nagyon óvatos UI-szintű duplázásvédelem.
+                  // V149: végső, nagyon óvatos UI-szintű duplázásvédelem.
                   // Nem nyúl a blokkdaraboláshoz és nem épít új logikát; csak azt akadályozza meg,
                   // hogy ugyanaz a kész mondat egymás után kétszer bekerüljön az ablakba.
                   if(isRecentlyDisplayedSourceDuplicate(sourceIsTop, original)) return -1;
@@ -3151,14 +3183,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V146.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V146.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V149.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V149.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V146
+          name: V149
           path: |
             artifact/*.apk
             artifact/*.aab
