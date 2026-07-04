@@ -3632,7 +3632,7 @@ jobs:
               void showApi() {
                   LinearLayout box = new LinearLayout(this);
                   box.setOrientation(LinearLayout.VERTICAL);
-                  int pad = dp(12);
+                  int pad = (int)(12 * getResources().getDisplayMetrics().density + 0.5f);
                   box.setPadding(pad, pad, pad, pad);
 
                   TextView note = label(
