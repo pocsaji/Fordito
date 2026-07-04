@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 145; versionName = "14.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 146; versionName = "14.6" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V145" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V146" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -456,7 +456,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V145");
+                  TextView title = label("Fordito_V146");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1606,6 +1606,7 @@ jobs:
                       b = cleanTranscriptForSelectedPair(b);
                       b = finalizeSpeechBlockText(b);
                       b = applyTinyHungarianTermFixes(b);
+                      b = trimRecentLiveBlockOverlap(b);
                       if(b.length() == 0) continue;
                       // V117: nyelvpár-zárás a BEVITELI oldalon.
                       // A fordító csak akkor kap blokkot, ha az átirat nem tűnik harmadik nyelvű zajnak.
@@ -1767,6 +1768,41 @@ jobs:
                   return false;
               }
 
+              String trimRecentLiveBlockOverlap(String block) {
+                  if(block == null) return "";
+                  String raw = block.trim().replaceAll("\\s+", " ");
+                  String h = normalizeLiveBlockHash(raw);
+                  if(h.length() < 8) return raw;
+                  String[] nw = h.split("\\s+");
+                  String[] rawWords = raw.split("\\s+");
+
+                  for(String old : recentLiveBlockHashOrder) {
+                      if(old == null || old.length() < 8) continue;
+                      String[] ow = old.split("\\s+");
+                      if(ow.length < 2 || nw.length < 2) continue;
+
+                      int maxN = Math.min(8, Math.min(ow.length, nw.length));
+                      for(int n=maxN; n>=2; n--) {
+                          boolean suffixPrefix = true;
+                          for(int i=0; i<n; i++) {
+                              if(!ow[ow.length-n+i].equals(nw[i])) { suffixPrefix = false; break; }
+                          }
+                          if(suffixPrefix) {
+                              // V146: nem dobjuk el az egész új blokkot, csak az előző blokk végéből
+                              // áthúzódó elejét vágjuk le. Ez fogja a csonkolt átfedéseket.
+                              if(n >= rawWords.length) return "";
+                              StringBuilder sb = new StringBuilder();
+                              for(int i=n; i<rawWords.length; i++) {
+                                  if(sb.length() > 0) sb.append(' ');
+                                  sb.append(rawWords[i]);
+                              }
+                              return sb.toString().trim();
+                          }
+                      }
+                  }
+                  return raw;
+              }
+
               boolean markLiveBlockQueued(String block) {
                   String h = normalizeLiveBlockHash(block);
                   if(h.length() < 3) return false;
@@ -1804,7 +1840,7 @@ jobs:
                               for(int i=0; i<n; i++) {
                                   if(!b[b.length-n+i].equals(a[i])) { suffixPrefix = false; break; }
                               }
-                              if(suffixPrefix) return true;
+                              if(suffixPrefix) continue;
 
                               boolean prefixSuffix = true;
                               for(int i=0; i<n; i++) {
@@ -3031,14 +3067,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V145.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V145.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V146.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V146.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V145
+          name: V146
           path: |
             artifact/*.apk
             artifact/*.aab
