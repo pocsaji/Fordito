@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 147; versionName = "14.7" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 148; versionName = "14.8" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V147" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V148" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -456,7 +456,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V147");
+                  TextView title = label("Fordito_V148");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1625,6 +1625,7 @@ jobs:
                       // a kiválasztott két nyelv közül címkézi a valódi SOURCE_LANG-et,
                       // és applyLiveTranslation() a blokkot a megfelelő ablakba rendezi.
                       int id = addSourceOnlyBlock(topActive, b);
+                      if(id < 0) continue;
                       firstSpeechBlockReleased = true;
                       liveTranslateQueue.add(id);
                   }
@@ -2095,6 +2096,11 @@ jobs:
               }
 
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
+                  // V148: végső, nagyon óvatos UI-szintű duplázásvédelem.
+                  // Nem nyúl a blokkdaraboláshoz és nem épít új logikát; csak azt akadályozza meg,
+                  // hogy ugyanaz a kész mondat egymás után kétszer bekerüljön az ablakba.
+                  if(isRecentlyDisplayedSourceDuplicate(sourceIsTop, original)) return -1;
+
                   TextBlock b = new TextBlock();
                   b.sourceTop = sourceIsTop;
                   b.translatedOk = false;
@@ -2103,6 +2109,40 @@ jobs:
                   textBlocks.add(b);
                   renderBlocksKeepView();
                   return textBlocks.size() - 1;
+              }
+
+              boolean isRecentlyDisplayedSourceDuplicate(boolean sourceIsTop, String original) {
+                  if(original == null) return true;
+                  String h = normalizeLiveBlockHash(original);
+                  if(h.length() < 8) return false;
+                  String[] hw = h.split("\\s+");
+
+                  int checked = 0;
+                  for(int i=textBlocks.size()-1; i>=0 && checked<8; i--) {
+                      TextBlock b = textBlocks.get(i);
+                      if(b == null || b.sourceTop != sourceIsTop) continue;
+                      checked++;
+                      String oldText = sourceIsTop ? b.topText : b.bottomText;
+                      String oh = normalizeLiveBlockHash(oldText);
+                      if(oh.length() < 8) continue;
+                      if(h.equals(oh)) return true;
+
+                      int min = Math.min(h.length(), oh.length());
+                      int max = Math.max(h.length(), oh.length());
+                      if(min >= 18 && (h.contains(oh) || oh.contains(h)) && (min * 100 / Math.max(1, max)) >= 72) return true;
+
+                      String[] ow = oh.split("\\s+");
+                      if(hw.length >= 4 && ow.length >= 4) {
+                          HashSet<String> sa = new HashSet<>(Arrays.asList(hw));
+                          HashSet<String> sb = new HashSet<>(Arrays.asList(ow));
+                          int common = 0;
+                          for(String w: sa) if(sb.contains(w)) common++;
+                          int small = Math.min(sa.size(), sb.size());
+                          int large = Math.max(sa.size(), sb.size());
+                          if(small >= 4 && common * 100 / Math.max(1, small) >= 88 && small * 100 / Math.max(1, large) >= 78) return true;
+                      }
+                  }
+                  return false;
               }
 
               void processNextLiveTranslation() {
