@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 170; versionName = "17.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 171; versionName = "17.1" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V170" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V171" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -486,7 +486,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V170");
+                  TextView title = label("Fordito_V171");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1394,7 +1394,7 @@ jobs:
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
 
-                  // V170: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+                  // V171: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
                   if(clipboardResponseMode) {
                       clipboardResponseMode = false;
                       pendingClipboardText = "";
@@ -2836,8 +2836,10 @@ jobs:
                       Button b = btn("⇄");
                       b.setTextSize(30);
                       b.setTextColor(Color.WHITE);
+                      // V171: a jel optikailag lejjebb ült a gombban, ezért kicsit feljebb igazítjuk.
                       b.setGravity(Gravity.CENTER);
-                      b.setPadding(0, 0, 0, 0);
+                      b.setIncludeFontPadding(false);
+                      b.setPadding(0, 0, 0, 10);
                       b.setMinWidth(0);
                       b.setMinimumWidth(0);
                       b.setMinHeight(0);
@@ -2922,7 +2924,8 @@ jobs:
                       showClipboardTranslatorPanel("", "", "Nincs fordítható szöveg a vágólapon. Másold ki újra a szöveget, majd nyomd meg ismét a lebegő gombot.");
                       return;
                   }
-                  showClipboardTranslatorPanel(text, "Értelmezés folyamatban…", "Fordítás folyamatban…");
+                  boolean huInput = isClipboardHungarian(text);
+                  showClipboardTranslatorPanel(text, huInput ? "Értelmezés folyamatban…" : "", "Fordítás folyamatban…");
                   translateClipboardFullHttp(text, clipboardCurrentTarget);
               }
 
@@ -2951,7 +2954,8 @@ jobs:
                   }
                   clipboardCurrentSource = source;
                   clipboardCurrentTarget = clipboardTargetCode(source);
-                  showClipboardTranslatorPanel(source, "Értelmezés folyamatban…", "Fordítás folyamatban…");
+                  boolean huInput = isClipboardHungarian(source);
+                  showClipboardTranslatorPanel(source, huInput ? "Értelmezés folyamatban…" : "", "Fordítás folyamatban…");
                   translateClipboardFullHttp(source, clipboardCurrentTarget);
               }
 
@@ -3089,7 +3093,13 @@ jobs:
                       prepared = source == null ? "" : source.trim();
                       translation = cleanClipboardApiText(out);
                   }
-                  if(prepared.length() == 0) prepared = source == null ? "" : source.trim();
+                  boolean huInput = isClipboardHungarian(source);
+                  if(huInput) {
+                      if(prepared.length() == 0) prepared = source == null ? "" : source.trim();
+                  } else {
+                      // V171: idegen nyelvű bemenetnél a középső mező üres marad; csak a magyar fordítás kell.
+                      prepared = "";
+                  }
                   if(translation.length() == 0) {
                       showClipboardTranslatorPanel(source, prepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
                       return;
@@ -3142,13 +3152,21 @@ jobs:
                       return "";
                   }
               }
+              boolean isClipboardHungarian(String text) {
+                  return "HU".equalsIgnoreCase(guessClipboardLangCode(text));
+              }
+
               String clipboardTargetCode(String text) {
-                  // V170: vágólapos iránylogika. Ha a szöveg már az alsó ablak nyelvének tűnik,
-                  // akkor a felső nyelvre fordítunk. Egyébként az alsó nyelvre.
+                  // V171: vágólapos iránylogika.
+                  // Magyar bemenet: a másik kiválasztott nyelvre fordít.
+                  // Idegen bemenet: magyarra fordít, a középső mező üres marad.
                   String bottom = code(bottomLang);
                   String top = code(topLang);
                   String guessed = guessClipboardLangCode(text);
-                  if(guessed.length() > 0 && guessed.equalsIgnoreCase(bottom)) return top;
+                  if("HU".equalsIgnoreCase(guessed)) {
+                      return "HU".equalsIgnoreCase(bottom) ? top : bottom;
+                  }
+                  if(guessed.length() > 0) return "HU";
                   return bottom;
               }
 
@@ -3229,8 +3247,9 @@ jobs:
 
               String clipboardFullInstructions() {
                   return "You are a standalone clipboard text repair and translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. " +
-                    "First create a cleaned, corrected, understandable version of TEXT in its original language. Correct obvious typos, missing accents, broken words and punctuation, but do not rewrite the meaning. " +
-                    "Then translate that prepared text to TARGET_LANG. Return ONLY valid JSON with exactly two string fields: prepared and translation. No markdown, no labels outside JSON. " +
+                    "Detect the source language. If the source language is Hungarian, create a cleaned, corrected, understandable Hungarian version in the prepared field, then translate it to TARGET_LANG. " +
+                    "If the source language is not Hungarian, leave prepared as an empty string and translate TEXT directly to natural Hungarian unless TARGET_LANG explicitly says otherwise. " +
+                    "Correct obvious typos, missing accents, broken words and punctuation, but do not rewrite the meaning. Return ONLY valid JSON with exactly two string fields: prepared and translation. No markdown, no labels outside JSON. " +
                     "Keep the user's practical meaning, tone, register, emotional intensity and context. If the text is friendly, keep it friendly; if official, keep it official; if intimate or sexual, keep that style instead of making it formal. Make the result natural and native-sounding in the target language. " +
                     "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. " + modePrompt();
               }
@@ -4015,14 +4034,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V170.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V170.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V171.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V171.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V170
+          name: V171
           path: |
             artifact/*.apk
             artifact/*.aab
