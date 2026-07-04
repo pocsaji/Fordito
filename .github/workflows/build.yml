@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 164; versionName = "16.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 166; versionName = "16.6" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V165" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V166" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -232,6 +232,8 @@ jobs:
               android.view.WindowManager floatingWindowManager;
               android.view.View floatingButtonView;
               android.view.View floatingResultView;
+              int floatingButtonX = 24;
+              int floatingButtonY = 0;
               Dialog clipboardDialog;
               TextView clipboardSourceView, clipboardTranslationView;
               String clipboardCurrentSource = "";
@@ -417,6 +419,8 @@ jobs:
                   }
                   mirrorBottomMode = sp.getBoolean("mirrorBottomMode", false);
                   floatingTranslatorEnabled = sp.getBoolean("floatingTranslatorEnabled", false);
+                  floatingButtonX = sp.getInt("floatingButtonX", 24);
+                  floatingButtonY = sp.getInt("floatingButtonY", 0);
                   topLang = sp.getString("topLang", "fr");
                   bottomLang = sp.getString("bottomLang", "hu");
                   if("normal".equals(vadMode)) vadMode = "medium";
@@ -464,6 +468,8 @@ jobs:
                     .putString("lastInterpreterAudioMode", lastInterpreterAudioMode)
                     .putBoolean("mirrorBottomMode", mirrorBottomMode)
                     .putBoolean("floatingTranslatorEnabled", floatingTranslatorEnabled)
+                    .putInt("floatingButtonX", floatingButtonX)
+                    .putInt("floatingButtonY", floatingButtonY)
                     .putString("topLang", topLang)
                     .putString("bottomLang", bottomLang)
                     .apply();
@@ -477,7 +483,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V165");
+                  TextView title = label("Fordito_V166");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1389,7 +1395,7 @@ jobs:
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
 
-                  // V165: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+                  // V166: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
                   if(clipboardResponseMode) {
                       clipboardResponseMode = false;
                       pendingClipboardText = "";
@@ -2840,20 +2846,40 @@ jobs:
                       b.setBackgroundColor(Color.rgb(30,120,75));
                       b.setOnClickListener(v -> translateClipboardFromFloatingButton());
                       b.setOnLongClickListener(v -> { hideFloatingTranslator(); floatingTranslatorEnabled = false; save(); return true; });
-                      final android.view.WindowManager.LayoutParams lp = floatingParams(92, 92, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+                      final android.view.WindowManager.LayoutParams lp = floatingParams(96, 96, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+                      lp.x = floatingButtonX;
+                      lp.y = floatingButtonY;
                       final int[] down = new int[4];
+                      final boolean[] moved = new boolean[1];
                       b.setOnTouchListener((v, ev) -> {
                           if(ev.getAction() == android.view.MotionEvent.ACTION_DOWN) {
                               down[0] = lp.x; down[1] = lp.y; down[2] = (int)ev.getRawX(); down[3] = (int)ev.getRawY();
-                              return false;
-                          }
-                          if(ev.getAction() == android.view.MotionEvent.ACTION_MOVE) {
-                              lp.x = down[0] - ((int)ev.getRawX() - down[2]);
-                              lp.y = down[1] + ((int)ev.getRawY() - down[3]);
-                              try { floatingWindowManager.updateViewLayout(b, lp); } catch(Exception ignored) {}
+                              moved[0] = false;
                               return true;
                           }
-                          return false;
+                          if(ev.getAction() == android.view.MotionEvent.ACTION_MOVE) {
+                              int dx = (int)ev.getRawX() - down[2];
+                              int dy = (int)ev.getRawY() - down[3];
+                              if(Math.abs(dx) > 8 || Math.abs(dy) > 8) moved[0] = true;
+                              lp.x = Math.max(0, down[0] - dx);
+                              lp.y = down[1] + dy;
+                              try {
+                                  android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+                                  int maxY = Math.max(0, dm.heightPixels / 2 - 64);
+                                  if(lp.y > maxY) lp.y = maxY;
+                                  if(lp.y < -maxY) lp.y = -maxY;
+                                  floatingWindowManager.updateViewLayout(b, lp);
+                              } catch(Exception ignored) {}
+                              return true;
+                          }
+                          if(ev.getAction() == android.view.MotionEvent.ACTION_UP) {
+                              floatingButtonX = lp.x;
+                              floatingButtonY = lp.y;
+                              save();
+                              if(!moved[0]) translateClipboardFromFloatingButton();
+                              return true;
+                          }
+                          return true;
                       });
                       floatingButtonView = b;
                       floatingWindowManager.addView(floatingButtonView, lp);
@@ -2936,7 +2962,7 @@ jobs:
                   }
               }
               String clipboardTargetCode(String text) {
-                  // V165: vágólapos iránylogika. Ha a szöveg már az alsó ablak nyelvének tűnik,
+                  // V166: vágólapos iránylogika. Ha a szöveg már az alsó ablak nyelvének tűnik,
                   // akkor a felső nyelvre fordítunk. Egyébként az alsó nyelvre.
                   String bottom = code(bottomLang);
                   String top = code(topLang);
@@ -3772,14 +3798,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V165.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V165.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V166.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V166.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V165
+          name: V166
           path: |
             artifact/*.apk
             artifact/*.aab
