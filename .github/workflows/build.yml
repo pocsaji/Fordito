@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 175; versionName = "17.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 176; versionName = "17.6" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V175" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V176" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -486,7 +486,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V175");
+                  TextView title = label("Fordito_V176");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1105,7 +1105,7 @@ jobs:
                     "Never include labels such as SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT or TRANSLATION. " +
                     "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly in the translation. Never output square-bracket category placeholders or asterisk-masked words. " +
                     "No markdown, no quotes, no explanation. " +
-                    "Keep meaning, context and tone.";
+                    "Keep meaning, context and tone. " + modePrompt();
               }
 
               String liveBlockInstructions(boolean ignoredSourceIsTop) {
@@ -1394,7 +1394,7 @@ jobs:
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
 
-                  // V175: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+                  // V176: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
                   if(clipboardResponseMode) {
                       clipboardResponseMode = false;
                       pendingClipboardText = "";
@@ -2803,7 +2803,7 @@ jobs:
 
 
               String floatingTranslatorLabel() {
-                  return floatingTranslatorEnabled ? "vágólap fordító gomb aktív" : "kikapcsolva – csak menüből indítható";
+                  return floatingTranslatorEnabled ? "vágólap fordítása mini ablakban" : "kikapcsolva – csak menüből indítható";
               }
 
               boolean canDrawOverlayNow() {
@@ -2834,13 +2834,10 @@ jobs:
                   try {
                       floatingWindowManager = (android.view.WindowManager)getSystemService(WINDOW_SERVICE);
                       Button b = btn("⇄");
-                      b.setTextSize(30);
+                      b.setTextSize(32);
                       b.setTextColor(Color.WHITE);
-                      // V175: a nyíl optikailag lejjebb ült, ezért erősebben középre/feljebb igazítjuk.
-                      b.setGravity(Gravity.CENTER);
-                      b.setIncludeFontPadding(false);
-                      b.setPadding(0, 0, 0, 18);
-                      b.setTranslationY(-6);
+                      b.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+                      b.setPadding(0, 8, 0, 0);
                       b.setMinWidth(0);
                       b.setMinimumWidth(0);
                       b.setMinHeight(0);
@@ -2925,16 +2922,9 @@ jobs:
                       showClipboardTranslatorPanel("", "", "Nincs fordítható szöveg a vágólapon. Másold ki újra a szöveget, majd nyomd meg ismét a lebegő gombot.");
                       return;
                   }
-                  boolean huInput = isClipboardHungarian(text);
-                  if(huInput) {
-                      showClipboardTranslatorPanel(text, "Értelmezés folyamatban…", "Fordítás folyamatban…");
-                      translateClipboardFullHttp(text, clipboardCurrentTarget);
-                  } else {
-                      clipboardCurrentPrepared = "";
-                      clipboardCurrentTarget = "HU";
-                      showClipboardTranslatorPanel(text, "", "Fordítás folyamatban…");
-                      translateClipboardForeignToHungarianHttp(text);
-                  }
+                  String mid = isClipboardHungarian(text) ? "Értelmezés folyamatban…" : "";
+                  showClipboardTranslatorPanel(text, mid, "Fordítás folyamatban…");
+                  translateClipboardFullHttp(text, clipboardCurrentTarget);
               }
 
               void runClipboardPanelTranslate() {
@@ -2962,75 +2952,9 @@ jobs:
                   }
                   clipboardCurrentSource = source;
                   clipboardCurrentTarget = clipboardTargetCode(source);
-                  boolean huInput = isClipboardHungarian(source);
-                  if(huInput) {
-                      showClipboardTranslatorPanel(source, "Értelmezés folyamatban…", "Fordítás folyamatban…");
-                      translateClipboardFullHttp(source, clipboardCurrentTarget);
-                  } else {
-                      clipboardCurrentPrepared = "";
-                      clipboardCurrentTarget = "HU";
-                      showClipboardTranslatorPanel(source, "", "Fordítás folyamatban…");
-                      translateClipboardForeignToHungarianHttp(source);
-                  }
-              }
-
-              void translateClipboardForeignToHungarianHttp(String sourceText) {
-                  clipboardCurrentSource = sourceText == null ? "" : sourceText.trim();
-                  clipboardCurrentPrepared = "";
-                  clipboardCurrentTarget = "HU";
-                  translateClipboardOnlyHttpWithDisplay(sourceText, "", "HU");
-              }
-
-              void translateClipboardOnlyHttpWithDisplay(String sourceText, String displayPrepared, String targetCode) {
-                  try {
-                      OkHttpClient http = new OkHttpClient.Builder()
-                          .connectTimeout(25, TimeUnit.SECONDS)
-                          .readTimeout(70, TimeUnit.SECONDS)
-                          .writeTimeout(30, TimeUnit.SECONDS)
-                          .build();
-                      JSONObject root = new JSONObject();
-                      root.put("model", "gpt-4o-mini");
-                      root.put("temperature", 0.1);
-                      JSONArray messages = new JSONArray();
-                      messages.put(new JSONObject().put("role", "system").put("content", clipboardTranslationInstructions()));
-                      messages.put(new JSONObject().put("role", "user").put("content", "SOURCE_LANG: AUTO\nTARGET_LANG: Hungarian\nTEXT:\n" + sourceText));
-                      root.put("messages", messages);
-                      MediaType mt = MediaType.parse("application/json; charset=utf-8");
-                      RequestBody body = RequestBody.create(root.toString(), mt);
-                      Request req = new Request.Builder()
-                          .url("https://api.openai.com/v1/chat/completions")
-                          .addHeader("Authorization", "Bearer " + apiKey.trim())
-                          .addHeader("Content-Type", "application/json")
-                          .post(body)
-                          .build();
-                      http.newCall(req).enqueue(new Callback() {
-                          @Override public void onFailure(Call call, java.io.IOException e) {
-                              runOnUiThread(() -> showClipboardTranslatorPanel(clipboardCurrentSource, displayPrepared, "Vágólap-fordítási hiba: kapcsolat nem sikerült."));
-                          }
-                          @Override public void onResponse(Call call, Response response) throws java.io.IOException {
-                              String raw = response.body() == null ? "" : response.body().string();
-                              if(!response.isSuccessful()) {
-                                  runOnUiThread(() -> showClipboardTranslatorPanel(clipboardCurrentSource, displayPrepared, "Vágólap-fordítási hiba: HTTP " + response.code()));
-                                  return;
-                              }
-                              try {
-                                  JSONObject obj = new JSONObject(raw);
-                                  JSONArray choices = obj.optJSONArray("choices");
-                                  String out = "";
-                                  if(choices != null && choices.length() > 0) {
-                                      JSONObject msg = choices.getJSONObject(0).optJSONObject("message");
-                                      if(msg != null) out = msg.optString("content", "");
-                                  }
-                                  final String result = out;
-                                  runOnUiThread(() -> applyClipboardTranslationOnly(displayPrepared, result));
-                              } catch(Exception ex) {
-                                  runOnUiThread(() -> showClipboardTranslatorPanel(clipboardCurrentSource, displayPrepared, "Vágólap-fordítási hiba: nem értelmezhető válasz."));
-                              }
-                          }
-                      });
-                  } catch(Exception e) {
-                      showClipboardTranslatorPanel(clipboardCurrentSource, displayPrepared, "Vágólap-fordítási hiba: " + e.getMessage());
-                  }
+                  String mid = isClipboardHungarian(source) ? "Értelmezés folyamatban…" : "";
+                  showClipboardTranslatorPanel(source, mid, "Fordítás folyamatban…");
+                  translateClipboardFullHttp(source, clipboardCurrentTarget);
               }
 
               void translateClipboardFullHttp(String sourceText, String targetCode) {
@@ -3167,13 +3091,9 @@ jobs:
                       prepared = source == null ? "" : source.trim();
                       translation = cleanClipboardApiText(out);
                   }
-                  boolean huInput = isClipboardHungarian(source);
-                  if(huInput) {
-                      if(prepared.length() == 0) prepared = source == null ? "" : source.trim();
-                  } else {
-                      // V175: idegen nyelvű bemenetnél a középső mező üres marad; csak a magyar fordítás kell.
-                      prepared = "";
-                  }
+                  boolean huSource = isClipboardHungarian(source);
+                  if(!huSource) prepared = "";
+                  else if(prepared.length() == 0) prepared = source == null ? "" : source.trim();
                   if(translation.length() == 0) {
                       showClipboardTranslatorPanel(source, prepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
                       return;
@@ -3187,18 +3107,12 @@ jobs:
 
               void applyClipboardTranslationOnly(String prepared, String tr) {
                   String clean = cleanClipboardApiText(tr);
-                  String displayPrepared = prepared == null ? "" : prepared.trim();
                   if(clean.length() == 0) {
-                      clipboardForceFieldUpdate = true;
-                      showClipboardTranslatorPanel(clipboardCurrentSource, displayPrepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
+                      showClipboardTranslatorPanel(clipboardCurrentSource, prepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
                       return;
                   }
                   setClipboardText(clean);
-                  // Idegen -> HU ágnál a középső mező szándékosan üres. Ilyenkor is erővel frissítünk,
-                  // különben egy korábbi szerkesztett középső mező fókusz miatt bent maradhat.
-                  clipboardCurrentPrepared = displayPrepared;
-                  clipboardForceFieldUpdate = true;
-                  showClipboardTranslatorPanel(clipboardCurrentSource, displayPrepared, clean);
+                  showClipboardTranslatorPanel(clipboardCurrentSource, prepared, clean);
                   Toast.makeText(this, "Fordítás a vágólapra másolva.", Toast.LENGTH_SHORT).show();
               }
 
@@ -3232,22 +3146,23 @@ jobs:
                       return "";
                   }
               }
-              boolean isClipboardHungarian(String text) {
-                  return "HU".equalsIgnoreCase(guessClipboardLangCode(text));
-              }
-
               String clipboardTargetCode(String text) {
-                  // V175: vágólapos iránylogika.
-                  // Magyar bemenet: a másik kiválasztott nyelvre fordít.
-                  // Idegen bemenet: magyarra fordít, a középső mező üres marad.
+                  // V176: vágólapos ág saját iránylogikája.
+                  // Magyar bemenet: a másik (nem HU) beállított nyelvre fordít.
+                  // Idegen bemenet: mindig magyarra fordít, a középső mező üres marad.
                   String bottom = code(bottomLang);
                   String top = code(topLang);
                   String guessed = guessClipboardLangCode(text);
-                  if("HU".equalsIgnoreCase(guessed)) {
-                      return "HU".equalsIgnoreCase(bottom) ? top : bottom;
+                  if(guessed.length() > 0 && !guessed.equalsIgnoreCase("HU")) return "HU";
+                  if(guessed.equalsIgnoreCase("HU")) {
+                      if(bottom.equalsIgnoreCase("HU") && !top.equalsIgnoreCase("HU")) return top;
+                      if(top.equalsIgnoreCase("HU") && !bottom.equalsIgnoreCase("HU")) return bottom;
                   }
-                  if(guessed.length() > 0) return "HU";
                   return bottom;
+              }
+
+              boolean isClipboardHungarian(String text) {
+                  return "HU".equalsIgnoreCase(guessClipboardLangCode(text));
               }
 
               String guessClipboardLangCode(String text) {
@@ -3326,20 +3241,19 @@ jobs:
               }
 
               String clipboardFullInstructions() {
-                  return "You are a standalone clipboard text repair and translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. " +
-                    "Detect the source language. If the source language is Hungarian, create a cleaned, corrected, understandable Hungarian version in the prepared field, then translate it to TARGET_LANG. " +
-                    "If the source language is not Hungarian, leave prepared as an empty string and translate TEXT directly to Hungarian. The translation field must be Hungarian text, not the source language. " +
-                    "Correct obvious typos, missing accents, broken words and punctuation, but do not rewrite the meaning. Return ONLY valid JSON with exactly two string fields: prepared and translation. No markdown, no labels outside JSON. " +
-                    "Keep the user's practical meaning, tone, register, emotional intensity and context. If the text is friendly, keep it friendly; if official, keep it official; if intimate or sexual, keep that style instead of making it formal. Make the result natural and native-sounding in the target language. " +
+                  return "You are a standalone clipboard text repair and translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
+                    "Return ONLY valid JSON with exactly two string fields: prepared and translation. No markdown, no labels outside JSON. " +
+                    "Detect the source language from TEXT. If the source is Hungarian, prepared must be a corrected Hungarian version of TEXT: add punctuation, sentence boundaries and capitalization; correct obvious typos, missing accents, broken words, accidental repeated words and grammar when the intended meaning is clear from context. If a mistake is not clear, keep it instead of inventing content. Then translate prepared to TARGET_LANG. " +
+                    "If the source is NOT Hungarian, prepared must be an empty string, and translation must be a natural Hungarian translation/interpretation of TEXT. Do not return the foreign source text as the translation. " +
+                    "Keep the user's practical meaning, tone, register, emotional intensity and context. Friendly stays friendly; official stays official; direct work messages stay direct; intimate or sexual text stays intimate or sexual instead of being made formal. Make the result natural and native-sounding. " +
                     "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording.";
               }
 
               String clipboardTranslationInstructions() {
-                  return "You are a clipboard translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. " +
-                    "If SOURCE_LANG is AUTO, detect the source language from TEXT. Translate the entire TEXT strictly to TARGET_LANG. If TARGET_LANG is HU, the answer must be Hungarian, never French/English/German/Italian. If TARGET_LANG is Hungarian, the answer must be Hungarian. " +
+                  return "You are a standalone clipboard translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
+                    "If SOURCE_LANG is AUTO, detect the source language from TEXT. Translate the entire TEXT to TARGET_LANG. If TARGET_LANG is HU, the answer must be Hungarian. " +
                     "Return ONLY the translated text. Preserve paragraphs where reasonable. No labels, no markdown, no quotes, no explanation. Preserve the original style, register and emotional tone: friendly stays friendly, official stays official, intimate or sexual stays intimate or sexual, and practical work messages stay natural and direct. " +
-                    "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. " +
-                    "Keep meaning, context and tone.";
+                    "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Keep meaning, context and tone.";
               }
 
               void applyClipboardTranslation(String out) {
@@ -3351,27 +3265,6 @@ jobs:
                   setClipboardText(tr);
                   showClipboardTranslatorPanel(clipboardCurrentSource, clipboardCurrentPrepared, tr);
                   Toast.makeText(this, "Fordítás a vágólapra másolva.", Toast.LENGTH_SHORT).show();
-              }
-
-              void styleClipboardButton(Button b) {
-                  try {
-                      android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
-                      bg.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
-                      bg.setColor(Color.rgb(88,88,88));
-                      bg.setCornerRadius(4);
-                      b.setBackground(bg);
-                      b.setTextColor(Color.WHITE);
-                      b.setTextSize(15);
-                      b.setAllCaps(false);
-                      b.setGravity(Gravity.CENTER);
-                      b.setIncludeFontPadding(false);
-                      b.setMinHeight(0);
-                      b.setMinimumHeight(0);
-                      b.setMinWidth(0);
-                      b.setMinimumWidth(0);
-                      b.setPadding(4, 0, 4, 0);
-                      b.setStateListAnimator(null);
-                  } catch(Exception ignored) {}
               }
 
               EditText clipboardEditBox(String hint, int textSize, int maxLines) {
@@ -3407,28 +3300,25 @@ jobs:
                           TextView rawTitle = label("Nyers beolvasott szöveg:");
                           rawTitle.setTextSize(13);
                           lay.addView(rawTitle, new LinearLayout.LayoutParams(-1, -2));
-                          clipboardRawEdit = clipboardEditBox("vágólap szövege", 14, 4);
-                          lay.addView(clipboardRawEdit, new LinearLayout.LayoutParams(-1, 0, 30));
+                          clipboardRawEdit = clipboardEditBox("vágólap szövege", 16, 5);
+                          lay.addView(clipboardRawEdit, new LinearLayout.LayoutParams(-1, 0, 1));
 
                           TextView prepTitle = label("Értelmezett / fordítandó szöveg:");
                           prepTitle.setTextSize(13);
                           lay.addView(prepTitle, new LinearLayout.LayoutParams(-1, -2));
-                          clipboardPreparedEdit = clipboardEditBox("javított vagy fordítandó szöveg", 15, 6);
-                          lay.addView(clipboardPreparedEdit, new LinearLayout.LayoutParams(-1, 0, 35));
+                          clipboardPreparedEdit = clipboardEditBox("javított vagy fordítandó szöveg", 16, 5);
+                          lay.addView(clipboardPreparedEdit, new LinearLayout.LayoutParams(-1, 0, 1));
 
                           TextView trTitle = label("Fordítás:");
                           trTitle.setTextSize(13);
                           lay.addView(trTitle, new LinearLayout.LayoutParams(-1, -2));
-                          clipboardTranslationEdit = clipboardEditBox("fordítás", 15, 7);
-                          lay.addView(clipboardTranslationEdit, new LinearLayout.LayoutParams(-1, 0, 35));
+                          clipboardTranslationEdit = clipboardEditBox("fordítás", 17, 7);
+                          lay.addView(clipboardTranslationEdit, new LinearLayout.LayoutParams(-1, 0, 1));
 
                           LinearLayout buttons = row();
                           Button translate = btn("FORDÍT");
                           Button copy = btn("MÁSOL");
                           Button hide = btn("HÁTTÉRBE");
-                          styleClipboardButton(translate);
-                          styleClipboardButton(copy);
-                          styleClipboardButton(hide);
                           translate.setOnClickListener(v -> runClipboardPanelTranslate());
                           copy.setOnClickListener(v -> {
                               String t = clipboardTranslationEdit == null ? "" : clipboardTranslationEdit.getText().toString().trim();
@@ -3439,44 +3329,24 @@ jobs:
                               }
                           });
                           hide.setOnClickListener(v -> { try { if(clipboardDialog != null) clipboardDialog.dismiss(); } catch(Exception ignored) {} moveTaskToBack(true); });
-                          LinearLayout.LayoutParams bp1 = new LinearLayout.LayoutParams(0,68,1);
-                          LinearLayout.LayoutParams bp2 = new LinearLayout.LayoutParams(0,68,1);
-                          LinearLayout.LayoutParams bp3 = new LinearLayout.LayoutParams(0,68,1);
-                          bp1.setMargins(0,0,8,0);
-                          bp2.setMargins(4,0,4,0);
-                          bp3.setMargins(8,0,0,0);
-                          buttons.addView(translate, bp1);
-                          buttons.addView(copy, bp2);
-                          buttons.addView(hide, bp3);
+                          buttons.addView(translate, new LinearLayout.LayoutParams(0,64,1));
+                          buttons.addView(copy, new LinearLayout.LayoutParams(0,64,1));
+                          buttons.addView(hide, new LinearLayout.LayoutParams(0,64,1));
                           lay.addView(buttons);
 
                           clipboardDialog.setContentView(lay);
                       }
                       boolean force = clipboardForceFieldUpdate;
-                      String srcText = source == null || source.trim().length() == 0 ? "" : source.trim();
-                      String prepText = prepared == null ? "" : prepared.trim();
-                      String trText = translation == null ? "" : translation.trim();
-                      if(clipboardRawEdit != null && (force || !clipboardRawEdit.hasFocus())) clipboardRawEdit.setText(srcText);
-                      // Ha az idegen bemenet miatt a középső mezőnek üresnek kell lennie, akkor ne tartsa meg
-                      // fókusz miatt a korábbi szöveget.
-                      if(clipboardPreparedEdit != null && (force || prepText.length() == 0 || !clipboardPreparedEdit.hasFocus())) clipboardPreparedEdit.setText(prepText);
-                      if(clipboardTranslationEdit != null && (force || !clipboardTranslationEdit.hasFocus())) clipboardTranslationEdit.setText(trText);
+                      if(clipboardRawEdit != null && (force || !clipboardRawEdit.hasFocus())) clipboardRawEdit.setText(source == null || source.trim().length() == 0 ? "" : source.trim());
+                      if(clipboardPreparedEdit != null && (force || !clipboardPreparedEdit.hasFocus())) clipboardPreparedEdit.setText(prepared == null ? "" : prepared.trim());
+                      if(clipboardTranslationEdit != null && (force || !clipboardTranslationEdit.hasFocus())) clipboardTranslationEdit.setText(translation == null ? "" : translation.trim());
                       clipboardForceFieldUpdate = false;
                       if(!clipboardDialog.isShowing()) clipboardDialog.show();
                       android.view.Window w = clipboardDialog.getWindow();
                       if(w != null) {
                           w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-                          int bottomReserveDp = 125;
-                          int bottomReservePx = (int)(bottomReserveDp * getResources().getDisplayMetrics().density + 0.5f);
-                          int h = getResources().getDisplayMetrics().heightPixels - bottomReservePx;
-                          if(h < 420) h = getResources().getDisplayMetrics().heightPixels;
-                          w.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-                          w.setLayout(-1, h);
-                          android.view.WindowManager.LayoutParams lp = w.getAttributes();
-                          lp.y = 0;
-                          lp.dimAmount = 0f;
-                          w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-                          w.setAttributes(lp);
+                          w.setLayout(-1, -1);
+                          w.setGravity(Gravity.CENTER);
                       }
                   } catch(Exception e) {
                       Toast.makeText(this, translation == null ? "Vágólap fordító hiba." : translation, Toast.LENGTH_LONG).show();
@@ -4068,6 +3938,7 @@ jobs:
               @Override public void onBackPressed() {
                   if(clipboardDialog != null && clipboardDialog.isShowing()) {
                       try { clipboardDialog.dismiss(); } catch(Exception ignored) {}
+                      moveTaskToBack(true);
                       if(floatingTranslatorEnabled) new Handler().postDelayed(() -> ensureFloatingTranslator(), 250);
                       return;
                   }
@@ -4157,14 +4028,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V175.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V175.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V176.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V176.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V175
+          name: V176
           path: |
             artifact/*.apk
             artifact/*.aab
