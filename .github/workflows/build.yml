@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 168; versionName = "16.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 169; versionName = "16.9" }
 
               signingConfigs {
                   create("release") {
@@ -82,7 +82,7 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <application android:allowBackup="false" android:label="Fordito_V168" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V169" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -473,7 +473,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V168");
+                  TextView title = label("Fordito_V169");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -977,11 +977,6 @@ jobs:
                               tr.put("model", "gpt-realtime-whisper");
                               tr.put("language", "hu");
                               tr.put("delay", "low");
-                              tr.put("prompt",
-                                  "Magyar hétköznapi élő beszédet írj át. " +
-                                  "Kamionos, munkahelyi, logisztikai beszélgetés, headset, telefon, csend, zaj, márkanevek előfordulhatnak. " +
-                                  "Ne fordíts, ne javíts túl, ne cenzúrázz. " +
-                                  "A részleges átirat legyen értelmesen darabolható rövid beszédegységekre; ha félmondat már természetesen fordítható, add ki.");
 
                               JSONObject input = new JSONObject();
                               input.put("format", format);
@@ -3555,14 +3550,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V168.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V168.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V169.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V169.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V168
+          name: V169
           path: |
             artifact/*.apk
             artifact/*.aab
