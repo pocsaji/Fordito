@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 158; versionName = "15.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 160; versionName = "16.0" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V158" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V160" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -474,7 +474,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V158");
+                  TextView title = label("Fordito_V160");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1386,7 +1386,7 @@ jobs:
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
 
-                  // V158: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+                  // V160: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
                   if(clipboardResponseMode) {
                       clipboardResponseMode = false;
                       pendingClipboardText = "";
@@ -2825,13 +2825,19 @@ jobs:
                   if(floatingButtonView != null) return;
                   try {
                       floatingWindowManager = (android.view.WindowManager)getSystemService(WINDOW_SERVICE);
-                      Button b = btn("↔");
-                      b.setTextSize(22);
+                      Button b = btn("⇄");
+                      b.setTextSize(30);
                       b.setTextColor(Color.WHITE);
+                      b.setGravity(Gravity.CENTER);
+                      b.setPadding(0, 0, 0, 0);
+                      b.setMinWidth(0);
+                      b.setMinimumWidth(0);
+                      b.setMinHeight(0);
+                      b.setMinimumHeight(0);
                       b.setBackgroundColor(Color.rgb(30,120,75));
                       b.setOnClickListener(v -> translateClipboardFromFloatingButton());
                       b.setOnLongClickListener(v -> { hideFloatingTranslator(); floatingTranslatorEnabled = false; save(); return true; });
-                      final android.view.WindowManager.LayoutParams lp = floatingParams(72, 72, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+                      final android.view.WindowManager.LayoutParams lp = floatingParams(92, 92, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
                       final int[] down = new int[4];
                       b.setOnTouchListener((v, ev) -> {
                           if(ev.getAction() == android.view.MotionEvent.ACTION_DOWN) {
@@ -2873,9 +2879,20 @@ jobs:
 
               void translateClipboardFromFloatingButton() {
                   if(!hasKey()) { showApi(); return; }
+                  showFloatingResultWindow("Vágólap olvasása…");
+                  new Handler().postDelayed(() -> translateClipboardNow(true), 220);
+              }
+
+              void translateClipboardNow(boolean allowForegroundRetry) {
                   String text = getClipboardText();
+                  if(text.trim().length() == 0 && allowForegroundRetry && Build.VERSION.SDK_INT >= 29) {
+                      bringAppToFrontForClipboardRead();
+                      showFloatingResultWindow("Vágólap olvasása…");
+                      new Handler().postDelayed(() -> translateClipboardNow(false), 650);
+                      return;
+                  }
                   if(text.trim().length() == 0) {
-                      showFloatingResultWindow("Nincs fordítható szöveg a vágólapon.");
+                      showFloatingResultWindow("Nincs fordítható szöveg a vágólapon. Másold ki újra a szöveget, majd nyomd meg ismét a lebegő gombot.");
                       return;
                   }
                   showFloatingResultWindow("Fordítás folyamatban…");
@@ -2889,14 +2906,33 @@ jobs:
                   }
               }
 
+              void bringAppToFrontForClipboardRead() {
+                  try {
+                      Intent it = new Intent(this, MainActivity.class);
+                      it.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+                      startActivity(it);
+                  } catch(Exception ignored) {}
+              }
+
               String getClipboardText() {
                   try {
                       android.content.ClipboardManager cm = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
                       if(cm == null || !cm.hasPrimaryClip()) return "";
                       ClipData cd = cm.getPrimaryClip();
                       if(cd == null || cd.getItemCount() == 0) return "";
-                      CharSequence cs = cd.getItemAt(0).coerceToText(this);
-                      return cs == null ? "" : cs.toString();
+                      StringBuilder sb = new StringBuilder();
+                      for(int i = 0; i < cd.getItemCount(); i++) {
+                          CharSequence cs = cd.getItemAt(i).coerceToText(this);
+                          if(cs != null) {
+                              String part = cs.toString().trim();
+                              if(part.length() > 0) {
+                                  if(sb.length() > 0) sb.append("
+");
+                                  sb.append(part);
+                              }
+                          }
+                      }
+                      return sb.toString().trim();
                   } catch(Exception e) {
                       return "";
                   }
@@ -3624,14 +3660,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V158.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V158.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V160.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V160.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V158
+          name: V160
           path: |
             artifact/*.apk
             artifact/*.aab
