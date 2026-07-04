@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 150; versionName = "15.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 151; versionName = "15.1" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V150" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V151" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -456,7 +456,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V150");
+                  TextView title = label("Fordito_V151");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -490,7 +490,7 @@ jobs:
                   controls.addView(menuBtn, new LinearLayout.LayoutParams(0,85,1));
                   root.addView(controls);
 
-                  // V150: sima kattintás / fókuszváltás ne állítsa le a mikrofont.
+                  // V151: sima kattintás / fókuszváltás ne állítsa le a mikrofont.
                   // Az aktív oldalt továbbra is átállítjuk, de live munkát nem törlünk.
                   topBox.setOnClickListener(v -> selectActiveBox(true));
                   bottomBox.setOnClickListener(v -> selectActiveBox(false));
@@ -634,7 +634,7 @@ jobs:
                   manualTopSource = top;
                   topActive = top;
 
-                  // V150: kattintás, fókusz és gépelés miatt nem állítjuk le a mikrofont.
+                  // V151: kattintás, fókusz és gépelés miatt nem állítjuk le a mikrofont.
                   // Kézi FORDÍT gombnál külön útvonal dolgozik, ezért nem kell itt élő
                   // mikrofon-stop. Csak a régi kézi válasz maradékát takarítjuk, ha volt.
                   if(!streaming) {
@@ -1595,7 +1595,7 @@ jobs:
                       liveBufferStartedAt = System.currentTimeMillis();
                       liveTranscriptBuffer = transcript;
                   }
-                  // V150: a completed nem nyelhet el értelmes félmondatot.
+                  // V151: a completed nem nyelhet el értelmes félmondatot.
                   // A vágásról továbbra is egyetlen központi blokkhatár-logika dönt:
                   // pontnál/gondolathatárnál vág, vagy completed/idle esetén kiengedi
                   // az emberi hosszúságú, nem teljesen lógó maradékot.
@@ -1613,7 +1613,7 @@ jobs:
                       String b = popReadySpeechBlock(flushAll);
                       if(b == null || b.trim().length() == 0) break;
 
-                      // V150: egyetlen beviteli normalizáló blokk.
+                      // V151: egyetlen beviteli normalizáló blokk.
                       // Itt történik a tisztítás, a közvetlen ismétlés összehúzása,
                       // az előző blokk végével való átfedés levágása és a biztos duplázás kiszűrése.
                       // Alapelv: ha bizonytalan, átengedjük, nem nyeljük el a beszédet.
@@ -1654,9 +1654,17 @@ jobs:
               String normalizeAndDeduplicateLiveBlock(String raw) {
                   if(raw == null) return "";
                   String b = cleanTranscriptForSelectedPair(raw);
-                  b = collapseImmediateRepeatedOpeningPhrase(b);
+
+                  // V151: egyetlen beviteli normalizáló lánc, nem új kapu.
+                  // Előbb a blokkon belüli közvetlen ismétlést húzzuk össze bárhol,
+                  // nem csak a blokk elején. Ez fogja meg a mondat közepén jelentkező
+                  // közvetlen ismétlést is.
+                  b = collapseAdjacentRepeatedPhrase(b);
                   b = finalizeSpeechBlockText(b);
                   b = applyTinyHungarianTermFixes(b);
+
+                  // Utána csak az előző kész blokk végéből az új blokk elejére átcsúszó
+                  // biztos átfedést vágjuk le. Ha bizonytalan, átengedjük.
                   b = trimRecentLiveBlockOverlap(b);
                   if(b == null) return "";
                   b = b.trim().replaceAll("\\s+", " ");
@@ -1665,49 +1673,62 @@ jobs:
                   String h = normalizeLiveBlockHash(b);
                   if(h.length() < 3) return "";
 
-                  // V150: itt már nem használunk külön hasonlósági kaput.
-                  // Csak a biztos, szinte szó szerinti ismétlést dobjuk el.
-                  // A hasonló, de esetleg új információt tartalmazó blokk inkább menjen át.
+                  // Csak a szó szerinti ismétlést dobjuk el. A hasonló, de nem azonos blokk
+                  // inkább menjen át, mert beszédvesztést nem akarunk.
                   if(recentLiveBlockHashes.contains(h)) return "";
 
+                  rememberLiveBlockHash(h);
+                  return b;
+              }
+
+              String collapseAdjacentRepeatedPhrase(String raw) {
+                  if(raw == null) return "";
+                  String t = raw.trim().replaceAll("\\s+", " ");
+                  if(t.length() == 0) return t;
+                  String[] w = t.split("\\s+");
+                  if(w.length < 6) return t;
+
+                  ArrayList<String> out = new ArrayList<>();
+                  int i = 0;
+                  while(i < w.length) {
+                      boolean collapsed = false;
+                      int maxN = Math.min(10, (w.length - i) / 2);
+                      for(int n=maxN; n>=3; n--) {
+                          boolean same = true;
+                          for(int j=0; j<n; j++) {
+                              String a = normalizeLiveBlockHash(w[i+j]);
+                              String b = normalizeLiveBlockHash(w[i+n+j]);
+                              if(a.length() == 0 || !a.equals(b)) { same = false; break; }
+                          }
+                          if(same) {
+                              for(int j=0; j<n; j++) out.add(w[i+j]);
+                              i += n * 2;
+                              collapsed = true;
+                              break;
+                          }
+                      }
+                      if(!collapsed) {
+                          out.add(w[i]);
+                          i++;
+                      }
+                  }
+
+                  StringBuilder sb = new StringBuilder();
+                  for(String x : out) {
+                      if(sb.length() > 0) sb.append(' ');
+                      sb.append(x);
+                  }
+                  return sb.toString().trim();
+              }
+
+              void rememberLiveBlockHash(String h) {
+                  if(h == null || h.length() < 3) return;
                   recentLiveBlockHashes.add(h);
                   recentLiveBlockHashOrder.add(h);
                   while(recentLiveBlockHashOrder.size() > 80) {
                       String old = recentLiveBlockHashOrder.poll();
                       if(old != null) recentLiveBlockHashes.remove(old);
                   }
-                  return b;
-              }
-
-              String collapseImmediateRepeatedOpeningPhrase(String raw) {
-                  if(raw == null) return "";
-                  String t = raw.trim().replaceAll("\\s+", " ");
-                  if(t.length() == 0) return t;
-                  String[] w = t.split("\\s+");
-                  // V150: a Realtime néha ugyanazt a 3-7 szavas indítást kétszer adja
-                  // ugyanazon blokkon belül. Nem új blokklogika: csak közvetlen, szó szerinti
-                  // belső ismétlést húzunk össze a blokk elején.
-                  for(int n=Math.min(7, w.length/2); n>=3; n--) {
-                      boolean same = true;
-                      for(int i=0; i<n; i++) {
-                          String a = normalizeLiveBlockHash(w[i]);
-                          String b = normalizeLiveBlockHash(w[i+n]);
-                          if(a.length() == 0 || !a.equals(b)) { same = false; break; }
-                      }
-                      if(same) {
-                          StringBuilder sb = new StringBuilder();
-                          for(int i=0; i<n; i++) {
-                              if(sb.length() > 0) sb.append(' ');
-                              sb.append(w[i]);
-                          }
-                          for(int i=n*2; i<w.length; i++) {
-                              if(sb.length() > 0) sb.append(' ');
-                              sb.append(w[i]);
-                          }
-                          return sb.toString().trim();
-                      }
-                  }
-                  return t;
               }
 
               String finalizeSpeechBlockText(String raw) {
@@ -1715,7 +1736,7 @@ jobs:
                   String t = raw.trim().replaceAll("\\s+", " ");
                   while(t.startsWith(",") || t.startsWith(";") || t.startsWith(":")) t = t.substring(1).trim();
                   if(t.length() == 0) return "";
-                  // V150: vesszőből / pontosvesszőből / kettőspontból nem gyártunk pontot.
+                  // V151: vesszőből / pontosvesszőből / kettőspontból nem gyártunk pontot.
                   // Ezek sokszor folytatást jelölnek, a hamis pont pedig rossz blokk- és
                   // nagybetűs mondatkezdést okozott.
                   return t;
@@ -1801,13 +1822,15 @@ jobs:
                   String[] de = {" ich ", " nicht ", " und ", " oder ", " bitte ", " danke ", " aber ", " wasser "};
                   String[] es = {" entonces ", " ahora ", " puede ", " funciona ", " pantalla ", " bloqueada "};
                   String[] it = {" allora ", " questo ", " questa ", " funziona ", " schermo "};
+                  String[] sv = {" jag ", " och ", " inte ", " men jag ", " det ", " är ", " till "};
                   for(String w: nl) if(x.contains(w)) hits++;
                   for(String w: en) if(x.contains(w)) hits++;
                   for(String w: de) if(x.contains(w)) hits++;
                   for(String w: es) if(x.contains(w)) hits++;
                   for(String w: it) if(x.contains(w)) hits++;
+                  for(String w: sv) if(x.contains(w)) hits++;
 
-                  if(words < 6 && hits >= 1) return true;
+                  if(words <= 6 && hits >= 1) return true;
                   return hits >= 2;
               }
 
@@ -1852,15 +1875,31 @@ jobs:
                       String[] ow = old.split("\\s+");
                       if(ow.length < 2 || nw.length < 2) continue;
 
-                      int maxN = Math.min(8, Math.min(ow.length, nw.length));
+                      // Ha a régi blokk teljes egészében az új blokk elején ismétlődik,
+                      // csak ezt az eleji ismétlést vágjuk le, az új folytatást megtartjuk.
+                      int fullOld = Math.min(ow.length, nw.length);
+                      if(fullOld >= 3) {
+                          boolean oldAtStart = true;
+                          for(int i=0; i<fullOld; i++) {
+                              if(!ow[i].equals(nw[i])) { oldAtStart = false; break; }
+                          }
+                          if(oldAtStart && fullOld < rawWords.length) {
+                              StringBuilder sb = new StringBuilder();
+                              for(int i=fullOld; i<rawWords.length; i++) {
+                                  if(sb.length() > 0) sb.append(' ');
+                                  sb.append(rawWords[i]);
+                              }
+                              return sb.toString().trim();
+                          }
+                      }
+
+                      int maxN = Math.min(10, Math.min(ow.length, nw.length));
                       for(int n=maxN; n>=2; n--) {
                           boolean suffixPrefix = true;
                           for(int i=0; i<n; i++) {
                               if(!ow[ow.length-n+i].equals(nw[i])) { suffixPrefix = false; break; }
                           }
                           if(suffixPrefix) {
-                              // V150: nem dobjuk el az egész új blokkot, csak az előző blokk végéből
-                              // áthúzódó elejét vágjuk le. Ez fogja a csonkolt átfedéseket.
                               if(n >= rawWords.length) return "";
                               StringBuilder sb = new StringBuilder();
                               for(int i=n; i<rawWords.length; i++) {
@@ -1878,13 +1917,7 @@ jobs:
                   String h = normalizeLiveBlockHash(block);
                   if(h.length() < 3) return false;
                   if(recentLiveBlockHashes.contains(h)) return false;
-                  if(isRecentlySimilarLiveBlock(h)) return false;
-                  recentLiveBlockHashes.add(h);
-                  recentLiveBlockHashOrder.add(h);
-                  while(recentLiveBlockHashOrder.size() > 80) {
-                      String old = recentLiveBlockHashOrder.poll();
-                      if(old != null) recentLiveBlockHashes.remove(old);
-                  }
+                  rememberLiveBlockHash(h);
                   return true;
               }
 
@@ -1959,7 +1992,7 @@ jobs:
                   String t = s.trim();
                   if(t.length() == 0) return -1;
 
-                  // V150: egyetlen blokkhatár-döntés.
+                  // V151: egyetlen blokkhatár-döntés.
                   // 1) valódi mondatzárás; 2) hosszú beszédnél természetes gondolathatár;
                   // 3) idle/completed esetén értelmezhető félmondat kiengedése.
                   int cut = firstHardSentenceEnd(s);
@@ -1982,7 +2015,7 @@ jobs:
                   int words = t.split("\\s+").length;
                   long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
                   long age = started > 0L ? System.currentTimeMillis() - started : 0L;
-                  // V150: tényleg csak rövid, önálló közlés legyen időzített utóflush.
+                  // V151: tényleg csak rövid, önálló közlés legyen időzített utóflush.
                   // Korábban minden 2+ szavas töredéket kiengedett 2 mp után, ez vágta félbe
                   // a folytatódó mondatokat és néha a szavakat is.
                   if(age < 2200 || words < 2 || words > 5) return false;
@@ -2002,7 +2035,7 @@ jobs:
                   long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
                   long age = started > 0L ? System.currentTimeMillis() - started : 0L;
 
-                  // V150: completed/idle után nem tartunk bent értelmezhető félmondatot
+                  // V151: completed/idle után nem tartunk bent értelmezhető félmondatot
                   // csak azért, mert nincs rajta szép pont. A túl hosszú blokkot továbbra is
                   // a smartLinguisticCut szóhatáron darabolja, ezért itt emberi méretű
                   // maradékot engedünk ki.
@@ -2181,7 +2214,7 @@ jobs:
               }
 
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
-                  // V150: végső, nagyon óvatos UI-szintű duplázásvédelem.
+                  // V151: végső, nagyon óvatos UI-szintű duplázásvédelem.
                   // Nem nyúl a blokkdaraboláshoz és nem épít új logikát; csak azt akadályozza meg,
                   // hogy ugyanaz a kész mondat egymás után kétszer bekerüljön az ablakba.
                   if(isRecentlyDisplayedSourceDuplicate(sourceIsTop, original)) return -1;
@@ -2213,7 +2246,7 @@ jobs:
 
                       int min = Math.min(h.length(), oh.length());
                       int max = Math.max(h.length(), oh.length());
-                      // V150: csak majdnem teljes azonosságot fogunk meg.
+                      // V151: csak majdnem teljes azonosságot fogunk meg.
                       // A hasonló, de eltérő blokk ne essen ki, mert az beszédvesztéshez vezetett.
                       if(min >= 24 && (h.contains(oh) || oh.contains(h)) && (min * 100 / Math.max(1, max)) >= 92) return true;
                   }
@@ -3226,14 +3259,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V150.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V150.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V151.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V151.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V150
+          name: V151
           path: |
             artifact/*.apk
             artifact/*.aab
