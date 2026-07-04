@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 146; versionName = "14.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 147; versionName = "14.7" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V146" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V147" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -456,7 +456,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V146");
+                  TextView title = label("Fordito_V147");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -490,10 +490,12 @@ jobs:
                   controls.addView(menuBtn, new LinearLayout.LayoutParams(0,85,1));
                   root.addView(controls);
 
-                  topBox.setOnClickListener(v -> enterManualEditMode(true));
-                  bottomBox.setOnClickListener(v -> enterManualEditMode(false));
-                  topBox.setOnFocusChangeListener((v, hasFocus) -> { if(hasFocus) enterManualEditMode(true); });
-                  bottomBox.setOnFocusChangeListener((v, hasFocus) -> { if(hasFocus) enterManualEditMode(false); });
+                  // V147: sima kattintás / fókuszváltás ne állítsa le a mikrofont.
+                  // Az aktív oldalt továbbra is átállítjuk, de live munkát nem törlünk.
+                  topBox.setOnClickListener(v -> selectActiveBox(true));
+                  bottomBox.setOnClickListener(v -> selectActiveBox(false));
+                  topBox.setOnFocusChangeListener((v, hasFocus) -> { if(hasFocus) selectActiveBox(true); });
+                  bottomBox.setOnFocusChangeListener((v, hasFocus) -> { if(hasFocus) selectActiveBox(false); });
                   topBox.addTextChangedListener(manualWatcher(true));
                   bottomBox.addTextChangedListener(manualWatcher(false));
                   applyDisplayMode();
@@ -620,33 +622,36 @@ jobs:
                   };
               }
 
+              void selectActiveBox(boolean top) {
+                  if(!manualEditMode || uiLockedForLive || finalizingStop) return;
+                  manualTopSource = top;
+                  topActive = top;
+                  updateButtons();
+              }
+
               void enterManualEditMode(boolean top) {
                   if(!manualEditMode || uiLockedForLive || finalizingStop) return;
                   manualTopSource = top;
                   topActive = top;
 
-                  // V98: kézi szerkesztés és live mikrofon nem futhat egyszerre.
-                  // Ha a felhasználó bármelyik ablakba kattint vagy írni kezd,
-                  // a mikrofon és minden függő live fordítás leáll. Így a kézi
-                  // teljes ablakos fordításba nem írhat vissza későn érkező live válasz.
-                  if(streaming) {
-                      stop();
-                      return;
+                  // V147: kattintás, fókusz és gépelés miatt nem állítjuk le a mikrofont.
+                  // Kézi FORDÍT gombnál külön útvonal dolgozik, ezért nem kell itt élő
+                  // mikrofon-stop. Csak a régi kézi válasz maradékát takarítjuk, ha volt.
+                  if(!streaming) {
+                      try {
+                          if(ws != null && responseInProgress) {
+                              JSONObject cancel = new JSONObject();
+                              cancel.put("type", "response.cancel");
+                              ws.send(cancel.toString());
+                          }
+                      } catch(Exception ignored) {}
+
+                      responseInProgress = false;
+                      liveTranslateMode = false;
+                      pendingLiveBlockId = -1;
+                      pendingOutput = "";
+                      liveTranslateQueue.clear();
                   }
-
-                  try {
-                      if(ws != null && responseInProgress) {
-                          JSONObject cancel = new JSONObject();
-                          cancel.put("type", "response.cancel");
-                          ws.send(cancel.toString());
-                      }
-                  } catch(Exception ignored) {}
-
-                  responseInProgress = false;
-                  liveTranslateMode = false;
-                  pendingLiveBlockId = -1;
-                  pendingOutput = "";
-                  liveTranslateQueue.clear();
                   updateButtons();
               }
 
@@ -1577,7 +1582,7 @@ jobs:
                       if(token == liveIdleFlushToken && streaming && liveTranscriptBuffer.trim().length() > 0) {
                           flushReadyTranscriptBlocks(true);
                       }
-                  }, 1800);
+                  }, 2400);
               }
 
               void handleTranscriptCompleted(String transcript) {
@@ -1590,6 +1595,9 @@ jobs:
                       liveBufferStartedAt = System.currentTimeMillis();
                       liveTranscriptBuffer = transcript;
                   }
+                  // V147: a completed technikai audio-blokk végét jelentheti, nem biztos mondatvéget.
+                  // Ezért csak őrzött lezárást engedünk: valódi mondatzárás, rövid önálló
+                  // közlés vagy stabil, nem lógó hosszabb maradék mehet ki.
                   flushReadyTranscriptBlocks(true);
                   liveIdleFlushToken++;
                   liveHadTranscriptDelta = false;
@@ -1645,8 +1653,9 @@ jobs:
                   String t = raw.trim().replaceAll("\\s+", " ");
                   while(t.startsWith(",") || t.startsWith(";") || t.startsWith(":")) t = t.substring(1).trim();
                   if(t.length() == 0) return "";
-                  char last = t.charAt(t.length() - 1);
-                  if(last == ',' || last == ';' || last == ':') t = t.substring(0, t.length() - 1).trim() + ".";
+                  // V147: vesszőből / pontosvesszőből / kettőspontból nem gyártunk pontot.
+                  // Ezek sokszor folytatást jelölnek, a hamis pont pedig rossz blokk- és
+                  // nagybetűs mondatkezdést okozott.
                   return t;
               }
 
@@ -1882,7 +1891,7 @@ jobs:
                   if(cut < 0) cut = smartLinguisticCut(s);
 
                   if(cut < 0 && shouldFlushShortIdleBlock(s)) cut = s.length();
-                  if(cut < 0 && flushAll) cut = s.length();
+                  if(cut < 0 && flushAll && shouldForceFlushWholeBuffer(s)) cut = s.length();
                   if(cut < 0) return null;
 
                   String out = s.substring(0, cut).trim();
@@ -1898,9 +1907,44 @@ jobs:
                   int words = t.split("\\s+").length;
                   long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
                   long age = started > 0L ? System.currentTimeMillis() - started : 0L;
-                  // V75: 2-3 szavas rövid közlés 2 mp csend után forduljon akkor is,
-                  // ha nincs pont vagy hosszú mondathatár. 1 szavas zajt nem engedünk át.
-                  return age >= 2000 && words >= 2;
+                  // V147: tényleg csak rövid, önálló közlés legyen időzített utóflush.
+                  // Korábban minden 2+ szavas töredéket kiengedett 2 mp után, ez vágta félbe
+                  // a folytatódó mondatokat és néha a szavakat is.
+                  if(age < 2200 || words < 2 || words > 5) return false;
+                  if(t.length() < 6 || t.length() > 55) return false;
+                  if(looksLikeDanglingSpeechFragment(t)) return false;
+                  return isAllowedShortReply(t) || words >= 3;
+              }
+
+              boolean shouldForceFlushWholeBuffer(String s) {
+                  if(s == null) return false;
+                  String t = s.trim();
+                  if(t.length() == 0) return false;
+                  if(firstHardSentenceEnd(t) >= 0) return true;
+                  if(shouldFlushShortIdleBlock(t)) return true;
+                  // Stop / végső takarítás esetére: hosszabb, önmagában olvasható maradékot
+                  // kiengedünk, de tipikus félbemaradt kötőszavas vagy ragos részt nem.
+                  int words = t.split("\\s+").length;
+                  return words >= 6 && t.length() >= 45 && !looksLikeDanglingSpeechFragment(t);
+              }
+
+              boolean looksLikeDanglingSpeechFragment(String text) {
+                  if(text == null) return true;
+                  String x = text.trim();
+                  if(x.length() == 0) return true;
+                  String l = x.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
+                  if(l.endsWith(",") || l.endsWith(";") || l.endsWith(":")) return true;
+                  String[] dangling = {
+                      " a", " az", " egy", " hogy", " ha", " amikor", " akkor", " majd", " és", " vagy", " illetve", " de", " mert", " tehát", " szerint", " lehet", " kellene", " annak", " arra", " ezt", " azt", " ne", " be", " ki", " fel", " le",
+                      " le", " la", " les", " de", " des", " du", " que", " qui", " qu", " si", " alors", " mais", " puis", " lorsque", " parce", " pour", " dans", " à", " au", " aux",
+                      " the", " a", " an", " to", " of", " for", " and", " or", " but", " if", " when", " because", " with"
+                  };
+                  for(String d: dangling) if(l.endsWith(d)) return true;
+                  String last = l;
+                  int sp = l.lastIndexOf(' ');
+                  if(sp >= 0) last = l.substring(sp + 1);
+                  if(last.length() <= 2) return true;
+                  return false;
               }
 
               int firstHardSentenceEnd(String s) {
