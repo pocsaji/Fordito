@@ -236,6 +236,7 @@ jobs:
               int floatingButtonY = 0;
               Dialog clipboardDialog;
               EditText clipboardRawEdit, clipboardPreparedEdit, clipboardTranslationEdit;
+              TextView clipboardPreparedTitle;
               String clipboardCurrentSource = "";
               String clipboardCurrentPrepared = "";
               String clipboardCurrentTarget = "";
@@ -486,7 +487,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V176");
+                  TextView title = label("Fordito_V177");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2834,10 +2835,12 @@ jobs:
                   try {
                       floatingWindowManager = (android.view.WindowManager)getSystemService(WINDOW_SERVICE);
                       Button b = btn("⇄");
-                      b.setTextSize(32);
+                      b.setTextSize(34);
                       b.setTextColor(Color.WHITE);
-                      b.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-                      b.setPadding(0, 8, 0, 0);
+                      b.setIncludeFontPadding(false);
+                      b.setGravity(Gravity.CENTER);
+                      b.setPadding(0, 0, 0, 0);
+                      b.setTranslationY(-6f);
                       b.setMinWidth(0);
                       b.setMinimumWidth(0);
                       b.setMinHeight(0);
@@ -3299,20 +3302,23 @@ jobs:
 
                           TextView rawTitle = label("Nyers beolvasott szöveg:");
                           rawTitle.setTextSize(13);
+                          rawTitle.setTextColor(Color.rgb(255, 210, 80));
                           lay.addView(rawTitle, new LinearLayout.LayoutParams(-1, -2));
-                          clipboardRawEdit = clipboardEditBox("vágólap szövege", 16, 5);
+                          clipboardRawEdit = clipboardEditBox("vágólap szövege", 15, 5);
                           lay.addView(clipboardRawEdit, new LinearLayout.LayoutParams(-1, 0, 1));
 
-                          TextView prepTitle = label("Értelmezett / fordítandó szöveg:");
-                          prepTitle.setTextSize(13);
-                          lay.addView(prepTitle, new LinearLayout.LayoutParams(-1, -2));
-                          clipboardPreparedEdit = clipboardEditBox("javított vagy fordítandó szöveg", 16, 5);
+                          clipboardPreparedTitle = label("Értelmezett / fordítandó szöveg:");
+                          clipboardPreparedTitle.setTextSize(13);
+                          clipboardPreparedTitle.setTextColor(Color.rgb(255, 210, 80));
+                          lay.addView(clipboardPreparedTitle, new LinearLayout.LayoutParams(-1, -2));
+                          clipboardPreparedEdit = clipboardEditBox("javított vagy fordítandó szöveg", 15, 5);
                           lay.addView(clipboardPreparedEdit, new LinearLayout.LayoutParams(-1, 0, 1));
 
                           TextView trTitle = label("Fordítás:");
                           trTitle.setTextSize(13);
+                          trTitle.setTextColor(Color.rgb(255, 210, 80));
                           lay.addView(trTitle, new LinearLayout.LayoutParams(-1, -2));
-                          clipboardTranslationEdit = clipboardEditBox("fordítás", 17, 7);
+                          clipboardTranslationEdit = clipboardEditBox("fordítás", 16, 7);
                           lay.addView(clipboardTranslationEdit, new LinearLayout.LayoutParams(-1, 0, 1));
 
                           LinearLayout buttons = row();
@@ -3336,6 +3342,10 @@ jobs:
 
                           clipboardDialog.setContentView(lay);
                       }
+                      boolean huSource = isClipboardHungarian(source);
+                      int prepVisibility = huSource ? View.VISIBLE : View.GONE;
+                      if(clipboardPreparedTitle != null) clipboardPreparedTitle.setVisibility(prepVisibility);
+                      if(clipboardPreparedEdit != null) clipboardPreparedEdit.setVisibility(prepVisibility);
                       boolean force = clipboardForceFieldUpdate;
                       if(clipboardRawEdit != null && (force || !clipboardRawEdit.hasFocus())) clipboardRawEdit.setText(source == null || source.trim().length() == 0 ? "" : source.trim());
                       if(clipboardPreparedEdit != null && (force || !clipboardPreparedEdit.hasFocus())) clipboardPreparedEdit.setText(prepared == null ? "" : prepared.trim());
