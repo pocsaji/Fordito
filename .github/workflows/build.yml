@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 155; versionName = "15.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 156; versionName = "15.6" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V155" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V156" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -236,7 +236,7 @@ jobs:
               long liveBufferStartedAt = 0L;
               long liveLastTranscriptDeltaAt = 0L;
               int liveIdleFlushToken = 0;
-              // V155: eseménysorrend-védelem. Nem várakoztat, csak megjegyzi,
+              // V156: eseménysorrend-védelem. Nem várakoztat, csak megjegyzi,
               // hogy a delta útvonal már adott ki blokkot, ezért a közvetlen completed/idle
               // nem zárhatja le ugyanazt még egyszer.
               long lastLiveBlockReleasedAt = 0L;
@@ -462,7 +462,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V155");
+                  TextView title = label("Fordito_V156");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -885,7 +885,7 @@ jobs:
                           return;
                       }
                       try { tts.setLanguage(localeForTts(item.lang)); } catch(Exception ignored) {}
-                      try { tts.setSpeechRate("hu".equals(item.lang) ? 1.0f : 1.10f); } catch(Exception ignored) {}
+                      try { tts.setSpeechRate(("hu".equals(item.lang) || "fr".equals(item.lang)) ? 1.17f : 1.10f); } catch(Exception ignored) {}
                       ttsSpeaking = true;
                       Bundle params = new Bundle();
                       String id = "fordito_tts_" + (++ttsSeq);
@@ -1221,8 +1221,9 @@ jobs:
                       .setSingleChoiceItems(names, checked, (d, which) -> {
                           delayMode = vals[which];
                           save();
+                          applyRecognitionTimingChange();
                           d.dismiss();
-                          Toast.makeText(this, "Új kapcsolatnál érvényesül: " + names[which], Toast.LENGTH_SHORT).show();
+                          Toast.makeText(this, "Bevitel időzítés beállítva: " + names[which], Toast.LENGTH_SHORT).show();
                       })
                       .setNegativeButton("Mégse", null)
                       .show();
@@ -1585,11 +1586,11 @@ jobs:
                   int released = flushReadyTranscriptBlocks(false);
                   if(released > 0) {
                       liveDeltaReleasedSinceLastCompleted = true;
-                      // V155: a már kiadott delta-blokkhoz tartozó korábbi idle flush ne futhasson rá később.
+                      // V156: a már kiadott delta-blokkhoz tartozó korábbi idle flush ne futhasson rá később.
                       liveIdleFlushToken++;
                   }
 
-                  // V75/V155: csak akkor ütemezünk utóflush-t, ha tényleg maradt pufferben szöveg.
+                  // V75/V156: csak akkor ütemezünk utóflush-t, ha tényleg maradt pufferben szöveg.
                   // Ez nem lassítás: nincs plusz várakozás, csak a régi tokenek érvénytelenítése.
                   if(liveTranscriptBuffer.trim().length() > 0) {
                       final int token = ++liveIdleFlushToken;
@@ -1615,13 +1616,34 @@ jobs:
                           liveTranscriptBuffer = transcript;
                       }
                   }
-                  // V155: completed nem írhatja ki újra azt, amit a delta útvonal már kiadott.
+                  // V156: completed nem írhatja ki újra azt, amit a delta útvonal már kiadott.
                   // Ha viszont valódi maradék van a pufferben, azonnal kiengedjük; nincs lassítás.
                   int released = completedIsOnlyAlreadyReleased ? 0 : flushReadyTranscriptBlocks(true);
                   if(released > 0) lastLiveBlockReleasedAt = System.currentTimeMillis();
                   liveIdleFlushToken++;
                   liveHadTranscriptDelta = false;
                   liveDeltaReleasedSinceLastCompleted = false;
+              }
+
+              void resetLiveRecognitionTimingState() {
+                  // V156: beszédfelismerési időzítés váltásakor nem várunk és nem építünk új kaput.
+                  // Csak az élő, még le nem zárt transcript állapotot nullázzuk, hogy a régi mód
+                  // puffer/időzítője ne zárhasson rá az új mód szabályaira. A már kiadott blokkok
+                  // dedupe-cache-e szándékosan megmarad, így egy későn érkező régi completed esemény
+                  // nem tudja újra behozni ugyanazt a mondatot.
+                  liveTranscriptBuffer = "";
+                  liveHadTranscriptDelta = false;
+                  firstSpeechHeardAt = 0L;
+                  liveBufferStartedAt = 0L;
+                  liveLastTranscriptDeltaAt = 0L;
+                  liveIdleFlushToken++;
+                  lastLiveBlockReleasedAt = 0L;
+                  liveDeltaReleasedSinceLastCompleted = false;
+              }
+
+              void applyRecognitionTimingChange() {
+                  resetLiveRecognitionTimingState();
+                  sessionUpdateIfConnected();
               }
 
               int flushReadyTranscriptBlocks(boolean flushAll) {
@@ -1655,7 +1677,7 @@ jobs:
                       lastLiveBlockReleasedAt = System.currentTimeMillis();
                   }
                   if(releasedCount > 0) {
-                      // V155: sikeres kiírás után a régi idle flush már nem zárhat ugyanarra.
+                      // V156: sikeres kiírás után a régi idle flush már nem zárhat ugyanarra.
                       liveIdleFlushToken++;
                   }
                   processNextLiveTranslation();
@@ -1730,7 +1752,7 @@ jobs:
                   String h = normalizeLiveBlockHash(b);
                   if(h.length() < 3) return "";
 
-                  // V155: legutolsó lépésként, minden tisztítás után hasonlítunk a közvetlenül
+                  // V156: legutolsó lépésként, minden tisztítás után hasonlítunk a közvetlenül
                   // frissen kiadott blokkokhoz. Nem új kapu: ugyanennek a normalizáló blokknak
                   // a vége. Csak teljes vagy majdnem teljes ismétlést dobunk el.
                   if(matchesVeryRecentReleasedBlock(h)) return "";
@@ -2050,7 +2072,7 @@ jobs:
                   String t = s.trim();
                   if(t.length() == 0) return -1;
 
-                  // V155: egyszerűsített, egyirányú blokkhatár-döntés.
+                  // V156: egyszerűsített, egyirányú blokkhatár-döntés.
                   // Delta közben csak biztos mondatvégnél vagy természetes hosszú vágásnál adunk ki.
                   // Completed/idle esetén viszont nincs nyelvtani várakoztatás: ami bent maradt,
                   // azt kiadjuk. A rövid puffer nem ragadhat bent és nem kell szótár hozzá.
@@ -2073,7 +2095,7 @@ jobs:
                   int words = t.split("\\s+").length;
                   long sinceDelta = liveLastTranscriptDeltaAt > 0L ? System.currentTimeMillis() - liveLastTranscriptDeltaAt : 99999L;
 
-                  // V155: 1-5 szavas puffer esetén nincs szótár, nincs nyelvtani kapu,
+                  // V156: 1-5 szavas puffer esetén nincs szótár, nincs nyelvtani kapu,
                   // nincs "hátha majd mondat lesz" várakozás. A meglévő completed/idle esemény
                   // kiadja, ami bent van. Ez javítja az igen/nem/működik jellegű beragadást.
                   if(words <= 5) return s.length();
@@ -2119,7 +2141,7 @@ jobs:
               }
 
               boolean shouldFlushShortIdleBlock(String s) {
-                  // V155: kompatibilitási segédfüggvény. A blokkzárás fő döntése már a
+                  // V156: kompatibilitási segédfüggvény. A blokkzárás fő döntése már a
                   // findLiveBlockCut(flushAll) ágban történik, ezért itt nincs szótár és nincs
                   // nyelvtani visszatartás. Rövid puffer idle esetén kiadható.
                   if(s == null) return false;
@@ -2132,7 +2154,7 @@ jobs:
               }
 
               boolean shouldForceFlushWholeBuffer(String s) {
-                  // V155: nincs külön nyelvtani kapu. Completed/idle esetén a központi
+                  // V156: nincs külön nyelvtani kapu. Completed/idle esetén a központi
                   // safeWholeBufferFlushCut dönt, ezért ez csak régi hívásokhoz marad egyszerűen.
                   return s != null && s.trim().length() > 0;
               }
@@ -3029,7 +3051,7 @@ jobs:
                   return "Általános – ajánlott";
               }
 
-              void chooseVad() { chooseFrom("Két mondat közötti szünet", vadModes, vadMode, v -> { vadMode = v; save(); sessionUpdateIfConnected(); }); }
+              void chooseVad() { chooseFrom("Két mondat közötti szünet", vadModes, vadMode, v -> { vadMode = v; save(); applyRecognitionTimingChange(); }); }
               void chooseMicGate() { chooseFrom("Mikrofon küldési kapu", micGateModes, micGateMode, v -> { micGateMode = v; save(); }); }
               void chooseAudioSource() { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }); }
               void chooseAndroidEffects() { chooseFrom("Android zajszűrés", androidEffectsModes, androidEffectsMode, v -> { androidEffectsMode = v; save(); restartIfNeeded(); }); }
@@ -3349,14 +3371,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V155.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V155.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V156.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V156.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V155
+          name: V156
           path: |
             artifact/*.apk
             artifact/*.aab
