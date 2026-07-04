@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 161; versionName = "16.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 163; versionName = "16.3" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V162" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V163" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -474,7 +474,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V162");
+                  TextView title = label("Fordito_V163");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1386,7 +1386,7 @@ jobs:
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
 
-                  // V162: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+                  // V163: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
                   if(clipboardResponseMode) {
                       clipboardResponseMode = false;
                       pendingClipboardText = "";
@@ -2937,7 +2937,7 @@ jobs:
                   }
               }
               String clipboardTargetCode(String text) {
-                  // V162: vágólapos iránylogika. Ha a szöveg már az alsó ablak nyelvének tűnik,
+                  // V163: vágólapos iránylogika. Ha a szöveg már az alsó ablak nyelvének tűnik,
                   // akkor a felső nyelvre fordítunk. Egyébként az alsó nyelvre.
                   String bottom = code(bottomLang);
                   String top = code(topLang);
@@ -2957,7 +2957,7 @@ jobs:
                       if("äöüß".indexOf(ch) >= 0) de += 3;
                       if("ìòàèù".indexOf(ch) >= 0) it += 2;
                   }
-                  String pad = " " + t.replaceAll("[^\p{L}]+", " ") + " ";
+                  String pad = " " + t.replaceAll("[^\\p{L}]+", " ") + " ";
                   String[] huWords = {" hogy "," vagy "," nem "," igen "," ezt "," azt "," akkor "," most "," lehet "," kérlek "," szeretném "," miért "," mert "," tehát "," van "," lesz "," volt "};
                   String[] frWords = {" je "," tu "," vous "," nous "," est "," pas "," que "," pour "," avec "," dans "," une "," des "," les "," mais "," donc "," alors "," pourquoi "};
                   String[] deWords = {" ich "," du "," sie "," wir "," nicht "," und "," oder "," dass "," mit "," für "," ein "," eine "," der "," die "," das "," warum "};
@@ -3699,14 +3699,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V162.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V162.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V163.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V163.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V162
+          name: V163
           path: |
             artifact/*.apk
             artifact/*.aab
