@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 166; versionName = "16.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 167; versionName = "16.7" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V166" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V167" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -483,7 +483,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V166");
+                  TextView title = label("Fordito_V167");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -986,10 +986,6 @@ jobs:
                                   String p = pendingManualText;
                                   pendingManualText = "";
                                   new Handler().postDelayed(() -> sendManualText(p), 500);
-                              } else if(!withAudio && pendingClipboardText.length() > 0) {
-                                  String p = pendingClipboardText;
-                                  pendingClipboardText = "";
-                                  new Handler().postDelayed(() -> sendClipboardTextToTranslate(p), 500);
                               }
                           });
                       }
@@ -1395,7 +1391,7 @@ jobs:
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
 
-                  // V166: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+                  // V167: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
                   if(clipboardResponseMode) {
                       clipboardResponseMode = false;
                       pendingClipboardText = "";
@@ -2922,13 +2918,74 @@ jobs:
                   }
                   showClipboardTranslatorPanel(text, "Fordítás folyamatban…");
                   String target = clipboardTargetCode(text);
-                  String payload = "SOURCE_LANG: AUTO\nTARGET_LANG: " + target + "\nTEXT:\n" + text;
-                  if(ws == null || !connected) {
-                      pendingClipboardText = payload;
-                      start(false);
-                  } else {
-                      sendClipboardTextToTranslate(payload);
+                  translateClipboardTextHttp(text, target);
+              }
+
+              void translateClipboardTextHttp(String sourceText, String targetCode) {
+                  try {
+                      OkHttpClient http = new OkHttpClient.Builder()
+                          .connectTimeout(25, TimeUnit.SECONDS)
+                          .readTimeout(70, TimeUnit.SECONDS)
+                          .writeTimeout(30, TimeUnit.SECONDS)
+                          .build();
+
+                      JSONObject root = new JSONObject();
+                      root.put("model", "gpt-4o-mini");
+                      root.put("temperature", 0.1);
+                      JSONArray messages = new JSONArray();
+                      messages.put(new JSONObject().put("role", "system").put("content", clipboardTranslationInstructions()));
+                      messages.put(new JSONObject().put("role", "user").put("content",
+                          "SOURCE_LANG: AUTO\nTARGET_LANG: " + targetCode + "\nTEXT:\n" + sourceText));
+                      root.put("messages", messages);
+
+                      MediaType mt = MediaType.parse("application/json; charset=utf-8");
+                      RequestBody body = RequestBody.create(root.toString(), mt);
+                      Request req = new Request.Builder()
+                          .url("https://api.openai.com/v1/chat/completions")
+                          .addHeader("Authorization", "Bearer " + apiKey.trim())
+                          .addHeader("Content-Type", "application/json")
+                          .post(body)
+                          .build();
+
+                      http.newCall(req).enqueue(new Callback() {
+                          @Override public void onFailure(Call call, java.io.IOException e) {
+                              runOnUiThread(() -> showClipboardTranslatorPanel(sourceText, "Vágólap-fordítási hiba: kapcsolat nem sikerült."));
+                          }
+                          @Override public void onResponse(Call call, Response response) throws java.io.IOException {
+                              String raw = response.body() == null ? "" : response.body().string();
+                              if(!response.isSuccessful()) {
+                                  runOnUiThread(() -> showClipboardTranslatorPanel(sourceText, "Vágólap-fordítási hiba: HTTP " + response.code()));
+                                  return;
+                              }
+                              try {
+                                  JSONObject obj = new JSONObject(raw);
+                                  JSONArray choices = obj.optJSONArray("choices");
+                                  String out = "";
+                                  if(choices != null && choices.length() > 0) {
+                                      JSONObject msg = choices.getJSONObject(0).optJSONObject("message");
+                                      if(msg != null) out = msg.optString("content", "");
+                                  }
+                                  final String result = cleanOneBlockTranslation(out);
+                                  runOnUiThread(() -> applyClipboardTranslationDirect(sourceText, result));
+                              } catch(Exception ex) {
+                                  runOnUiThread(() -> showClipboardTranslatorPanel(sourceText, "Vágólap-fordítási hiba: nem értelmezhető válasz."));
+                              }
+                          }
+                      });
+                  } catch(Exception e) {
+                      showClipboardTranslatorPanel(sourceText, "Vágólap-fordítási hiba: " + e.getMessage());
                   }
+              }
+
+              void applyClipboardTranslationDirect(String source, String tr) {
+                  String clean = cleanOneBlockTranslation(tr);
+                  if(!isCleanManualTranslation(clean)) {
+                      showClipboardTranslatorPanel(source, "Nem tiszta fordítás érkezett. Próbáld újra.");
+                      return;
+                  }
+                  setClipboardText(clean);
+                  showClipboardTranslatorPanel(source, clean);
+                  Toast.makeText(this, "Fordítás a vágólapra másolva.", Toast.LENGTH_SHORT).show();
               }
 
               void bringAppToFrontForClipboardRead() {
@@ -2962,7 +3019,7 @@ jobs:
                   }
               }
               String clipboardTargetCode(String text) {
-                  // V166: vágólapos iránylogika. Ha a szöveg már az alsó ablak nyelvének tűnik,
+                  // V167: vágólapos iránylogika. Ha a szöveg már az alsó ablak nyelvének tűnik,
                   // akkor a felső nyelvre fordítunk. Egyébként az alsó nyelvre.
                   String bottom = code(bottomLang);
                   String top = code(topLang);
@@ -3798,14 +3855,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V166.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V166.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V167.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V167.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V166
+          name: V167
           path: |
             artifact/*.apk
             artifact/*.aab
