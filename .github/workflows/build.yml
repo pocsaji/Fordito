@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 163; versionName = "16.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 164; versionName = "16.4" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V163" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V164" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -232,6 +232,9 @@ jobs:
               android.view.WindowManager floatingWindowManager;
               android.view.View floatingButtonView;
               android.view.View floatingResultView;
+              Dialog clipboardDialog;
+              TextView clipboardSourceView, clipboardTranslationView;
+              String clipboardCurrentSource = "";
               String pendingClipboardText = "";
               boolean clipboardResponseMode = false;
               boolean manualTopSource = true;
@@ -474,7 +477,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V163");
+                  TextView title = label("Fordito_V164");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1386,7 +1389,7 @@ jobs:
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
 
-                  // V163: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+                  // V164: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
                   if(clipboardResponseMode) {
                       clipboardResponseMode = false;
                       pendingClipboardText = "";
@@ -2878,26 +2881,25 @@ jobs:
               }
 
               void translateClipboardFromFloatingButton() {
-                  if(!hasKey()) { showApi(); return; }
-                  showFloatingResultWindow("Vágólap olvasása…");
-                  new Handler().postDelayed(() -> translateClipboardNow(true), 220);
+                  if(!hasKey()) { bringAppToFrontForClipboardRead(); new Handler().postDelayed(() -> showApi(), 250); return; }
+                  hideFloatingResultWindow();
+                  bringAppToFrontForClipboardRead();
+                  new Handler().postDelayed(() -> translateClipboardNow(false), 480);
               }
 
               void translateClipboardNow(boolean allowForegroundRetry) {
-                  String text = getClipboardText();
-                  if(text.trim().length() == 0 && allowForegroundRetry && Build.VERSION.SDK_INT >= 29) {
-                      bringAppToFrontForClipboardRead();
-                      showFloatingResultWindow("Vágólap olvasása…");
-                      new Handler().postDelayed(() -> translateClipboardNow(false), 650);
+                  String text = getClipboardText().trim();
+                  clipboardCurrentSource = text;
+                  if(text.length() == 0) {
+                      showClipboardTranslatorPanel("", "Nincs fordítható szöveg a vágólapon. Másold ki újra a szöveget, majd nyomd meg ismét a lebegő gombot.");
                       return;
                   }
-                  if(text.trim().length() == 0) {
-                      showFloatingResultWindow("Nincs fordítható szöveg a vágólapon. Másold ki újra a szöveget, majd nyomd meg ismét a lebegő gombot.");
-                      return;
-                  }
-                  showFloatingResultWindow("Fordítás folyamatban…");
-                  String target = clipboardTargetCode(text.trim());
-                  String payload = "SOURCE_LANG: AUTO\nTARGET_LANG: " + target + "\nTEXT:\n" + text.trim();
+                  showClipboardTranslatorPanel(text, "Fordítás folyamatban…");
+                  String target = clipboardTargetCode(text);
+                  String payload = "SOURCE_LANG: AUTO
+TARGET_LANG: " + target + "
+TEXT:
+" + text;
                   if(ws == null || !connected) {
                       pendingClipboardText = payload;
                       start(false);
@@ -2937,7 +2939,7 @@ jobs:
                   }
               }
               String clipboardTargetCode(String text) {
-                  // V163: vágólapos iránylogika. Ha a szöveg már az alsó ablak nyelvének tűnik,
+                  // V164: vágólapos iránylogika. Ha a szöveg már az alsó ablak nyelvének tűnik,
                   // akkor a felső nyelvre fordítunk. Egyébként az alsó nyelvre.
                   String bottom = code(bottomLang);
                   String top = code(topLang);
@@ -3032,12 +3034,86 @@ jobs:
               void applyClipboardTranslation(String out) {
                   String tr = cleanOneBlockTranslation(out);
                   if(!isCleanManualTranslation(tr)) {
-                      showFloatingResultWindow("Nem tiszta fordítás érkezett. Próbáld újra.");
+                      showClipboardTranslatorPanel(clipboardCurrentSource, "Nem tiszta fordítás érkezett. Próbáld újra.");
                       return;
                   }
                   setClipboardText(tr);
-                  showFloatingResultWindow(tr);
+                  showClipboardTranslatorPanel(clipboardCurrentSource, tr);
                   Toast.makeText(this, "Fordítás a vágólapra másolva.", Toast.LENGTH_SHORT).show();
+              }
+
+              void showClipboardTranslatorPanel(String source, String translation) {
+                  try {
+                      if(clipboardDialog == null) {
+                          clipboardDialog = new Dialog(this);
+                          LinearLayout lay = new LinearLayout(this);
+                          lay.setOrientation(LinearLayout.VERTICAL);
+                          lay.setPadding(22, 18, 22, 18);
+                          lay.setBackgroundColor(Color.rgb(28,31,37));
+
+                          TextView title = label("Vágólap fordító");
+                          title.setTextSize(22);
+                          title.setTextColor(Color.WHITE);
+                          lay.addView(title, new LinearLayout.LayoutParams(-1, -2));
+
+                          TextView srcTitle = label("Vágólapról beolvasva:");
+                          srcTitle.setTextSize(14);
+                          lay.addView(srcTitle, new LinearLayout.LayoutParams(-1, -2));
+                          clipboardSourceView = label("");
+                          clipboardSourceView.setTextSize(17);
+                          clipboardSourceView.setTextColor(Color.WHITE);
+                          clipboardSourceView.setMaxLines(7);
+                          clipboardSourceView.setPadding(0, 4, 0, 12);
+                          lay.addView(clipboardSourceView, new LinearLayout.LayoutParams(-1, -2));
+
+                          TextView trTitle = label("Fordítás:");
+                          trTitle.setTextSize(14);
+                          lay.addView(trTitle, new LinearLayout.LayoutParams(-1, -2));
+                          clipboardTranslationView = label("");
+                          clipboardTranslationView.setTextSize(20);
+                          clipboardTranslationView.setTextColor(Color.WHITE);
+                          clipboardTranslationView.setMaxLines(10);
+                          clipboardTranslationView.setPadding(0, 4, 0, 16);
+                          lay.addView(clipboardTranslationView, new LinearLayout.LayoutParams(-1, -2));
+
+                          LinearLayout row1 = row();
+                          Button copy = btn("MÁSOL");
+                          Button hide = btn("HÁTTÉRBE");
+                          copy.setOnClickListener(v -> {
+                              String t = clipboardTranslationView == null ? "" : clipboardTranslationView.getText().toString().trim();
+                              if(t.length() > 0 && !t.equals("Fordítás folyamatban…")) {
+                                  setClipboardText(t);
+                                  Toast.makeText(this, "Vágólapra másolva.", Toast.LENGTH_SHORT).show();
+                              }
+                          });
+                          hide.setOnClickListener(v -> { try { if(clipboardDialog != null) clipboardDialog.dismiss(); } catch(Exception ignored) {} moveTaskToBack(true); });
+                          row1.addView(copy, new LinearLayout.LayoutParams(0,70,1));
+                          row1.addView(hide, new LinearLayout.LayoutParams(0,70,1));
+                          lay.addView(row1);
+
+                          LinearLayout row2 = row();
+                          Button retry = btn("ÚJRA");
+                          Button close = btn("BEZÁR");
+                          retry.setOnClickListener(v -> translateClipboardNow(false));
+                          close.setOnClickListener(v -> { try { if(clipboardDialog != null) clipboardDialog.dismiss(); } catch(Exception ignored) {} });
+                          row2.addView(retry, new LinearLayout.LayoutParams(0,64,1));
+                          row2.addView(close, new LinearLayout.LayoutParams(0,64,1));
+                          lay.addView(row2);
+
+                          clipboardDialog.setContentView(lay);
+                      }
+                      if(clipboardSourceView != null) clipboardSourceView.setText(source == null || source.trim().length() == 0 ? "—" : source.trim());
+                      if(clipboardTranslationView != null) clipboardTranslationView.setText(translation == null ? "" : translation.trim());
+                      if(!clipboardDialog.isShowing()) clipboardDialog.show();
+                      android.view.Window w = clipboardDialog.getWindow();
+                      if(w != null) {
+                          w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+                          w.setLayout(-1, -2);
+                          w.setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+                      }
+                  } catch(Exception e) {
+                      Toast.makeText(this, translation == null ? "Vágólap fordító hiba." : translation, Toast.LENGTH_LONG).show();
+                  }
               }
 
               void setClipboardText(String text) {
@@ -3699,14 +3775,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V163.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V163.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V164.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V164.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V163
+          name: V164
           path: |
             artifact/*.apk
             artifact/*.aab
