@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 142; versionName = "14.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 143; versionName = "14.3" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V142" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V143" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -213,6 +213,7 @@ jobs:
               boolean finalizingStop = false;
               boolean interpreterMode = false;
               String interpreterAudioMode = "off";
+              String lastInterpreterAudioMode = "headset";
               volatile long ttsMuteUntilMs = 0L;
               static final int MAX_TRAILING_SILENCE_SEND_MS = 600;
               static final int PRE_ROLL_AUDIO_MS = 500;
@@ -387,9 +388,14 @@ jobs:
                   androidEffectsMode = sp.getString("androidEffectsMode", "ns_only");
                   openAiNoiseMode = "off"; // V117: OpenAI zajszűrés fixen kikapcsolva
                   interpreterMode = sp.getBoolean("interpreterMode", false);
-                  interpreterAudioMode = sp.getString("interpreterAudioMode", interpreterMode ? "headset" : "off");
+                  lastInterpreterAudioMode = sp.getString("lastInterpreterAudioMode", "headset");
+                  if(!"speaker".equals(lastInterpreterAudioMode) && !"headset".equals(lastInterpreterAudioMode)) lastInterpreterAudioMode = "headset";
+                  interpreterAudioMode = sp.getString("interpreterAudioMode", interpreterMode ? lastInterpreterAudioMode : "off");
                   if("off".equals(interpreterAudioMode)) interpreterMode = false;
-                  else interpreterMode = true;
+                  else {
+                      interpreterMode = true;
+                      if("speaker".equals(interpreterAudioMode) || "headset".equals(interpreterAudioMode)) lastInterpreterAudioMode = interpreterAudioMode;
+                  }
                   mirrorBottomMode = sp.getBoolean("mirrorBottomMode", false);
                   topLang = sp.getString("topLang", "fr");
                   bottomLang = sp.getString("bottomLang", "hu");
@@ -435,6 +441,7 @@ jobs:
                     .putString("openAiNoiseMode", openAiNoiseMode)
                     .putBoolean("interpreterMode", interpreterMode)
                     .putString("interpreterAudioMode", interpreterAudioMode)
+                    .putString("lastInterpreterAudioMode", lastInterpreterAudioMode)
                     .putBoolean("mirrorBottomMode", mirrorBottomMode)
                     .putString("topLang", topLang)
                     .putString("bottomLang", bottomLang)
@@ -449,7 +456,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V142");
+                  TextView title = label("Fordito_V143");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1641,11 +1648,36 @@ jobs:
                   return t;
               }
 
+              boolean isAllowedShortReply(String text) {
+                  if(text == null) return false;
+                  String x = text.toLowerCase(Locale.ROOT)
+                      .replaceAll("[^a-z0-9áéíóöőúüűàâçèéêëîïôùûüÿñæœß\\s]", " ")
+                      .replaceAll("\\s+", " ").trim();
+                  if(x.length() == 0) return false;
+
+                  String[] one = {
+                      "igen","nem","jó","jo","ok","oké","oke","rendben","persze","talán","talan",
+                      "ma","holnap","tegnap","reggel","este","itt","ott","köszönöm","koszonom",
+                      "oui","non","bon","merci","demain","hier","matin","soir",
+                      "yes","no","okay","thanks","tomorrow","yesterday"
+                  };
+                  for(String w: one) if(x.equals(w)) return true;
+
+                  String[] two = {
+                      "nem tudom","jó lesz","jo lesz","ma este","holnap reggel","holnap este",
+                      "igen köszönöm","igen koszonom","nem köszönöm","nem koszonom",
+                      "oui merci","non merci","d accord","daccord","yes thanks","no thanks"
+                  };
+                  for(String w: two) if(x.equals(w)) return true;
+                  return false;
+              }
+
               boolean passesSelectedPairInputGate(String block) {
                   if(block == null) return false;
                   String t = block.trim();
                   if(t.length() == 0) return false;
                   int words = t.split("\\s+").length;
+                  if(words <= 2 && isAllowedShortReply(t)) return true;
                   if(words <= 1) return false;
 
                   // Először a régi, óvatos harmadik-nyelv/zaj szűrő.
@@ -2235,11 +2267,18 @@ jobs:
                       refreshMenuButton((Button)v, "Háttér / lezárt kijelző", backgroundScreenLabel(), backgroundScreenAllowed);
                       updateButtons();
                   });
-                  addMenuButton(box, "Tolmács felolvasás", interpreterQuickLabel(), interpreterMode, v -> {
+                  Button interpreterBtn = addMenuButton(box, "Tolmács mód", interpreterQuickLabel(), interpreterMode, v -> {
                       toggleInterpreterQuick();
-                      refreshMenuButton((Button)v, "Tolmács felolvasás", interpreterQuickLabel(), interpreterMode);
+                      refreshInterpreterMenuButton((Button)v);
                       updateButtons();
                   });
+                  interpreterBtn.setOnLongClickListener(v -> {
+                      disableInterpreterQuick();
+                      refreshInterpreterMenuButton((Button)v);
+                      updateButtons();
+                      return true;
+                  });
+                  refreshInterpreterMenuButton(interpreterBtn);
                   addMenuButton(box, "Tükör mód", displayModeLabel(), mirrorBottomMode, v -> {
                       toggleDisplayModeQuick();
                       refreshMenuButton((Button)v, "Tükör mód", displayModeLabel(), mirrorBottomMode);
@@ -2304,6 +2343,23 @@ jobs:
                   b.setText(ss);
                   b.setBackgroundColor(active ? Color.rgb(30,140,70) : Color.rgb(95,95,95));
               }
+
+              void refreshInterpreterMenuButton(Button b) {
+                  String title = "Tolmács mód";
+                  String sub = interpreterQuickLabel();
+                  String text = title + "\n" + sub;
+                  SpannableString ss = new SpannableString(text);
+                  ss.setSpan(new AbsoluteSizeSpan(15, true), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                  ss.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                  int st = title.length() + 1;
+                  ss.setSpan(new AbsoluteSizeSpan(12, true), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                  ss.setSpan(new ForegroundColorSpan(Color.RED), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                  b.setText(ss);
+                  if(!interpreterMode) b.setBackgroundColor(Color.rgb(95,95,95));
+                  else if("speaker".equals(interpreterAudioMode)) b.setBackgroundColor(Color.rgb(30,140,70));
+                  else b.setBackgroundColor(Color.rgb(35,85,150));
+              }
+
 
               String translationMenuLabel() {
                   return profileLabel() + " / " + modeLabel();
@@ -2406,21 +2462,32 @@ jobs:
               }
 
               String interpreterQuickLabel() {
-                  return interpreterMode ? "aktív – csak a következő újraindításig" : "inaktív – csak szöveges fordítás";
+                  if(!interpreterMode) return "kikapcsolva – csak szöveges fordítás";
+                  if("speaker".equals(interpreterAudioMode)) return "KIHANGOSÍTOTT MÓD";
+                  return "BLUETOOTH MÓD";
+              }
+
+              void disableInterpreterQuick() {
+                  interpreterMode = false;
+                  interpreterAudioMode = "off";
+                  ttsMuteUntilMs = 0L;
+                  speakQueue.clear();
+                  ttsSpeaking = false;
+                  try { if(tts != null) tts.stop(); } catch(Exception ignored) {}
+                  save();
+                  Toast.makeText(this, "Tolmács mód kikapcsolva.", Toast.LENGTH_SHORT).show();
               }
 
               void toggleInterpreterQuick() {
-                  if(interpreterMode) {
-                      interpreterMode = false;
-                      interpreterAudioMode = "off";
-                      ttsMuteUntilMs = 0L;
-                      speakQueue.clear();
-                      ttsSpeaking = false;
-                      try { if(tts != null) tts.stop(); } catch(Exception ignored) {}
-                  } else {
+                  if(!interpreterMode) {
                       interpreterMode = true;
-                      interpreterAudioMode = "headset";
+                      interpreterAudioMode = lastInterpreterAudioMode;
+                      if(!"speaker".equals(interpreterAudioMode) && !"headset".equals(interpreterAudioMode)) interpreterAudioMode = "headset";
+                  } else {
+                      if("headset".equals(interpreterAudioMode)) interpreterAudioMode = "speaker";
+                      else interpreterAudioMode = "headset";
                   }
+                  if("speaker".equals(interpreterAudioMode) || "headset".equals(interpreterAudioMode)) lastInterpreterAudioMode = interpreterAudioMode;
                   save();
                   Toast.makeText(this, interpreterQuickLabel(), Toast.LENGTH_SHORT).show();
                   updateButtons();
@@ -2907,14 +2974,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V142.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V142.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V143.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V143.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V142
+          name: V143
           path: |
             artifact/*.apk
             artifact/*.aab
