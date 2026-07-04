@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 161; versionName = "16.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 161; versionName = "16.2" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V161" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V162" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -474,7 +474,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V161");
+                  TextView title = label("Fordito_V162");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1386,7 +1386,7 @@ jobs:
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
 
-                  // V161: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+                  // V162: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
                   if(clipboardResponseMode) {
                       clipboardResponseMode = false;
                       pendingClipboardText = "";
@@ -2896,7 +2896,7 @@ jobs:
                       return;
                   }
                   showFloatingResultWindow("Fordítás folyamatban…");
-                  String target = code(bottomLang);
+                  String target = clipboardTargetCode(text.trim());
                   String payload = "SOURCE_LANG: AUTO\nTARGET_LANG: " + target + "\nTEXT:\n" + text.trim();
                   if(ws == null || !connected) {
                       pendingClipboardText = payload;
@@ -2936,6 +2936,46 @@ jobs:
                       return "";
                   }
               }
+              String clipboardTargetCode(String text) {
+                  // V162: vágólapos iránylogika. Ha a szöveg már az alsó ablak nyelvének tűnik,
+                  // akkor a felső nyelvre fordítunk. Egyébként az alsó nyelvre.
+                  String bottom = code(bottomLang);
+                  String top = code(topLang);
+                  String guessed = guessClipboardLangCode(text);
+                  if(guessed.length() > 0 && guessed.equalsIgnoreCase(bottom)) return top;
+                  return bottom;
+              }
+
+              String guessClipboardLangCode(String text) {
+                  String t = (text == null ? "" : text).toLowerCase(Locale.ROOT);
+                  if(t.trim().length() == 0) return "";
+                  int hu = 0, fr = 0, de = 0, en = 0, it = 0;
+                  for(int i=0;i<t.length();i++) {
+                      char ch = t.charAt(i);
+                      if("áéíóöőúüű".indexOf(ch) >= 0) hu += 3;
+                      if("àâçéèêëîïôùûüÿœæ".indexOf(ch) >= 0) fr += 2;
+                      if("äöüß".indexOf(ch) >= 0) de += 3;
+                      if("ìòàèù".indexOf(ch) >= 0) it += 2;
+                  }
+                  String pad = " " + t.replaceAll("[^\p{L}]+", " ") + " ";
+                  String[] huWords = {" hogy "," vagy "," nem "," igen "," ezt "," azt "," akkor "," most "," lehet "," kérlek "," szeretném "," miért "," mert "," tehát "," van "," lesz "," volt "};
+                  String[] frWords = {" je "," tu "," vous "," nous "," est "," pas "," que "," pour "," avec "," dans "," une "," des "," les "," mais "," donc "," alors "," pourquoi "};
+                  String[] deWords = {" ich "," du "," sie "," wir "," nicht "," und "," oder "," dass "," mit "," für "," ein "," eine "," der "," die "," das "," warum "};
+                  String[] enWords = {" i "," you "," we "," they "," the "," and "," or "," not "," with "," for "," this "," that "," why "," because "};
+                  String[] itWords = {" io "," tu "," noi "," non "," che "," per "," con "," una "," gli "," sono "," perché "," allora "};
+                  for(String w: huWords) if(pad.contains(w)) hu += 2;
+                  for(String w: frWords) if(pad.contains(w)) fr += 2;
+                  for(String w: deWords) if(pad.contains(w)) de += 2;
+                  for(String w: enWords) if(pad.contains(w)) en += 2;
+                  for(String w: itWords) if(pad.contains(w)) it += 2;
+                  int max = hu; String lang = "HU";
+                  if(fr > max) { max = fr; lang = "FR"; }
+                  if(de > max) { max = de; lang = "DE"; }
+                  if(en > max) { max = en; lang = "EN"; }
+                  if(it > max) { max = it; lang = "IT"; }
+                  return max >= 2 ? lang : "";
+              }
+
 
               void sendClipboardTextToTranslate(String text) {
                   clipboardResponseMode = true;
@@ -3659,14 +3699,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V161.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V161.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V162.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V162.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V161
+          name: V162
           path: |
             artifact/*.apk
             artifact/*.aab
