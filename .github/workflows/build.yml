@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 171; versionName = "17.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 172; versionName = "17.2" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V171" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V172" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -486,7 +486,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V171");
+                  TextView title = label("Fordito_V172");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1394,7 +1394,7 @@ jobs:
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
 
-                  // V171: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+                  // V172: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
                   if(clipboardResponseMode) {
                       clipboardResponseMode = false;
                       pendingClipboardText = "";
@@ -2836,7 +2836,7 @@ jobs:
                       Button b = btn("⇄");
                       b.setTextSize(30);
                       b.setTextColor(Color.WHITE);
-                      // V171: a jel optikailag lejjebb ült a gombban, ezért kicsit feljebb igazítjuk.
+                      // V172: a jel optikailag lejjebb ült a gombban, ezért kicsit feljebb igazítjuk.
                       b.setGravity(Gravity.CENTER);
                       b.setIncludeFontPadding(false);
                       b.setPadding(0, 0, 0, 10);
@@ -3097,7 +3097,7 @@ jobs:
                   if(huInput) {
                       if(prepared.length() == 0) prepared = source == null ? "" : source.trim();
                   } else {
-                      // V171: idegen nyelvű bemenetnél a középső mező üres marad; csak a magyar fordítás kell.
+                      // V172: idegen nyelvű bemenetnél a középső mező üres marad; csak a magyar fordítás kell.
                       prepared = "";
                   }
                   if(translation.length() == 0) {
@@ -3157,7 +3157,7 @@ jobs:
               }
 
               String clipboardTargetCode(String text) {
-                  // V171: vágólapos iránylogika.
+                  // V172: vágólapos iránylogika.
                   // Magyar bemenet: a másik kiválasztott nyelvre fordít.
                   // Idegen bemenet: magyarra fordít, a középső mező üres marad.
                   String bottom = code(bottomLang);
@@ -3273,6 +3273,19 @@ jobs:
                   Toast.makeText(this, "Fordítás a vágólapra másolva.", Toast.LENGTH_SHORT).show();
               }
 
+              void styleClipboardButton(Button b) {
+                  try {
+                      android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+                      bg.setColor(Color.rgb(92,92,92));
+                      bg.setCornerRadius(6);
+                      b.setBackground(bg);
+                      b.setTextColor(Color.WHITE);
+                      b.setTextSize(15);
+                      b.setGravity(Gravity.CENTER);
+                      b.setPadding(4, 0, 4, 0);
+                  } catch(Exception ignored) {}
+              }
+
               EditText clipboardEditBox(String hint, int textSize, int maxLines) {
                   EditText e = new EditText(this);
                   e.setHint(hint);
@@ -3306,25 +3319,28 @@ jobs:
                           TextView rawTitle = label("Nyers beolvasott szöveg:");
                           rawTitle.setTextSize(13);
                           lay.addView(rawTitle, new LinearLayout.LayoutParams(-1, -2));
-                          clipboardRawEdit = clipboardEditBox("vágólap szövege", 16, 5);
+                          clipboardRawEdit = clipboardEditBox("vágólap szövege", 15, 5);
                           lay.addView(clipboardRawEdit, new LinearLayout.LayoutParams(-1, 0, 1));
 
                           TextView prepTitle = label("Értelmezett / fordítandó szöveg:");
                           prepTitle.setTextSize(13);
                           lay.addView(prepTitle, new LinearLayout.LayoutParams(-1, -2));
-                          clipboardPreparedEdit = clipboardEditBox("javított vagy fordítandó szöveg", 16, 5);
+                          clipboardPreparedEdit = clipboardEditBox("javított vagy fordítandó szöveg", 15, 5);
                           lay.addView(clipboardPreparedEdit, new LinearLayout.LayoutParams(-1, 0, 1));
 
                           TextView trTitle = label("Fordítás:");
                           trTitle.setTextSize(13);
                           lay.addView(trTitle, new LinearLayout.LayoutParams(-1, -2));
-                          clipboardTranslationEdit = clipboardEditBox("fordítás", 17, 7);
+                          clipboardTranslationEdit = clipboardEditBox("fordítás", 16, 7);
                           lay.addView(clipboardTranslationEdit, new LinearLayout.LayoutParams(-1, 0, 1));
 
                           LinearLayout buttons = row();
                           Button translate = btn("FORDÍT");
                           Button copy = btn("MÁSOL");
                           Button hide = btn("HÁTTÉRBE");
+                          styleClipboardButton(translate);
+                          styleClipboardButton(copy);
+                          styleClipboardButton(hide);
                           translate.setOnClickListener(v -> runClipboardPanelTranslate());
                           copy.setOnClickListener(v -> {
                               String t = clipboardTranslationEdit == null ? "" : clipboardTranslationEdit.getText().toString().trim();
@@ -3335,9 +3351,15 @@ jobs:
                               }
                           });
                           hide.setOnClickListener(v -> { try { if(clipboardDialog != null) clipboardDialog.dismiss(); } catch(Exception ignored) {} moveTaskToBack(true); });
-                          buttons.addView(translate, new LinearLayout.LayoutParams(0,64,1));
-                          buttons.addView(copy, new LinearLayout.LayoutParams(0,64,1));
-                          buttons.addView(hide, new LinearLayout.LayoutParams(0,64,1));
+                          LinearLayout.LayoutParams bp1 = new LinearLayout.LayoutParams(0,64,1);
+                          LinearLayout.LayoutParams bp2 = new LinearLayout.LayoutParams(0,64,1);
+                          LinearLayout.LayoutParams bp3 = new LinearLayout.LayoutParams(0,64,1);
+                          bp1.setMargins(0,0,8,0);
+                          bp2.setMargins(4,0,4,0);
+                          bp3.setMargins(8,0,0,0);
+                          buttons.addView(translate, bp1);
+                          buttons.addView(copy, bp2);
+                          buttons.addView(hide, bp3);
                           lay.addView(buttons);
 
                           clipboardDialog.setContentView(lay);
@@ -3351,8 +3373,15 @@ jobs:
                       android.view.Window w = clipboardDialog.getWindow();
                       if(w != null) {
                           w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-                          w.setLayout(-1, -1);
-                          w.setGravity(Gravity.CENTER);
+                          int topDp = 75;
+                          int topPx = (int)(topDp * getResources().getDisplayMetrics().density + 0.5f);
+                          int h = getResources().getDisplayMetrics().heightPixels - topPx;
+                          if(h < 300) h = -1;
+                          w.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+                          w.setLayout(-1, h);
+                          android.view.WindowManager.LayoutParams lp = w.getAttributes();
+                          lp.y = topPx;
+                          w.setAttributes(lp);
                       }
                   } catch(Exception e) {
                       Toast.makeText(this, translation == null ? "Vágólap fordító hiba." : translation, Toast.LENGTH_LONG).show();
@@ -4034,14 +4063,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V171.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V171.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V172.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V172.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V171
+          name: V172
           path: |
             artifact/*.apk
             artifact/*.aab
