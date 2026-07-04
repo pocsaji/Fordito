@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 151; versionName = "15.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 152; versionName = "15.2" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V151" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V152" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -235,6 +235,11 @@ jobs:
               long firstSpeechHeardAt = 0L;
               long liveBufferStartedAt = 0L;
               int liveIdleFlushToken = 0;
+              // V152: eseménysorrend-védelem. Nem várakoztat, csak megjegyzi,
+              // hogy a delta útvonal már adott ki blokkot, ezért a közvetlen completed/idle
+              // nem zárhatja le ugyanazt még egyszer.
+              long lastLiveBlockReleasedAt = 0L;
+              boolean liveDeltaReleasedSinceLastCompleted = false;
               boolean firstSpeechBlockReleased = false;
               int pendingLiveBlockId = -1;
               final ArrayDeque<Integer> liveTranslateQueue = new ArrayDeque<>();
@@ -456,7 +461,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V151");
+                  TextView title = label("Fordito_V152");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1394,6 +1399,8 @@ jobs:
                   firstSpeechHeardAt = 0L;
                   liveBufferStartedAt = 0L;
                   liveIdleFlushToken++;
+                  lastLiveBlockReleasedAt = 0L;
+                  liveDeltaReleasedSinceLastCompleted = false;
                   firstSpeechBlockReleased = false;
                   liveTranslateMode = false;
                   pendingLiveBlockId = -1;
@@ -1572,17 +1579,23 @@ jobs:
                   if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = now;
                   if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
                   liveTranscriptBuffer += delta;
-                  flushReadyTranscriptBlocks(false);
+                  int released = flushReadyTranscriptBlocks(false);
+                  if(released > 0) {
+                      liveDeltaReleasedSinceLastCompleted = true;
+                      // V152: a már kiadott delta-blokkhoz tartozó korábbi idle flush ne futhasson rá később.
+                      liveIdleFlushToken++;
+                  }
 
-                  // V75: ha csak 2-3 szó hangzott el és utána hosszú csend van,
-                  // ne ragadjon a pufferben. Ez nem VAD és nem beszédvégi darabolás,
-                  // csak biztonsági utóflush rövid, magára hagyott blokkokhoz.
-                  final int token = ++liveIdleFlushToken;
-                  topBox.postDelayed(() -> {
-                      if(token == liveIdleFlushToken && streaming && liveTranscriptBuffer.trim().length() > 0) {
-                          flushReadyTranscriptBlocks(true);
-                      }
-                  }, 2400);
+                  // V75/V152: csak akkor ütemezünk utóflush-t, ha tényleg maradt pufferben szöveg.
+                  // Ez nem lassítás: nincs plusz várakozás, csak a régi tokenek érvénytelenítése.
+                  if(liveTranscriptBuffer.trim().length() > 0) {
+                      final int token = ++liveIdleFlushToken;
+                      topBox.postDelayed(() -> {
+                          if(token == liveIdleFlushToken && streaming && liveTranscriptBuffer.trim().length() > 0) {
+                              flushReadyTranscriptBlocks(true);
+                          }
+                      }, 2400);
+                  }
               }
 
               void handleTranscriptCompleted(String transcript) {
@@ -1591,24 +1604,29 @@ jobs:
                   // amit a delta eseményekből már kiírtunk és fordítottunk.
                   // Ha volt delta ebben a körben, NEM töltjük vissza a teljes transcriptet,
                   // csak a bufferben maradt befejezetlen részt zárjuk le.
+                  boolean completedIsOnlyAlreadyReleased = false;
                   if(!liveHadTranscriptDelta && liveTranscriptBuffer.trim().length() == 0 && transcript != null && transcript.trim().length() > 0) {
-                      liveBufferStartedAt = System.currentTimeMillis();
-                      liveTranscriptBuffer = transcript;
+                      completedIsOnlyAlreadyReleased = isAlreadyReleasedTranscript(transcript);
+                      if(!completedIsOnlyAlreadyReleased) {
+                          liveBufferStartedAt = System.currentTimeMillis();
+                          liveTranscriptBuffer = transcript;
+                      }
                   }
-                  // V151: a completed nem nyelhet el értelmes félmondatot.
-                  // A vágásról továbbra is egyetlen központi blokkhatár-logika dönt:
-                  // pontnál/gondolathatárnál vág, vagy completed/idle esetén kiengedi
-                  // az emberi hosszúságú, nem teljesen lógó maradékot.
-                  flushReadyTranscriptBlocks(true);
+                  // V152: completed nem írhatja ki újra azt, amit a delta útvonal már kiadott.
+                  // Ha viszont valódi maradék van a pufferben, azonnal kiengedjük; nincs lassítás.
+                  int released = completedIsOnlyAlreadyReleased ? 0 : flushReadyTranscriptBlocks(true);
+                  if(released > 0) lastLiveBlockReleasedAt = System.currentTimeMillis();
                   liveIdleFlushToken++;
                   liveHadTranscriptDelta = false;
+                  liveDeltaReleasedSinceLastCompleted = false;
               }
 
-              void flushReadyTranscriptBlocks(boolean flushAll) {
+              int flushReadyTranscriptBlocks(boolean flushAll) {
+                  int releasedCount = 0;
                   // V74: az első élő blokkot nem engedjük ki azonnal 1-2 bizonytalan szóból.
                   // Ez szűri a kezdő "Microfoonprobe / Kazakhstan / UFO" jellegű félrehallást,
                   // de nem nyúl az audiohoz és nem épít új nyelvfelismerőt.
-                  if(!firstSpeechBlockReleased && !initialSpeechGateOpen()) return;
+                  if(!firstSpeechBlockReleased && !initialSpeechGateOpen()) return 0;
                   while(true) {
                       String b = popReadySpeechBlock(flushAll);
                       if(b == null || b.trim().length() == 0) break;
@@ -1630,8 +1648,15 @@ jobs:
                       if(id < 0) continue;
                       firstSpeechBlockReleased = true;
                       liveTranslateQueue.add(id);
+                      releasedCount++;
+                      lastLiveBlockReleasedAt = System.currentTimeMillis();
+                  }
+                  if(releasedCount > 0) {
+                      // V152: sikeres kiírás után a régi idle flush már nem zárhat ugyanarra.
+                      liveIdleFlushToken++;
                   }
                   processNextLiveTranslation();
+                  return releasedCount;
               }
 
               boolean initialSpeechGateOpen() {
@@ -1648,6 +1673,35 @@ jobs:
                   if(looksLikeObviousThirdLanguageNoise(s) && words < 5) return false;
                   if(firstHardSentenceEnd(s) >= 0 && words >= 3) return true;
                   if(s.length() >= 42 && words >= 4) return true;
+                  return false;
+              }
+
+              boolean isAlreadyReleasedTranscript(String transcript) {
+                  if(transcript == null) return false;
+                  String b = cleanTranscriptForSelectedPair(transcript);
+                  b = collapseAdjacentRepeatedPhrase(b);
+                  b = finalizeSpeechBlockText(b);
+                  b = applyTinyHungarianTermFixes(b);
+                  b = b.trim().replaceAll("\\s+", " ");
+                  if(b.length() == 0) return false;
+                  String h = normalizeLiveBlockHash(b);
+                  if(h.length() < 8) return false;
+                  return matchesVeryRecentReleasedBlock(h);
+              }
+
+              boolean matchesVeryRecentReleasedBlock(String h) {
+                  if(h == null || h.length() < 8) return false;
+                  if(recentLiveBlockHashes.contains(h)) return true;
+                  int checked = 0;
+                  Iterator<String> it = recentLiveBlockHashOrder.descendingIterator();
+                  while(it.hasNext() && checked < 8) {
+                      String old = it.next();
+                      checked++;
+                      if(old == null || old.length() < 8) continue;
+                      int min = Math.min(h.length(), old.length());
+                      int max = Math.max(h.length(), old.length());
+                      if(min >= 18 && (h.contains(old) || old.contains(h)) && (min * 100 / Math.max(1, max)) >= 82) return true;
+                  }
                   return false;
               }
 
@@ -1673,9 +1727,10 @@ jobs:
                   String h = normalizeLiveBlockHash(b);
                   if(h.length() < 3) return "";
 
-                  // Csak a szó szerinti ismétlést dobjuk el. A hasonló, de nem azonos blokk
-                  // inkább menjen át, mert beszédvesztést nem akarunk.
-                  if(recentLiveBlockHashes.contains(h)) return "";
+                  // V152: legutolsó lépésként, minden tisztítás után hasonlítunk a közvetlenül
+                  // frissen kiadott blokkokhoz. Nem új kapu: ugyanennek a normalizáló blokknak
+                  // a vége. Csak teljes vagy majdnem teljes ismétlést dobunk el.
+                  if(matchesVeryRecentReleasedBlock(h)) return "";
 
                   rememberLiveBlockHash(h);
                   return b;
@@ -3259,14 +3314,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V151.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V151.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V152.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V152.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V151
+          name: V152
           path: |
             artifact/*.apk
             artifact/*.aab
