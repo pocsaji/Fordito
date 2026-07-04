@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 152; versionName = "15.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 153; versionName = "15.3" }
 
               signingConfigs {
                   create("release") {
@@ -83,7 +83,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V152" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V153" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -234,8 +234,9 @@ jobs:
               boolean liveHadTranscriptDelta = false;
               long firstSpeechHeardAt = 0L;
               long liveBufferStartedAt = 0L;
+              long liveLastTranscriptDeltaAt = 0L;
               int liveIdleFlushToken = 0;
-              // V152: eseménysorrend-védelem. Nem várakoztat, csak megjegyzi,
+              // V153: eseménysorrend-védelem. Nem várakoztat, csak megjegyzi,
               // hogy a delta útvonal már adott ki blokkot, ezért a közvetlen completed/idle
               // nem zárhatja le ugyanazt még egyszer.
               long lastLiveBlockReleasedAt = 0L;
@@ -461,7 +462,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V152");
+                  TextView title = label("Fordito_V153");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1398,6 +1399,7 @@ jobs:
                   liveHadTranscriptDelta = false;
                   firstSpeechHeardAt = 0L;
                   liveBufferStartedAt = 0L;
+                  liveLastTranscriptDeltaAt = 0L;
                   liveIdleFlushToken++;
                   lastLiveBlockReleasedAt = 0L;
                   liveDeltaReleasedSinceLastCompleted = false;
@@ -1576,17 +1578,18 @@ jobs:
                   if(delta == null || delta.length() == 0) return;
                   liveHadTranscriptDelta = true;
                   long now = System.currentTimeMillis();
+                  liveLastTranscriptDeltaAt = now;
                   if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = now;
                   if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
                   liveTranscriptBuffer += delta;
                   int released = flushReadyTranscriptBlocks(false);
                   if(released > 0) {
                       liveDeltaReleasedSinceLastCompleted = true;
-                      // V152: a már kiadott delta-blokkhoz tartozó korábbi idle flush ne futhasson rá később.
+                      // V153: a már kiadott delta-blokkhoz tartozó korábbi idle flush ne futhasson rá később.
                       liveIdleFlushToken++;
                   }
 
-                  // V75/V152: csak akkor ütemezünk utóflush-t, ha tényleg maradt pufferben szöveg.
+                  // V75/V153: csak akkor ütemezünk utóflush-t, ha tényleg maradt pufferben szöveg.
                   // Ez nem lassítás: nincs plusz várakozás, csak a régi tokenek érvénytelenítése.
                   if(liveTranscriptBuffer.trim().length() > 0) {
                       final int token = ++liveIdleFlushToken;
@@ -1612,7 +1615,7 @@ jobs:
                           liveTranscriptBuffer = transcript;
                       }
                   }
-                  // V152: completed nem írhatja ki újra azt, amit a delta útvonal már kiadott.
+                  // V153: completed nem írhatja ki újra azt, amit a delta útvonal már kiadott.
                   // Ha viszont valódi maradék van a pufferben, azonnal kiengedjük; nincs lassítás.
                   int released = completedIsOnlyAlreadyReleased ? 0 : flushReadyTranscriptBlocks(true);
                   if(released > 0) lastLiveBlockReleasedAt = System.currentTimeMillis();
@@ -1652,7 +1655,7 @@ jobs:
                       lastLiveBlockReleasedAt = System.currentTimeMillis();
                   }
                   if(releasedCount > 0) {
-                      // V152: sikeres kiírás után a régi idle flush már nem zárhat ugyanarra.
+                      // V153: sikeres kiírás után a régi idle flush már nem zárhat ugyanarra.
                       liveIdleFlushToken++;
                   }
                   processNextLiveTranslation();
@@ -1727,7 +1730,7 @@ jobs:
                   String h = normalizeLiveBlockHash(b);
                   if(h.length() < 3) return "";
 
-                  // V152: legutolsó lépésként, minden tisztítás után hasonlítunk a közvetlenül
+                  // V153: legutolsó lépésként, minden tisztítás után hasonlítunk a közvetlenül
                   // frissen kiadott blokkokhoz. Nem új kapu: ugyanennek a normalizáló blokknak
                   // a vége. Csak teljes vagy majdnem teljes ismétlést dobunk el.
                   if(matchesVeryRecentReleasedBlock(h)) return "";
@@ -2047,20 +2050,71 @@ jobs:
                   String t = s.trim();
                   if(t.length() == 0) return -1;
 
-                  // V151: egyetlen blokkhatár-döntés.
-                  // 1) valódi mondatzárás; 2) hosszú beszédnél természetes gondolathatár;
-                  // 3) idle/completed esetén értelmezhető félmondat kiengedése.
+                  // V153: ugyanaz a központi blokkhatár-döntés marad, csak a flushAll ág
+                  // nem vághatja ki a frissen érkezett, még instabil utolsó szóelemet.
+                  // Nincs új kapu és nincs várakoztatás: ha biztos mondatvég vagy természetes
+                  // hosszú vágás van, az azonnal megy. Csak a completed/idle teljes-puffer
+                  // zárásnál védjük a szó végét.
                   int cut = firstHardSentenceEnd(s);
                   if(cut >= 0) return cut;
 
                   cut = smartLinguisticCut(s);
                   if(cut >= 0) return cut;
 
-                  if(shouldFlushShortIdleBlock(s)) return s.length();
+                  if(shouldFlushShortIdleBlock(s)) return safeWholeBufferFlushCut(s);
 
-                  if(flushAll && shouldForceFlushWholeBuffer(s)) return s.length();
+                  if(flushAll && shouldForceFlushWholeBuffer(s)) return safeWholeBufferFlushCut(s);
 
                   return -1;
+              }
+
+              int safeWholeBufferFlushCut(String s) {
+                  if(s == null) return -1;
+                  String t = s.trim();
+                  if(t.length() == 0) return -1;
+                  if(firstHardSentenceEnd(t) >= 0) return s.length();
+
+                  long sinceDelta = liveLastTranscriptDeltaAt > 0L ? System.currentTimeMillis() - liveLastTranscriptDeltaAt : 99999L;
+                  // Ha a completed közvetlenül a delta után jön, a Realtime gyakran még csak
+                  // szóelemet adott át (pl. "egysz" -> "egyszavas", "eset" -> "esetlegesen").
+                  // Ilyenkor nem az egész blokkot tartjuk vissza, csak az utolsó token marad
+                  // a pufferben, hogy a következő delta hozzá tudjon nőni. Idle-nél / később
+                  // ez nem aktív, tehát nem lassítja a normál működést.
+                  if(sinceDelta <= 700 && hasPossiblyUnstableTrailingToken(t)) {
+                      int cut = lastWhitespaceBeforeLastToken(s);
+                      if(cut > 0) {
+                          String prefix = s.substring(0, cut).trim();
+                          int words = prefix.length() == 0 ? 0 : prefix.split("\\s+").length;
+                          if(words >= 3) return cut;
+                      }
+                  }
+                  return s.length();
+              }
+
+              int lastWhitespaceBeforeLastToken(String s) {
+                  if(s == null) return -1;
+                  int end = s.length() - 1;
+                  while(end >= 0 && Character.isWhitespace(s.charAt(end))) end--;
+                  if(end < 0) return -1;
+                  int i = end;
+                  while(i >= 0 && !Character.isWhitespace(s.charAt(i))) i--;
+                  return i >= 0 ? i + 1 : -1;
+              }
+
+              boolean hasPossiblyUnstableTrailingToken(String text) {
+                  if(text == null) return false;
+                  String t = text.trim();
+                  if(t.length() == 0) return false;
+                  char lastCh = t.charAt(t.length() - 1);
+                  if(lastCh == '.' || lastCh == '!' || lastCh == '?' || lastCh == '…' || lastCh == ',' || lastCh == ';' || lastCh == ':') return false;
+                  int sp = Math.max(Math.max(t.lastIndexOf(' '), t.lastIndexOf('\n')), t.lastIndexOf('\t'));
+                  if(sp < 0) return false;
+                  String last = t.substring(sp + 1).replaceAll("[^a-zA-ZáéíóöőúüűÁÉÍÓÖŐÚÜŰàâçèéêëîïôùûüÿñæœßÀÂÇÈÉÊËÎÏÔÙÛÜŸÑÆŒ]", "");
+                  if(last.length() == 0) return false;
+                  if(last.length() <= 2) return true;
+                  // A szóköz nélküli Realtime szófolytatások tipikusan rövid/közepes tokenként
+                  // érkeznek. Nem nyelvi szótár, csak az utolsó, friss token védelme.
+                  return last.length() <= 8;
               }
 
               boolean shouldFlushShortIdleBlock(String s) {
@@ -3314,14 +3368,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V152.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V152.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V153.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V153.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V152
+          name: V153
           path: |
             artifact/*.apk
             artifact/*.aab
