@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 180; versionName = "18.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 181; versionName = "18.1" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V180" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V181" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -487,7 +487,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V180");
+                  TextView title = label("Fordito_V181");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2846,7 +2846,7 @@ jobs:
                       b.setMinHeight(0);
                       b.setMinimumHeight(0);
                       b.setBackgroundColor(Color.rgb(30,120,75));
-                      b.setOnClickListener(v -> translateClipboardFromFloatingButton());
+                      b.setOnClickListener(v -> floatingTranslatorButtonAction());
                       b.setOnLongClickListener(v -> { hideFloatingTranslator(); floatingTranslatorEnabled = false; save(); return true; });
                       final android.view.WindowManager.LayoutParams lp = floatingParams(96, 96, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
                       lp.x = floatingButtonX;
@@ -2878,7 +2878,7 @@ jobs:
                               floatingButtonX = lp.x;
                               floatingButtonY = lp.y;
                               save();
-                              if(!moved[0]) translateClipboardFromFloatingButton();
+                              if(!moved[0]) floatingTranslatorButtonAction();
                               return true;
                           }
                           return true;
@@ -2906,6 +2906,17 @@ jobs:
                   try { if(floatingWindowManager != null && floatingButtonView != null) floatingWindowManager.removeView(floatingButtonView); } catch(Exception ignored) {}
                   floatingButtonView = null;
                   hideFloatingResultWindow();
+              }
+
+              void floatingTranslatorButtonAction() {
+                  try {
+                      if(clipboardDialog != null && clipboardDialog.isShowing()) {
+                          clipboardDialog.dismiss();
+                          moveTaskToBack(true);
+                          return;
+                      }
+                  } catch(Exception ignored) {}
+                  translateClipboardFromFloatingButton();
               }
 
               void translateClipboardFromFloatingButton() {
