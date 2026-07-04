@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 168; versionName = "16.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 169; versionName = "16.9" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V168" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V169" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -485,7 +485,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V168");
+                  TextView title = label("Fordito_V169");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1393,7 +1393,7 @@ jobs:
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
 
-                  // V168: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+                  // V169: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
                   if(clipboardResponseMode) {
                       clipboardResponseMode = false;
                       pendingClipboardText = "";
@@ -3049,7 +3049,7 @@ jobs:
                                       JSONObject msg = choices.getJSONObject(0).optJSONObject("message");
                                       if(msg != null) out = msg.optString("content", "");
                                   }
-                                  final String result = cleanOneBlockTranslation(out);
+                                  final String result = cleanClipboardApiText(out);
                                   runOnUiThread(() -> applyClipboardTranslationOnly(preparedText, result));
                               } catch(Exception ex) {
                                   runOnUiThread(() -> showClipboardTranslatorPanel(clipboardCurrentSource, preparedText, "Vágólap-fordítási hiba: nem értelmezhető válasz."));
@@ -3061,6 +3061,17 @@ jobs:
                   }
               }
 
+              String cleanClipboardApiText(String out) {
+                  String t = out == null ? "" : out.trim();
+                  if(t.startsWith("```")) {
+                      t = t.replaceFirst("^```[a-zA-Z]*\\s*", "");
+                      t = t.replaceFirst("\\s*```$", "");
+                  }
+                  t = t.trim();
+                  if(t.startsWith("\"") && t.endsWith("\"") && t.length() >= 2) t = t.substring(1, t.length() - 1).trim();
+                  return t;
+              }
+
               void applyClipboardFullResult(String source, String out) {
                   String prepared = "";
                   String translation = "";
@@ -3070,16 +3081,15 @@ jobs:
                       int b = cleaned.lastIndexOf('}');
                       if(a >= 0 && b > a) cleaned = cleaned.substring(a, b + 1);
                       JSONObject jo = new JSONObject(cleaned);
-                      prepared = jo.optString("prepared", "").trim();
-                      translation = jo.optString("translation", "").trim();
+                      prepared = cleanClipboardApiText(jo.optString("prepared", ""));
+                      translation = cleanClipboardApiText(jo.optString("translation", ""));
                   } catch(Exception ignored) {
                       prepared = source == null ? "" : source.trim();
-                      translation = cleanOneBlockTranslation(out);
+                      translation = cleanClipboardApiText(out);
                   }
                   if(prepared.length() == 0) prepared = source == null ? "" : source.trim();
-                  translation = cleanOneBlockTranslation(translation);
-                  if(translation.length() == 0 || !isCleanManualTranslation(translation)) {
-                      showClipboardTranslatorPanel(source, prepared, "Nem tiszta fordítás érkezett. Próbáld újra.");
+                  if(translation.length() == 0) {
+                      showClipboardTranslatorPanel(source, prepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
                       return;
                   }
                   clipboardCurrentPrepared = prepared;
@@ -3089,9 +3099,9 @@ jobs:
               }
 
               void applyClipboardTranslationOnly(String prepared, String tr) {
-                  String clean = cleanOneBlockTranslation(tr);
-                  if(!isCleanManualTranslation(clean)) {
-                      showClipboardTranslatorPanel(clipboardCurrentSource, prepared, "Nem tiszta fordítás érkezett. Próbáld újra.");
+                  String clean = cleanClipboardApiText(tr);
+                  if(clean.length() == 0) {
+                      showClipboardTranslatorPanel(clipboardCurrentSource, prepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
                       return;
                   }
                   setClipboardText(clean);
@@ -3130,7 +3140,7 @@ jobs:
                   }
               }
               String clipboardTargetCode(String text) {
-                  // V168: vágólapos iránylogika. Ha a szöveg már az alsó ablak nyelvének tűnik,
+                  // V169: vágólapos iránylogika. Ha a szöveg már az alsó ablak nyelvének tűnik,
                   // akkor a felső nyelvre fordítunk. Egyébként az alsó nyelvre.
                   String bottom = code(bottomLang);
                   String top = code(topLang);
@@ -3231,9 +3241,9 @@ jobs:
               }
 
               void applyClipboardTranslation(String out) {
-                  String tr = cleanOneBlockTranslation(out);
-                  if(!isCleanManualTranslation(tr)) {
-                      showClipboardTranslatorPanel(clipboardCurrentSource, clipboardCurrentPrepared, "Nem tiszta fordítás érkezett. Próbáld újra.");
+                  String tr = cleanClipboardApiText(out);
+                  if(tr.length() == 0) {
+                      showClipboardTranslatorPanel(clipboardCurrentSource, clipboardCurrentPrepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
                       return;
                   }
                   setClipboardText(tr);
@@ -3267,8 +3277,8 @@ jobs:
                           lay.setBackgroundColor(Color.rgb(28,31,37));
 
                           TextView title = label("Vágólap fordító");
-                          title.setTextSize(22);
-                          title.setTextColor(Color.WHITE);
+                          title.setTextSize(13);
+                          title.setTextColor(Color.rgb(255, 210, 80));
                           lay.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
                           TextView rawTitle = label("Nyers beolvasott szöveg:");
@@ -3289,9 +3299,10 @@ jobs:
                           clipboardTranslationEdit = clipboardEditBox("fordítás", 17, 7);
                           lay.addView(clipboardTranslationEdit, new LinearLayout.LayoutParams(-1, 0, 1));
 
-                          LinearLayout row1 = row();
+                          LinearLayout buttons = row();
                           Button translate = btn("FORDÍT");
                           Button copy = btn("MÁSOL");
+                          Button hide = btn("HÁTTÉRBE");
                           translate.setOnClickListener(v -> runClipboardPanelTranslate());
                           copy.setOnClickListener(v -> {
                               String t = clipboardTranslationEdit == null ? "" : clipboardTranslationEdit.getText().toString().trim();
@@ -3301,18 +3312,11 @@ jobs:
                                   Toast.makeText(this, "Vágólapra másolva.", Toast.LENGTH_SHORT).show();
                               }
                           });
-                          row1.addView(translate, new LinearLayout.LayoutParams(0,64,1));
-                          row1.addView(copy, new LinearLayout.LayoutParams(0,64,1));
-                          lay.addView(row1);
-
-                          LinearLayout row2 = row();
-                          Button hide = btn("HÁTTÉRBE");
-                          Button close = btn("BEZÁR");
                           hide.setOnClickListener(v -> { try { if(clipboardDialog != null) clipboardDialog.dismiss(); } catch(Exception ignored) {} moveTaskToBack(true); });
-                          close.setOnClickListener(v -> { try { if(clipboardDialog != null) clipboardDialog.dismiss(); } catch(Exception ignored) {} });
-                          row2.addView(hide, new LinearLayout.LayoutParams(0,60,1));
-                          row2.addView(close, new LinearLayout.LayoutParams(0,60,1));
-                          lay.addView(row2);
+                          buttons.addView(translate, new LinearLayout.LayoutParams(0,64,1));
+                          buttons.addView(copy, new LinearLayout.LayoutParams(0,64,1));
+                          buttons.addView(hide, new LinearLayout.LayoutParams(0,64,1));
+                          lay.addView(buttons);
 
                           clipboardDialog.setContentView(lay);
                       }
