@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 209; versionName = "20.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 211; versionName = "21.1" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V209" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V211" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -503,7 +503,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V209");
+                  TextView title = label("Fordito_V211");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -4191,6 +4191,21 @@ jobs:
                   return code.toUpperCase(Locale.ROOT);
               }
 
+              String speechBcp47Tag(String langCode) {
+                  String lc = langCode == null ? "" : langCode.trim().toLowerCase(Locale.ROOT);
+                  if(lc.equals("hu")) return "hu-HU";
+                  if(lc.equals("fr")) return "fr-FR";
+                  if(lc.equals("en")) return "en-US";
+                  if(lc.equals("de")) return "de-DE";
+                  if(lc.equals("it")) return "it-IT";
+                  if(lc.equals("es")) return "es-ES";
+                  if(lc.equals("ro")) return "ro-RO";
+                  if(lc.equals("hr")) return "hr-HR";
+                  if(lc.equals("sk")) return "sk-SK";
+                  if(lc.equals("sl")) return "sl-SI";
+                  return lc;
+              }
+
               String apiCode(String code) {
                   if(code == null || code.isEmpty() || code.equals("AUTO")) return "";
                   for(String[] l: langs) {
@@ -4349,23 +4364,25 @@ jobs:
                       clipboardSpeechIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
 
-                      // A diktálás kizárólag a főablakban kiválasztott két nyelvet használhatja.
-                      // Nem kényszerítjük többé magyarra a Google felismerőt.
-                      String speechTopLang = code(topLang).toLowerCase(Locale.ROOT);
-                      String speechBottomLang = code(bottomLang).toLowerCase(Locale.ROOT);
+                      // V211: hivatalos Android 14+ nyelvfelismerés + nyelvváltás.
+                      // Nem adunk EXTRA_LANGUAGE-t, mert az egyik nyelvre rögzítheti a motort.
+                      // A felismerés és a váltás csak a főablakban kiválasztott két nyelv között történhet.
                       ArrayList<String> allowedSpeechLanguages = new ArrayList<>();
-                      allowedSpeechLanguages.add(speechTopLang);
-                      if(!speechBottomLang.equals(speechTopLang)) allowedSpeechLanguages.add(speechBottomLang);
+                      String speechTop = speechBcp47Tag(apiCode(topLang));
+                      String speechBottom = speechBcp47Tag(apiCode(bottomLang));
+                      if(speechTop.length() > 0 && !speechTop.equalsIgnoreCase("AUTO")) allowedSpeechLanguages.add(speechTop);
+                      if(speechBottom.length() > 0 && !speechBottom.equalsIgnoreCase("AUTO") && !speechBottom.equalsIgnoreCase(speechTop)) allowedSpeechLanguages.add(speechBottom);
 
-                      // Android/Google többnyelvű felismerés. String kulcsokat használunk,
-                      // így régebbi Androidon sem okoz fordítási hibát; ahol támogatott,
-                      // a felismerő automatikusan választ a kijelölt nyelvpárból.
                       clipboardSpeechIntent.putExtra("android.speech.extra.ENABLE_LANGUAGE_DETECTION", true);
                       clipboardSpeechIntent.putStringArrayListExtra(
                           "android.speech.extra.LANGUAGE_DETECTION_ALLOWED_LANGUAGES",
                           allowedSpeechLanguages
                       );
-                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, speechTopLang);
+                      clipboardSpeechIntent.putExtra("android.speech.extra.ENABLE_LANGUAGE_SWITCH", "balanced");
+                      clipboardSpeechIntent.putStringArrayListExtra(
+                          "android.speech.extra.LANGUAGE_SWITCH_ALLOWED_LANGUAGES",
+                          allowedSpeechLanguages
+                      );
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000);
@@ -4555,14 +4572,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V209.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V209.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V211.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V211.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V209
+          name: V211
           path: |
             artifact/*.apk
             artifact/*.aab
