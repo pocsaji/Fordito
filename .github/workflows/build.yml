@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 194; versionName = "19.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 195; versionName = "19.5" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V194" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V195" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -498,7 +498,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V194");
+                  TextView title = label("Fordito_V195");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -3387,7 +3387,7 @@ jobs:
                           clipboardMicButton.setMinimumHeight(0);
                           clipboardMicButton.setBackgroundColor(Color.rgb(30,120,75));
                           clipboardMicButton.setTranslationY(0f);
-                          clipboardMicButton.setOnClickListener(v -> Toast.makeText(this, "A vágólapos diktálás ideiglenesen kikapcsolva. A fő mikrofon érintetlen.", Toast.LENGTH_SHORT).show());
+                          clipboardMicButton.setOnClickListener(v -> startClipboardSystemSpeech());
                           clipboardTitleRow.addView(title, new LinearLayout.LayoutParams(0, 96, 1));
                           clipboardTitleRow.addView(clipboardMicButton, new LinearLayout.LayoutParams(96, 96));
                           lay.addView(clipboardTitleRow, new LinearLayout.LayoutParams(-1, -2));
@@ -4313,14 +4313,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V194.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V194.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V195.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V195.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V194
+          name: V195
           path: |
             artifact/*.apk
             artifact/*.aab
