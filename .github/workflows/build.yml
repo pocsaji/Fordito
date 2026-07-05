@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 186; versionName = "18.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 187; versionName = "18.7" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V186" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V187" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -162,6 +162,7 @@ jobs:
           import android.graphics.Color;
           import android.media.*;
           import android.media.audiofx.*;
+          import android.speech.RecognizerIntent;
           import android.speech.tts.TextToSpeech;
           import android.speech.tts.UtteranceProgressListener;
           import android.os.*;
@@ -181,6 +182,7 @@ jobs:
           import okhttp3.*;
 
           public class MainActivity extends Activity {
+              static final int CLIPBOARD_SPEECH_REQUEST = 7301;
               TextView state;
               EditText topBox, bottomBox;
               Button micBtn, translateBtn, menuBtn, topLangBtn, bottomLangBtn;
@@ -229,7 +231,6 @@ jobs:
               boolean mirrorBottomMode = false;
               boolean backgroundScreenAllowed = false;
               boolean floatingTranslatorEnabled = false;
-              Handler floatingLongPressHandler = new Handler(Looper.getMainLooper());
               android.view.WindowManager floatingWindowManager;
               android.view.View floatingButtonView;
               android.view.View floatingResultView;
@@ -244,8 +245,6 @@ jobs:
               String pendingClipboardText = "";
               boolean clipboardForceFieldUpdate = false;
               boolean clipboardResponseMode = false;
-              String lastClipboardTranslatedSource = "";
-              android.speech.SpeechRecognizer clipboardSpeechRecognizer;
               boolean manualTopSource = true;
               boolean responseInProgress = false;
               long sessionStart = 0L;
@@ -490,7 +489,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V186");
+                  TextView title = label("Fordito_V187");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2850,35 +2849,22 @@ jobs:
                       b.setMinimumHeight(0);
                       b.setBackgroundColor(Color.rgb(30,120,75));
                       b.setOnClickListener(v -> floatingTranslatorButtonAction());
+                      b.setOnLongClickListener(v -> { hideFloatingTranslator(); floatingTranslatorEnabled = false; save(); return true; });
                       final android.view.WindowManager.LayoutParams lp = floatingParams(96, 96, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
                       lp.x = floatingButtonX;
                       lp.y = floatingButtonY;
                       final int[] down = new int[4];
                       final boolean[] moved = new boolean[1];
-                      final boolean[] longDone = new boolean[1];
-                      final Runnable longPressTask = () -> {
-                          if(!moved[0]) {
-                              longDone[0] = true;
-                              try { b.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); } catch(Exception ignored) {}
-                              openClipboardReplyMode();
-                          }
-                      };
                       b.setOnTouchListener((v, ev) -> {
                           if(ev.getAction() == android.view.MotionEvent.ACTION_DOWN) {
                               down[0] = lp.x; down[1] = lp.y; down[2] = (int)ev.getRawX(); down[3] = (int)ev.getRawY();
                               moved[0] = false;
-                              longDone[0] = false;
-                              floatingLongPressHandler.removeCallbacks(longPressTask);
-                              floatingLongPressHandler.postDelayed(longPressTask, 500);
                               return true;
                           }
                           if(ev.getAction() == android.view.MotionEvent.ACTION_MOVE) {
                               int dx = (int)ev.getRawX() - down[2];
                               int dy = (int)ev.getRawY() - down[3];
-                              if(Math.abs(dx) > 8 || Math.abs(dy) > 8) {
-                                  moved[0] = true;
-                                  floatingLongPressHandler.removeCallbacks(longPressTask);
-                              }
+                              if(Math.abs(dx) > 8 || Math.abs(dy) > 8) moved[0] = true;
                               lp.x = Math.max(0, down[0] - dx);
                               lp.y = down[1] + dy;
                               try {
@@ -2891,15 +2877,10 @@ jobs:
                               return true;
                           }
                           if(ev.getAction() == android.view.MotionEvent.ACTION_UP) {
-                              floatingLongPressHandler.removeCallbacks(longPressTask);
                               floatingButtonX = lp.x;
                               floatingButtonY = lp.y;
                               save();
-                              if(!moved[0] && !longDone[0]) floatingTranslatorButtonAction();
-                              return true;
-                          }
-                          if(ev.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
-                              floatingLongPressHandler.removeCallbacks(longPressTask);
+                              if(!moved[0]) floatingTranslatorButtonAction();
                               return true;
                           }
                           return true;
@@ -2940,26 +2921,6 @@ jobs:
                   translateClipboardFromFloatingButton();
               }
 
-              void openClipboardReplyMode() {
-                  try {
-                      setClipboardText(" ");
-                      clipboardResponseMode = true;
-                      clipboardCurrentSource = "";
-                      clipboardCurrentPrepared = "";
-                      clipboardCurrentTarget = "";
-                      lastClipboardTranslatedSource = "";
-                      clipboardForceFieldUpdate = true;
-                      hideFloatingResultWindow();
-                      bringAppToFrontForClipboardRead();
-                      new Handler().postDelayed(() -> {
-                          showClipboardTranslatorPanel("", "", "");
-                          try { if(clipboardRawEdit != null) { clipboardRawEdit.requestFocus(); clipboardRawEdit.setSelection(clipboardRawEdit.getText().length()); } } catch(Exception ignored) {}
-                      }, 220);
-                  } catch(Exception e) {
-                      Toast.makeText(this, "Új válasz mód hiba: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                  }
-              }
-
               void translateClipboardFromFloatingButton() {
                   if(!hasKey()) { bringAppToFrontForClipboardRead(); new Handler().postDelayed(() -> showApi(), 250); return; }
                   hideFloatingResultWindow();
@@ -2969,13 +2930,6 @@ jobs:
 
               void translateClipboardNow(boolean allowForegroundRetry) {
                   String text = getClipboardText().trim();
-                  clipboardResponseMode = false;
-                  if(text.length() > 0 && text.equals(lastClipboardTranslatedSource) && clipboardCurrentTarget != null && clipboardCurrentTarget.trim().length() > 0) {
-                      clipboardForceFieldUpdate = true;
-                      showClipboardTranslatorPanel(clipboardCurrentSource, clipboardCurrentPrepared, clipboardCurrentTarget);
-                      Toast.makeText(this, "Ez a vágólapszöveg már le lett fordítva.", Toast.LENGTH_SHORT).show();
-                      return;
-                  }
                   clipboardCurrentSource = text;
                   clipboardCurrentPrepared = "";
                   clipboardCurrentTarget = clipboardTargetCode(text);
@@ -3161,16 +3115,10 @@ jobs:
                       return;
                   }
                   clipboardCurrentPrepared = prepared;
-                  clipboardCurrentTarget = translation;
-                  lastClipboardTranslatedSource = source == null ? "" : source.trim();
                   clipboardForceFieldUpdate = true;
+                  setClipboardText(translation);
                   showClipboardTranslatorPanel(source, prepared, translation);
-                  if(isClipboardHungarian(source)) {
-                      setClipboardText(translation);
-                      Toast.makeText(this, "Fordítás a vágólapra másolva.", Toast.LENGTH_SHORT).show();
-                  } else {
-                      Toast.makeText(this, "Magyar fordítás elkészült. Nem került automatikusan a vágólapra.", Toast.LENGTH_SHORT).show();
-                  }
+                  Toast.makeText(this, "Fordítás a vágólapra másolva.", Toast.LENGTH_SHORT).show();
               }
 
               void applyClipboardTranslationOnly(String prepared, String tr) {
@@ -3179,8 +3127,6 @@ jobs:
                       showClipboardTranslatorPanel(clipboardCurrentSource, prepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
                       return;
                   }
-                  clipboardCurrentTarget = clean;
-                  lastClipboardTranslatedSource = prepared == null ? "" : prepared.trim();
                   setClipboardText(clean);
                   showClipboardTranslatorPanel(clipboardCurrentSource, prepared, clean);
                   Toast.makeText(this, "Fordítás a vágólapra másolva.", Toast.LENGTH_SHORT).show();
@@ -3353,53 +3299,6 @@ jobs:
                   return e;
               }
 
-              void startClipboardDictation() {
-                  try {
-                      if(Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reqMic(); return; }
-                      if(!android.speech.SpeechRecognizer.isRecognitionAvailable(this)) {
-                          Toast.makeText(this, "A diktálás ezen a készüléken nem érhető el.", Toast.LENGTH_LONG).show();
-                          return;
-                      }
-                      try { if(clipboardSpeechRecognizer != null) clipboardSpeechRecognizer.destroy(); } catch(Exception ignored) {}
-                      clipboardSpeechRecognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(this);
-                      android.content.Intent intent = new android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-                      intent.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-                      intent.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "hu-HU");
-                      intent.putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-                      intent.putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Diktálás");
-                      clipboardSpeechRecognizer.setRecognitionListener(new android.speech.RecognitionListener() {
-                          @Override public void onReadyForSpeech(Bundle params) { Toast.makeText(MainActivity.this, "Diktálás indul…", Toast.LENGTH_SHORT).show(); }
-                          @Override public void onBeginningOfSpeech() {}
-                          @Override public void onRmsChanged(float rmsdB) {}
-                          @Override public void onBufferReceived(byte[] buffer) {}
-                          @Override public void onEndOfSpeech() {}
-                          @Override public void onError(int error) { Toast.makeText(MainActivity.this, "Diktálás vége vagy hiba.", Toast.LENGTH_SHORT).show(); }
-                          @Override public void onResults(Bundle results) { applyClipboardSpeechResults(results); }
-                          @Override public void onPartialResults(Bundle partialResults) { applyClipboardSpeechResults(partialResults); }
-                          @Override public void onEvent(int eventType, Bundle params) {}
-                      });
-                      clipboardSpeechRecognizer.startListening(intent);
-                  } catch(Exception e) {
-                      Toast.makeText(this, "Diktálás hiba: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                  }
-              }
-
-              void applyClipboardSpeechResults(Bundle results) {
-                  try {
-                      java.util.ArrayList<String> list = results.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION);
-                      if(list == null || list.size() == 0) return;
-                      String heard = list.get(0);
-                      if(heard == null || heard.trim().length() == 0 || clipboardRawEdit == null) return;
-                      String old = clipboardRawEdit.getText().toString().trim();
-                      String add = heard.trim();
-                      if(old.length() == 0) clipboardRawEdit.setText(add);
-                      else if(!old.endsWith(add)) clipboardRawEdit.setText(old + " " + add);
-                      clipboardRawEdit.setSelection(clipboardRawEdit.getText().length());
-                      clipboardResponseMode = true;
-                      clipboardForceFieldUpdate = false;
-                  } catch(Exception ignored) {}
-              }
-
               void showClipboardTranslatorPanel(String source, String prepared, String translation) {
                   try {
                       if(clipboardDialog == null) {
@@ -3409,21 +3308,23 @@ jobs:
                           lay.setPadding(18, 14, 18, 14);
                           lay.setBackgroundColor(Color.rgb(28,31,37));
 
+                          LinearLayout clipboardTitleRow = row();
                           TextView title = label("Vágólap fordító");
                           title.setTextSize(13);
                           title.setTextColor(Color.rgb(255, 210, 80));
-                          lay.addView(title, new LinearLayout.LayoutParams(-1, -2));
+                          Button sysMic = btn("🎙");
+                          sysMic.setTextSize(16);
+                          sysMic.setTextColor(Color.WHITE);
+                          sysMic.setBackgroundColor(Color.rgb(65, 70, 80));
+                          sysMic.setOnClickListener(v -> startClipboardSystemSpeech());
+                          clipboardTitleRow.addView(title, new LinearLayout.LayoutParams(0, 52, 1));
+                          clipboardTitleRow.addView(sysMic, new LinearLayout.LayoutParams(76, 52));
+                          lay.addView(clipboardTitleRow, new LinearLayout.LayoutParams(-1, -2));
 
-                          LinearLayout rawHead = row();
                           TextView rawTitle = label("Nyers beolvasott szöveg:");
                           rawTitle.setTextSize(13);
                           rawTitle.setTextColor(Color.rgb(255, 210, 80));
-                          Button rawMic = btn("🎙");
-                          rawMic.setTextSize(16);
-                          rawMic.setOnClickListener(v -> startClipboardDictation());
-                          rawHead.addView(rawTitle, new LinearLayout.LayoutParams(0, -2, 1));
-                          rawHead.addView(rawMic, new LinearLayout.LayoutParams(72, 44));
-                          lay.addView(rawHead, new LinearLayout.LayoutParams(-1, -2));
+                          lay.addView(rawTitle, new LinearLayout.LayoutParams(-1, -2));
                           clipboardRawEdit = clipboardEditBox("vágólap szövege", 15, 5);
                           lay.addView(clipboardRawEdit, new LinearLayout.LayoutParams(-1, 0, 1));
 
@@ -3463,7 +3364,7 @@ jobs:
                           clipboardDialog.setContentView(lay);
                       }
                       boolean huSource = isClipboardHungarian(source);
-                      int prepVisibility = (clipboardResponseMode || huSource) ? View.VISIBLE : View.GONE;
+                      int prepVisibility = huSource ? View.VISIBLE : View.GONE;
                       if(clipboardPreparedTitle != null) clipboardPreparedTitle.setVisibility(prepVisibility);
                       if(clipboardPreparedEdit != null) clipboardPreparedEdit.setVisibility(prepVisibility);
                       boolean force = clipboardForceFieldUpdate;
@@ -4095,6 +3996,45 @@ jobs:
                   styleUiState();
               }
 
+              void startClipboardSystemSpeech() {
+                  try {
+                      Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                      intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                      intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hu-HU");
+                      intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Diktálás a nyers szöveg mezőbe");
+                      startActivityForResult(intent, CLIPBOARD_SPEECH_REQUEST);
+                  } catch(Exception e) {
+                      Toast.makeText(this, "A gyári beszédfelismerő nem indítható: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                  }
+              }
+
+              @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+                  super.onActivityResult(requestCode, resultCode, data);
+                  if(requestCode == CLIPBOARD_SPEECH_REQUEST) {
+                      if(resultCode == RESULT_OK && data != null) {
+                          ArrayList<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+                          if(results != null && results.size() > 0) {
+                              String spoken = results.get(0) == null ? "" : results.get(0).trim();
+                              if(spoken.length() > 0) {
+                                  if(clipboardDialog == null || !clipboardDialog.isShowing()) {
+                                      clipboardForceFieldUpdate = true;
+                                      showClipboardTranslatorPanel("", "", "");
+                                  }
+                                  if(clipboardRawEdit != null) {
+                                      String old = clipboardRawEdit.getText() == null ? "" : clipboardRawEdit.getText().toString().trim();
+                                      String combined = old.length() == 0 ? spoken : old + " " + spoken;
+                                      clipboardRawEdit.setText(combined);
+                                      clipboardRawEdit.requestFocus();
+                                      clipboardRawEdit.setSelection(clipboardRawEdit.getText().length());
+                                  }
+                                  clipboardResponseMode = true;
+                                  Toast.makeText(this, "Diktálás beírva a nyers mezőbe.", Toast.LENGTH_SHORT).show();
+                              }
+                          }
+                      }
+                  }
+              }
+
               @Override public void onBackPressed() {
                   if(clipboardDialog != null && clipboardDialog.isShowing()) {
                       try { clipboardDialog.dismiss(); } catch(Exception ignored) {}
@@ -4188,14 +4128,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V180.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V180.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V187.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V187.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V180
+          name: V187
           path: |
             artifact/*.apk
             artifact/*.aab
