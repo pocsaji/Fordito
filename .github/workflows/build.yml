@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 189; versionName = "18.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 190; versionName = "19.0" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V189" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V190" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -490,7 +490,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V189");
+                  TextView title = label("Fordito_V190");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -3358,12 +3358,18 @@ jobs:
                           TextView title = label("Vágólap fordító");
                           title.setTextSize(13);
                           title.setTextColor(Color.rgb(255, 210, 80));
-                          Button sysMic = btn("MIK");
-                          sysMic.setTextSize(18);
+                          Button sysMic = btn("🎙");
+                          sysMic.setTextSize(34);
                           sysMic.setTextColor(Color.WHITE);
                           sysMic.setIncludeFontPadding(false);
-                          sysMic.setGravity(Gravity.CENTER);
+                          sysMic.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+                          sysMic.setPadding(0, 0, 0, 0);
+                          sysMic.setMinWidth(0);
+                          sysMic.setMinimumWidth(0);
+                          sysMic.setMinHeight(0);
+                          sysMic.setMinimumHeight(0);
                           sysMic.setBackgroundColor(Color.rgb(30,120,75));
+                          sysMic.setTranslationY(-3f);
                           sysMic.setOnClickListener(v -> startClipboardSystemSpeech());
                           clipboardTitleRow.addView(title, new LinearLayout.LayoutParams(0, 96, 1));
                           clipboardTitleRow.addView(sysMic, new LinearLayout.LayoutParams(96, 96));
@@ -4060,6 +4066,9 @@ jobs:
                       intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
                       intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hu-HU");
                       intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Diktálás a nyers szöveg mezőbe");
+                      intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 5000);
+                      intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3000);
+                      intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 9000);
                       startActivityForResult(intent, CLIPBOARD_SPEECH_REQUEST);
                   } catch(Exception e) {
                       Toast.makeText(this, "A gyári beszédfelismerő nem indítható: " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -4186,14 +4195,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V189.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V189.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V190.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V190.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V189
+          name: V190
           path: |
             artifact/*.apk
             artifact/*.aab
