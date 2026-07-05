@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 221; versionName = "22.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 222; versionName = "22.2" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V221" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V222" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -506,7 +506,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V221");
+                  TextView title = label("Fordito_V222");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1086,7 +1086,7 @@ jobs:
                       evt.put("session", session);
                       ws.send(evt.toString());
                   } catch(Exception e) {
-                      append("\n[session hiba] " + e.getMessage());
+                      android.util.Log.e("Fordito", "session hiba", e);
                   }
               }
 
@@ -1604,7 +1604,7 @@ jobs:
                           }
                       }
                   } catch(Exception e) {
-                      runOnUiThread(() -> append("\n[event hiba] " + e.getMessage()));
+                      android.util.Log.e("Fordito", "event hiba", e);
                   }
               }
 
@@ -3203,6 +3203,8 @@ jobs:
                     "The user may provide text in either one of the selected language pair. You must keep the ORIGINAL input language. In this middle step translation is strictly forbidden. " +
                     "Make the original-language source message natural and culturally well-formed: punctuation, capitalization, accents, sentence boundaries, grammar, broken sentence structure and clear speech-recognition errors. " +
                     "Preserve the speaker's meaning, intent, facts and tone, but do not behave like a literal transcript. Remove obvious dictation noise, accidental filler words, false starts, repeated fragments, self-corrections and words that clearly do not belong when the surrounding context makes that clear. " +
+                    "If a random isolated word or phrase has no semantic role in the surrounding message, drop it instead of preserving it. Example: in 'kakaós próbáljuk ki hogy működik-e', the random first word 'kakaós' is noise unless the rest of the message is actually about cocoa. " +
+                    "This is not censorship: keep profanity, insults, slang, names, work terms, objects and strange words when they are plausibly intended. " +
                     "You may rewrite awkward wording naturally when this does not change meaning. Do NOT invent facts, explanations, opinions or new content. If an unusual or test word could be intentional, keep it. If genuinely ambiguous, prefer the closest plausible wording rather than guessing a new meaning. " +
                     "Do not add comments or explain the text. Preserve vulgarity, intimacy, friendliness and official or informal register.";
               }
@@ -3273,7 +3275,7 @@ jobs:
                                   final String clean = cleanClipboardApiText(out).trim();
                                   runOnUiThread(() -> {
                                       if(requestToken != clipboardPrepareRequestToken) return;
-                                      String prepared = clean.length() == 0 ? rawText : clean;
+                                      String prepared = (clean.length() == 0 || isClipboardSystemMessage(clean)) ? rawText : clean;
                                       if(clipboardPreparedEdit != null) clipboardPreparedEdit.setText(prepared);
                                       clipboardCurrentPrepared = prepared;
                                       if(clipboardAutoTranslateEnabled && prepared.trim().length() > 0) {
@@ -4668,14 +4670,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V221.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V221.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V222.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V222.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V221
+          name: V222
           path: |
             artifact/*.apk
             artifact/*.aab
