@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 216; versionName = "21.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 217; versionName = "21.7" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V216" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V217" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -506,7 +506,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V216");
+                  TextView title = label("Fordito_V217");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1918,6 +1918,7 @@ jobs:
                       .replaceAll("[^a-z0-9áéíóöőúüűàâçèéêëîïôùûüÿñæœß\\s]", " ")
                       .replaceAll("\\s+", " ").trim();
                   if(x.length() == 0) return false;
+                  if(isClipboardSystemMessage(x)) return false;
 
                   String[] one = {
                       "igen","nem","jó","jo","ok","oké","oke","rendben","persze","talán","talan",
@@ -3006,6 +3007,7 @@ jobs:
 
               void openClipboardReplyMode() {
                   try {
+                      setClipboardText(" ");
                       clipboardResponseMode = true;
                       clipboardCurrentSource = "";
                       clipboardCurrentPrepared = "";
@@ -3036,6 +3038,7 @@ jobs:
 
               void translateClipboardNow(boolean allowForegroundRetry) {
                   String text = getClipboardText().trim();
+                  if(isClipboardSystemMessage(text)) text = "";
                   clipboardCurrentSource = text;
                   clipboardCurrentPrepared = "";
                   clipboardCurrentTarget = clipboardTargetCode(text);
@@ -3162,7 +3165,7 @@ jobs:
                       if(clipboardRawEdit == null || clipboardPreparedEdit == null) return;
                       if(!hasKey()) return;
                       String raw = clipboardRawEdit.getText() == null ? "" : clipboardRawEdit.getText().toString().trim();
-                      if(raw.length() == 0 || raw.equalsIgnoreCase("vágólap szövege")) return;
+                      if(raw.length() == 0 || raw.equalsIgnoreCase("vágólap szövege") || isClipboardSystemMessage(raw)) return;
                       clipboardCurrentSource = raw;
                       clipboardForceFieldUpdate = false;
                       clipboardPreparedEdit.setText("Értelmezés folyamatban…");
@@ -3484,6 +3487,16 @@ jobs:
 
               void updateClipboardTranslateButtonLabel() {
                   if(clipboardTranslateButton != null) clipboardTranslateButton.setText(clipboardAutoTranslateEnabled ? "FORDÍT\nAUTO" : "FORDÍT\nMANUÁL");
+              }
+
+              boolean isClipboardSystemMessage(String s) {
+                  if(s == null) return false;
+                  String x = s.trim();
+                  if(x.startsWith("Nincs fordítható szöveg")) return true;
+                  if(x.startsWith("Vágólap-fordítási hiba")) return true;
+                  if(x.equalsIgnoreCase("Fordítás folyamatban…")) return true;
+                  if(x.equalsIgnoreCase("Értelmezés folyamatban…")) return true;
+                  return false;
               }
 
               boolean usableClipboardText(String s) {
@@ -4614,14 +4627,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V216.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V216.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V217.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V217.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V216
+          name: V217
           path: |
             artifact/*.apk
             artifact/*.aab
