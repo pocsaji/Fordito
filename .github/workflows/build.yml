@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 226; versionName = "22.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 227; versionName = "22.7" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V226" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V227" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -507,7 +507,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V226");
+                  TextView title = label("Fordito_V227");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2449,7 +2449,7 @@ jobs:
               }
 
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
-                  // V226: gyors visszajelzés. A nyers STT azonnal látható az aktuális oldalon,
+                  // V227: gyors visszajelzés. A nyers STT azonnal látható az aktuális oldalon,
                   // ugyanakkor pendingSourceText-ben is megmarad, hogy a valid AI-válasz után
                   // a blokk átkerülhessen a valódi SOURCE_LANG szerinti oldalra.
                   if(isRecentlyDisplayedSourceDuplicate(sourceIsTop, original)) return -1;
@@ -4467,6 +4467,11 @@ jobs:
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hu-HU");
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, true);
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+                      // V227: a Google/Android beszédfelismerő ne csillagozza ki a sértőnek ítélt szavakat.
+                      // A nyers felismerési eredmény változtatás nélkül jusson tovább.
+                      if(Build.VERSION.SDK_INT >= 33) {
+                          clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_MASK_OFFENSIVE_WORDS, false);
+                      }
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000);
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3000);
@@ -4664,14 +4669,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V226.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V226.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V227.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V227.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V226
+          name: V227
           path: |
             artifact/*.apk
             artifact/*.aab
