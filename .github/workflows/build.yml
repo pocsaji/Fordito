@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 214; versionName = "21.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 215; versionName = "21.5" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V214" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V215" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -506,7 +506,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V214");
+                  TextView title = label("Fordito_V215");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -4366,25 +4366,10 @@ jobs:
 
                       clipboardSpeechIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-
-                      // V213: hivatalos Android 14+ kétnyelvű automata felismerés.
-                      // NINCS EXTRA_LANGUAGE, mert az egyik nyelvre zárná a motort.
-                      ArrayList<String> allowedSpeechLanguages = new ArrayList<>();
-                      String speechTop = speechBcp47Tag(apiCode(topLang));
-                      String speechBottom = speechBcp47Tag(apiCode(bottomLang));
-                      if(speechTop.length() > 0 && !speechTop.equalsIgnoreCase("AUTO")) allowedSpeechLanguages.add(speechTop);
-                      if(speechBottom.length() > 0 && !speechBottom.equalsIgnoreCase("AUTO") && !speechBottom.equalsIgnoreCase(speechTop)) allowedSpeechLanguages.add(speechBottom);
-
-                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_DETECTION, true);
-                      clipboardSpeechIntent.putStringArrayListExtra(
-                          RecognizerIntent.EXTRA_LANGUAGE_DETECTION_ALLOWED_LANGUAGES,
-                          allowedSpeechLanguages
-                      );
-                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_SWITCH, RecognizerIntent.LANGUAGE_SWITCH_BALANCED);
-                      clipboardSpeechIntent.putStringArrayListExtra(
-                          RecognizerIntent.EXTRA_LANGUAGE_SWITCH_ALLOWED_LANGUAGES,
-                          allowedSpeechLanguages
-                      );
+                      // V215: stabil visszaállás. A vágólapos Google diktálás fixen magyar.
+                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hu-HU");
+                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hu-HU");
+                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, true);
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000);
@@ -4627,14 +4612,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V214.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V214.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V215.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V215.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V214
+          name: V215
           path: |
             artifact/*.apk
             artifact/*.aab
