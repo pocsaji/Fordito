@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 215; versionName = "21.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 216; versionName = "21.6" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V215" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V216" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -506,7 +506,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V215");
+                  TextView title = label("Fordito_V216");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -3041,7 +3041,7 @@ jobs:
                   clipboardCurrentTarget = clipboardTargetCode(text);
                   clipboardForceFieldUpdate = true;
                   if(text.length() == 0) {
-                      showClipboardTranslatorPanel("", "", "Nincs fordítható szöveg a vágólapon. Másold ki újra a szöveget, majd nyomd meg ismét a lebegő gombot.");
+                      showClipboardTranslatorPanel("", "", "");
                       return;
                   }
                   showClipboardTranslatorPanel(text, "Értelmezés folyamatban…", "");
@@ -3495,6 +3495,8 @@ jobs:
                   if(x.equalsIgnoreCase("fordítás")) return false;
                   if(x.equalsIgnoreCase("javított vagy fordítandó szöveg")) return false;
                   if(x.equalsIgnoreCase("vágólap szövege")) return false;
+                  if(x.startsWith("Nincs fordítható szöveg")) return false;
+                  if(x.startsWith("Vágólap-fordítási hiba")) return false;
                   return true;
               }
 
@@ -4612,14 +4614,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V215.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V215.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V216.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V216.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V215
+          name: V216
           path: |
             artifact/*.apk
             artifact/*.aab
