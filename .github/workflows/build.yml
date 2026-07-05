@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 196; versionName = "19.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 197; versionName = "19.7" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V196" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V197" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -254,6 +254,7 @@ jobs:
               String pendingClipboardText = "";
               boolean clipboardForceFieldUpdate = false;
               boolean clipboardResponseMode = false;
+              boolean clipboardReplyCleanMode = false;
               boolean manualTopSource = true;
               boolean responseInProgress = false;
               long sessionStart = 0L;
@@ -498,7 +499,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V196");
+                  TextView title = label("Fordito_V197");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -552,16 +553,18 @@ jobs:
                           else start(true);
                       } else {
                           if(streaming) stop();
-                          clipboardResponseMode = true;
-                          floatingTranslatorEnabled = true;
-                          backgroundScreenAllowed = false;
                           stopBackgroundForegroundService();
-                          save();
+                          backgroundScreenAllowed = false;
+                          clipboardResponseMode = true;
+                          clipboardCurrentSource = "";
+                          clipboardCurrentPrepared = "";
+                          clipboardCurrentTarget = "";
+                          clipboardForceFieldUpdate = true;
                           bringAppToFrontForClipboardRead();
                           new Handler().postDelayed(() -> {
                               showClipboardTranslatorPanel("", "", "");
                               startClipboardSystemSpeech();
-                          }, 250);
+                          }, 220);
                       }
                   });
                   translateBtn.setOnClickListener(v -> manualTranslate());
@@ -2978,6 +2981,7 @@ jobs:
                   try {
                       setClipboardText(" ");
                       clipboardResponseMode = true;
+                      clipboardReplyCleanMode = true;
                       clipboardCurrentSource = "";
                       clipboardCurrentPrepared = "";
                       clipboardCurrentTarget = "";
@@ -2999,6 +3003,7 @@ jobs:
               }
 
               void translateClipboardFromFloatingButton() {
+                  clipboardReplyCleanMode = false;
                   if(!hasKey()) { bringAppToFrontForClipboardRead(); new Handler().postDelayed(() -> showApi(), 250); return; }
                   hideFloatingResultWindow();
                   bringAppToFrontForClipboardRead();
@@ -3006,6 +3011,10 @@ jobs:
               }
 
               void translateClipboardNow(boolean allowForegroundRetry) {
+                  if(clipboardReplyCleanMode) {
+                      showClipboardTranslatorPanel("", "", "");
+                      return;
+                  }
                   String text = getClipboardText().trim();
                   clipboardCurrentSource = text;
                   clipboardCurrentPrepared = "";
@@ -3021,6 +3030,7 @@ jobs:
               }
 
               void runClipboardPanelTranslate() {
+                  clipboardReplyCleanMode = false;
                   String raw = clipboardRawEdit == null ? "" : clipboardRawEdit.getText().toString().trim();
                   String prep = clipboardPreparedEdit == null ? "" : clipboardPreparedEdit.getText().toString().trim();
                   String tr = clipboardTranslationEdit == null ? "" : clipboardTranslationEdit.getText().toString().trim();
@@ -3335,11 +3345,11 @@ jobs:
 
               String clipboardFullInstructions() {
                   return "You are a standalone text repair and translation engine for a Hungarian translator app. This branch is independent from the live realtime interpreter. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. " +
-                    "Your task has two steps. Step 1: understand the communicative situation, context, likely speaker intention, tone and register from the full TEXT. Step 2: repair the source text on its own language when useful, then translate. " +
                     "Return ONLY valid JSON with exactly two string fields: prepared and translation. No markdown, no labels outside JSON. " +
-                    "If the source is Hungarian, prepared must be a corrected Hungarian version of TEXT: add punctuation, sentence boundaries, capitalization and accents; correct obvious typos, accidental repeated words, broken words, wrong inflections, missing spaces and dictation errors when the intended meaning is clear from context. Preserve meaning and do not invent new facts. If a mistake is not clear, keep it instead of guessing. Then translate prepared to TARGET_LANG. " +
+                    "First infer the real communication context, speaker intention, addressee, tone and likely message type from the full TEXT. The input may be raw speech recognition, with background radio, repeated words, interrupted thoughts, missing punctuation, wrong accents, wrong words, broken phrases and accidental nonsense. " +
+                    "If the source is Hungarian, prepared must be a usable corrected Hungarian message. Add punctuation, sentence boundaries, capitalization and accents. Repair obvious dictation errors, bad word forms, missing spaces, repeated fragments, broken words, and contextually impossible phrases when the intended meaning is reasonably inferable from nearby words. You may rephrase for clarity and natural Hungarian, but you must not add new facts or change the practical meaning. If a phrase is truly unclear, keep the closest safe wording rather than inventing. Then translate prepared to TARGET_LANG. " +
                     "If the source is NOT Hungarian, prepared must be an empty string, and translation must be a natural Hungarian translation/interpretation of TEXT. Do not return the foreign source text as the translation. " +
-                    "Preserve the user's practical meaning, social relationship, tone, register, emotional intensity and context. Friendly stays friendly; official stays official; direct work messages stay direct; intimate or sexual text stays intimate or sexual instead of being made formal. Make both prepared and translation natural, native-sounding and usable as a real message. " +
+                    "Preserve style and relationship: friendly stays friendly, official stays official, work messages stay direct and practical, intimate or sexual text stays intimate or sexual. Do not over-formalize casual speech. Make the final text usable as a real message. " +
                     "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang or rude wording.";
               }
 
@@ -4139,7 +4149,9 @@ jobs:
                       }
                       if(clipboardRawEdit != null) {
                           clipboardRawEdit.requestFocus();
-                          clipboardSpeechBaseText = clipboardRawEdit.getText() == null ? "" : clipboardRawEdit.getText().toString().trim();
+                          String baseNow = clipboardRawEdit.getText() == null ? "" : clipboardRawEdit.getText().toString().trim();
+                          if(baseNow.equalsIgnoreCase("vágólap szövege") || baseNow.equalsIgnoreCase("fordítás") || baseNow.equalsIgnoreCase("javított vagy fordítandó szöveg")) baseNow = "";
+                          clipboardSpeechBaseText = baseNow;
                       } else {
                           clipboardSpeechBaseText = "";
                       }
@@ -4329,14 +4341,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V196.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V196.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V197.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V197.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V196
+          name: V197
           path: |
             artifact/*.apk
             artifact/*.aab
