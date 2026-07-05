@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 202; versionName = "20.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 203; versionName = "20.3" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V202" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V203" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -255,6 +255,7 @@ jobs:
               String pendingClipboardText = "";
               boolean clipboardForceFieldUpdate = false;
               boolean clipboardResponseMode = false;
+              int clipboardAutoPrepareToken = 0;
               boolean manualTopSource = true;
               boolean responseInProgress = false;
               long sessionStart = 0L;
@@ -499,7 +500,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V202");
+                  TextView title = label("Fordito_V203");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -3108,11 +3109,21 @@ jobs:
                     "Do not add comments such as 'this is absurd' or change the speaker's intent. Preserve tone, style, vulgarity, intimacy, friendliness or official register.";
               }
 
+              void scheduleClipboardAutoPrepare() {
+                  final int token = ++clipboardAutoPrepareToken;
+                  new Handler().postDelayed(() -> {
+                      if(token != clipboardAutoPrepareToken) return;
+                      if(clipboardSpeechActive) return;
+                      autoPrepareClipboardRawText();
+                  }, 850);
+              }
+
               void autoPrepareClipboardRawText() {
                   try {
                       if(clipboardRawEdit == null || clipboardPreparedEdit == null) return;
+                      if(!hasKey()) return;
                       String raw = clipboardRawEdit.getText() == null ? "" : clipboardRawEdit.getText().toString().trim();
-                      if(raw.length() == 0) return;
+                      if(raw.length() == 0 || raw.equalsIgnoreCase("vágólap szövege")) return;
                       clipboardCurrentSource = raw;
                       clipboardForceFieldUpdate = false;
                       clipboardPreparedEdit.setText("Értelmezés folyamatban…");
@@ -3481,6 +3492,14 @@ jobs:
                           rawTitle.setTextColor(Color.rgb(255, 210, 80));
                           lay.addView(rawTitle, new LinearLayout.LayoutParams(-1, -2));
                           clipboardRawEdit = clipboardEditBox("vágólap szövege", 14, 5);
+                          clipboardRawEdit.addTextChangedListener(new TextWatcher() {
+                              public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                              public void onTextChanged(CharSequence s, int start, int before, int count) {}
+                              public void afterTextChanged(Editable e) {
+                                  if(clipboardSpeechActive) return;
+                                  scheduleClipboardAutoPrepare();
+                              }
+                          });
                           lay.addView(clipboardRawEdit, new LinearLayout.LayoutParams(-1, 0, 0.90f));
 
                           clipboardPreparedTitle = label("Értelmezett / fordítandó szöveg:");
@@ -4270,6 +4289,10 @@ jobs:
               }
 
               void stopClipboardSystemSpeech(boolean toast) {
+                  boolean wasActive = clipboardSpeechActive;
+                  if(toast && wasActive && clipboardSpeechLastPartial != null && clipboardSpeechLastPartial.trim().length() > 0) {
+                      commitClipboardDictationResult(clipboardSpeechLastPartial);
+                  }
                   clipboardSpeechActive = false;
                   try { if(clipboardSpeechRecognizer != null) clipboardSpeechRecognizer.cancel(); } catch(Exception ignored) {}
                   if(clipboardMicButton != null) {
@@ -4277,7 +4300,10 @@ jobs:
                       clipboardMicButton.setTextSize(20);
                       clipboardMicButton.setBackgroundColor(Color.rgb(30,120,75));
                   }
-                  if(toast) Toast.makeText(this, "Vágólapos diktálás leállítva.", Toast.LENGTH_SHORT).show();
+                  if(toast) {
+                      Toast.makeText(this, "Vágólapos diktálás leállítva.", Toast.LENGTH_SHORT).show();
+                      scheduleClipboardAutoPrepare();
+                  }
               }
 
               String normSpeech(String s) {
@@ -4437,14 +4463,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V202.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V202.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V203.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V203.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V202
+          name: V203
           path: |
             artifact/*.apk
             artifact/*.aab
