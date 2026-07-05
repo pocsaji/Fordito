@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 204; versionName = "20.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 206; versionName = "20.6" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V204" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V206" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -255,7 +255,9 @@ jobs:
               String pendingClipboardText = "";
               boolean clipboardForceFieldUpdate = false;
               boolean clipboardResponseMode = false;
+              boolean clipboardAutoTranslateEnabled = false;
               int clipboardAutoPrepareToken = 0;
+              Button clipboardTranslateButton;
               boolean manualTopSource = true;
               boolean responseInProgress = false;
               long sessionStart = 0L;
@@ -346,6 +348,7 @@ jobs:
                   {"Bank","bank"},
                   {"Hivatal","office"},
                   {"Rendőrség","police"},
+                  {"Közösségi média / chat","social_media"},
                   {"Autószerviz / gépjavítás","service"}
               };
 
@@ -500,7 +503,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V204");
+                  TextView title = label("Fordito_V206");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1138,6 +1141,43 @@ jobs:
                   if(mode.equals("precise")) return "Precise mode: stay close to the meaning, do not expand, but always use correct natural grammar. Do not censor or mask words.";
                   if(mode.equals("interpreter")) return "Interpreter mode: use context strongly, make the translation sound like a human interpreter, but do not invent facts. Do not censor or mask words.";
                   return "Natural mode: translate meaning naturally and fluently, with light correction only. Do not censor or mask words.";
+              }
+
+              String clipboardContextPrompt() {
+                  String top = code(topLang);
+                  String bottom = code(bottomLang);
+                  if(top.equalsIgnoreCase("AUTO") || bottom.equalsIgnoreCase("AUTO")) {
+                      return "Context profile: general conversation. One selected language is AUTO, so do not use a domain glossary; rely only on the two detected/selected languages and the text itself. ";
+                  }
+                  String ctx = "Context profile: " + labelOf(profiles, profile) + " (" + profile + "). Use this only as a light domain hint; do not force words into the text if they do not fit. ";
+                  if("truck_general".equals(profile) || "logistics".equals(profile)) {
+                      ctx += "Domain glossary hints for HU/FR/EN/DE/IT/ES/RO/HR/SK/SL: rakodás/loading/chargement/Beladung, lerakó/unloading/déchargement/Entladung, referenciaszám/reference number/numéro de référence/Referenznummer, fuvar/freight/transport, cím/address/adresse/Adresse, raktár/warehouse/entrepôt/Lager, ügyfél/client/client/Kunde, sofőr/driver/chauffeur/Fahrer, pótkocsi/trailer/remorque/Auflieger, telephely/site/dépôt/Betriebshof. ";
+                  } else if("truck_tarp".equals(profile)) {
+                      ctx += "Domain glossary hints: ponyva/tarpaulin/bâche/Plane, spanifer/ratchet strap/sangle à cliquet/Spanngurt, raklap/pallet/palette/Palette, oldalponyva/curtain side/bâche latérale, lekötés/securing/arrimage/Ladungssicherung, élvédő/edge protector/cornière de protection/Kantenschutz. ";
+                  } else if("truck_bulk".equals(profile)) {
+                      ctx += "Domain glossary hints: ömlesztett áru/bulk goods/vrac/Schüttgut, siló/silo/silo/Silo, garat/hopper/trémie/Trichter, ürítés/unloading/vidange/Entleerung, mérleg/scale/pont-bascule/Waage, pellet/granulátum/granulate/granulés/Granulat. ";
+                  } else if("truck_tank".equals(profile)) {
+                      ctx += "Domain glossary hints: tartány/tanker/citerne/Tank, tömlő/hose/tuyau/Schlauch, szelep/valve/vanne/Ventil, nyomás/pressure/pression/Druck, ürítés/discharge/dépotage/Entladung, töltés/loading/remplissage/Befüllung. ";
+                  } else if("tourism".equals(profile)) {
+                      ctx += "Domain glossary hints: foglalás/booking/réservation/Buchung, szállás/accommodation/hébergement/Unterkunft, parkolás/parking/stationnement/Parken, jegy/ticket/billet/Ticket, belépő/admission ticket/billet d'entrée/Eintrittskarte, útvonal/route/itinéraire/Route. ";
+                  } else if("restaurant".equals(profile)) {
+                      ctx += "Domain glossary hints: asztalfoglalás/table reservation/réservation de table/Tischreservierung, étlap/menu/menu/Speisekarte, számla/bill/addition/Rechnung, allergia/allergy/allergie/Allergie, köret/side dish/accompagnement/Beilage, elvitel/takeaway/à emporter/zum Mitnehmen. ";
+                  } else if("hotel".equals(profile)) {
+                      ctx += "Domain glossary hints: bejelentkezés/check-in/arrivée/Check-in, kijelentkezés/check-out/départ/Check-out, kulcs/key/clé/Schlüssel, szoba/room/chambre/Zimmer, előleg/deposit/acompte/Anzahlung, kutyadíj/pet fee/supplément chien/Hundegebühr. ";
+                  } else if("medical".equals(profile) || "pharmacy".equals(profile)) {
+                      ctx += "Domain glossary hints: fájdalom/pain/douleur/Schmerz, gyógyszer/medicine/médicament/Medikament, recept/prescription/ordonnance/Rezept, vizsgálat/examination/examen/Untersuchung, beutaló/referral/ordonnance de consultation/Überweisung, allergia/allergy/allergie/Allergie. ";
+                  } else if("bank".equals(profile)) {
+                      ctx += "Domain glossary hints: bankszámla/bank account/compte bancaire/Bankkonto, átutalás/transfer/virement/Überweisung, kártya/card/carte/Karte, díj/fee/frais/Gebühr, hitel/loan/crédit/Kredit, igazolás/certificate/attestation/Bescheinigung. ";
+                  } else if("office".equals(profile)) {
+                      ctx += "Domain glossary hints: ügyintézés/administration/démarches administratives/Behördengang, igazolás/certificate/attestation/Bescheinigung, kérelem/request/demande/Antrag, határidő/deadline/délai/Frist, hivatal/office/administration/Amt, nyomtatvány/form/formulaire/Formular. ";
+                  } else if("police".equals(profile) || "customs".equals(profile)) {
+                      ctx += "Domain glossary hints: igazoltatás/ID check/contrôle d'identité/Personenkontrolle, jogosítvány/driving licence/permis de conduire/Führerschein, forgalmi/vehicle registration/carte grise/Fahrzeugschein, vám/customs/douane/Zoll, ellenőrzés/inspection/contrôle/Kontrolle, bírság/fine/amende/Bußgeld. ";
+                  } else if("social_media".equals(profile)) {
+                      ctx += "Context hints: short informal messages, Facebook/Messenger/Instagram/chat style, emojis or slang may be intentional. Preserve friendly, humorous, intimate, annoyed or casual tone; do not over-formalize. ";
+                  } else if("service".equals(profile)) {
+                      ctx += "Domain glossary hints: szerviz/service/atelier/Werkstatt, hiba/fault/panne/Fehler, alkatrész/part/pièce/Ersatzteil, javítás/repair/réparation/Reparatur, garancia/warranty/garantie/Garantie, időpont/appointment/rendez-vous/Termin. ";
+                  }
+                  return ctx;
               }
 
 
@@ -2963,7 +3003,6 @@ jobs:
 
               void openClipboardReplyMode() {
                   try {
-                      setClipboardText(" ");
                       clipboardResponseMode = true;
                       clipboardCurrentSource = "";
                       clipboardCurrentPrepared = "";
@@ -3002,9 +3041,8 @@ jobs:
                       showClipboardTranslatorPanel("", "", "Nincs fordítható szöveg a vágólapon. Másold ki újra a szöveget, majd nyomd meg ismét a lebegő gombot.");
                       return;
                   }
-                  String mid = isClipboardHungarian(text) ? "Értelmezés folyamatban…" : "";
-                  showClipboardTranslatorPanel(text, mid, "Fordítás folyamatban…");
-                  translateClipboardFullHttp(text, clipboardCurrentTarget);
+                  showClipboardTranslatorPanel(text, "Értelmezés folyamatban…", "");
+                  prepareClipboardOnlyHttp(text);
               }
 
               void runClipboardPanelTranslate() {
@@ -3012,10 +3050,7 @@ jobs:
                   String prep = clipboardPreparedEdit == null ? "" : clipboardPreparedEdit.getText().toString().trim();
                   String tr = clipboardTranslationEdit == null ? "" : clipboardTranslationEdit.getText().toString().trim();
                   if(clipboardTranslationEdit != null && clipboardTranslationEdit.hasFocus()) {
-                      if(tr.length() > 0) {
-                          setClipboardText(tr);
-                          Toast.makeText(this, "Fordítás a vágólapra másolva.", Toast.LENGTH_SHORT).show();
-                      }
+                      Toast.makeText(this, "Másoláshoz használd a MÁSOL gombot.", Toast.LENGTH_SHORT).show();
                       return;
                   }
                   if(clipboardPreparedEdit != null && clipboardPreparedEdit.hasFocus() && prep.length() > 0) {
@@ -3102,11 +3137,11 @@ jobs:
               }
 
               String clipboardPrepareOnlyInstructions() {
-                  return "You repair raw dictated text for the middle field of a 3-window translator. Return ONLY the corrected text, no labels, no markdown, no quotes, no explanation. " +
-                    "The input may contain raw Hungarian speech recognition with pauses, repeated fragments, broken phrases, odd test words, or background noise. " +
-                    "Your job: turn the raw Hungarian speech-recognition text into a natural, culturally well-formed Hungarian source message. Correct punctuation, capitalization, accents, sentence boundaries, obvious grammar, broken sentence structure and clear speech-recognition errors. " +
-                    "Preserve the speaker's meaning, intent, facts and tone, but do not behave like a literal transcript. Remove obvious dictation noise, accidental filler words, false starts, repeated fragments, self-corrections and words that clearly do not belong in the sentence when the surrounding context makes that clear. " +
-                    "You may rewrite awkward wording into natural Hungarian when this does not change the meaning. Do NOT invent facts, explanations, opinions or new content. If an unusual or test word could genuinely be intentional in context, keep it. If a phrase is genuinely ambiguous, prefer the closest plausible wording rather than guessing a new meaning. " +
+                  return clipboardContextPrompt() + "You repair raw dictated or clipboard text for the middle field of a 3-window translator. Return ONLY the corrected source-language text, no labels, no markdown, no quotes, no explanation. " +
+                    "The user may provide text in either one of the selected language pair. You must keep the ORIGINAL input language. In this middle step translation is strictly forbidden. " +
+                    "Make the original-language source message natural and culturally well-formed: punctuation, capitalization, accents, sentence boundaries, grammar, broken sentence structure and clear speech-recognition errors. " +
+                    "Preserve the speaker's meaning, intent, facts and tone, but do not behave like a literal transcript. Remove obvious dictation noise, accidental filler words, false starts, repeated fragments, self-corrections and words that clearly do not belong when the surrounding context makes that clear. " +
+                    "You may rewrite awkward wording naturally when this does not change meaning. Do NOT invent facts, explanations, opinions or new content. If an unusual or test word could be intentional, keep it. If genuinely ambiguous, prefer the closest plausible wording rather than guessing a new meaning. " +
                     "Do not add comments or explain the text. Preserve vulgarity, intimacy, friendliness and official or informal register.";
               }
 
@@ -3144,7 +3179,7 @@ jobs:
                       root.put("temperature", 0.05);
                       JSONArray messages = new JSONArray();
                       messages.put(new JSONObject().put("role", "system").put("content", clipboardPrepareOnlyInstructions()));
-                      messages.put(new JSONObject().put("role", "user").put("content", rawText));
+                      messages.put(new JSONObject().put("role", "user").put("content", "TOP_LANG: " + code(topLang) + "\nBOTTOM_LANG: " + code(bottomLang) + "\nTEXT:\n" + rawText));
                       root.put("messages", messages);
                       MediaType mt = MediaType.parse("application/json; charset=utf-8");
                       RequestBody body = RequestBody.create(root.toString(), mt);
@@ -3174,8 +3209,14 @@ jobs:
                                   }
                                   final String clean = cleanClipboardApiText(out).trim();
                                   runOnUiThread(() -> {
-                                      if(clipboardPreparedEdit != null) clipboardPreparedEdit.setText(clean.length() == 0 ? rawText : clean);
-                                      clipboardCurrentPrepared = clean.length() == 0 ? rawText : clean;
+                                      String prepared = clean.length() == 0 ? rawText : clean;
+                                      if(clipboardPreparedEdit != null) clipboardPreparedEdit.setText(prepared);
+                                      clipboardCurrentPrepared = prepared;
+                                      if(clipboardAutoTranslateEnabled && prepared.trim().length() > 0) {
+                                          clipboardCurrentTarget = clipboardTargetCode(prepared);
+                                          if(clipboardTranslationEdit != null) clipboardTranslationEdit.setText("Fordítás folyamatban…");
+                                          translateClipboardOnlyHttp(prepared, clipboardCurrentTarget);
+                                      }
                                   });
                               } catch(Exception ex) {
                                   runOnUiThread(() -> { if(clipboardPreparedEdit != null) clipboardPreparedEdit.setText(rawText); });
@@ -3274,9 +3315,8 @@ jobs:
                   }
                   clipboardCurrentPrepared = prepared;
                   clipboardForceFieldUpdate = true;
-                  setClipboardText(translation);
                   showClipboardTranslatorPanel(source, prepared, translation);
-                  Toast.makeText(this, "Fordítás a vágólapra másolva.", Toast.LENGTH_SHORT).show();
+                  Toast.makeText(this, "Fordítás elkészült.", Toast.LENGTH_SHORT).show();
               }
 
               void applyClipboardTranslationOnly(String prepared, String tr) {
@@ -3285,9 +3325,8 @@ jobs:
                       showClipboardTranslatorPanel(clipboardCurrentSource, prepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
                       return;
                   }
-                  setClipboardText(clean);
                   showClipboardTranslatorPanel(clipboardCurrentSource, prepared, clean);
-                  Toast.makeText(this, "Fordítás a vágólapra másolva.", Toast.LENGTH_SHORT).show();
+                  Toast.makeText(this, "Fordítás elkészült.", Toast.LENGTH_SHORT).show();
               }
 
               void bringAppToFrontForClipboardRead() {
@@ -3415,7 +3454,7 @@ jobs:
               }
 
               String clipboardFullInstructions() {
-                  return "You are a standalone clipboard text repair and translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
+                  return clipboardContextPrompt() + "You are a standalone clipboard text repair and translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
                     "Return ONLY valid JSON with exactly two string fields: prepared and translation. No markdown, no labels outside JSON. " +
                     "Detect the source language from TEXT. If the source is Hungarian, prepared must be a corrected Hungarian version of TEXT: add punctuation, sentence boundaries and capitalization; correct obvious typos, missing accents, broken words, accidental repeated words and grammar when the intended meaning is clear from context. Be context-aware but conservative: do NOT invent new content and do NOT replace strange, test-like or unclear words with a different meaning. If a word is odd but could be intentional, keep it. Then translate prepared to TARGET_LANG. " +
                     "If the source is NOT Hungarian, prepared must be an empty string, and translation must be a natural Hungarian translation/interpretation of TEXT. Do not return the foreign source text as the translation. " +
@@ -3424,7 +3463,7 @@ jobs:
               }
 
               String clipboardTranslationInstructions() {
-                  return "You are a standalone clipboard translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
+                  return clipboardContextPrompt() + "You are a standalone clipboard translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
                     "If SOURCE_LANG is AUTO, detect the source language from TEXT. Translate the entire TEXT to TARGET_LANG. If TARGET_LANG is HU, the answer must be Hungarian. " +
                     "Return ONLY the translated text. Preserve paragraphs where reasonable. No labels, no markdown, no quotes, no explanation. Preserve the original style, register and emotional tone: friendly stays friendly, official stays official, intimate or sexual stays intimate or sexual, and practical work messages stay natural and direct. " +
                     "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Keep meaning, context and tone.";
@@ -3436,9 +3475,34 @@ jobs:
                       showClipboardTranslatorPanel(clipboardCurrentSource, clipboardCurrentPrepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
                       return;
                   }
-                  setClipboardText(tr);
                   showClipboardTranslatorPanel(clipboardCurrentSource, clipboardCurrentPrepared, tr);
-                  Toast.makeText(this, "Fordítás a vágólapra másolva.", Toast.LENGTH_SHORT).show();
+                  Toast.makeText(this, "Fordítás elkészült.", Toast.LENGTH_SHORT).show();
+              }
+
+              void updateClipboardTranslateButtonLabel() {
+                  if(clipboardTranslateButton != null) clipboardTranslateButton.setText(clipboardAutoTranslateEnabled ? "FORDÍT\nAUTO" : "FORDÍT\nMANUÁL");
+              }
+
+              boolean usableClipboardText(String s) {
+                  if(s == null) return false;
+                  String x = s.trim();
+                  if(x.length() == 0) return false;
+                  if(x.equalsIgnoreCase("Fordítás folyamatban…")) return false;
+                  if(x.equalsIgnoreCase("Értelmezés folyamatban…")) return false;
+                  if(x.equalsIgnoreCase("fordítás")) return false;
+                  if(x.equalsIgnoreCase("javított vagy fordítandó szöveg")) return false;
+                  if(x.equalsIgnoreCase("vágólap szövege")) return false;
+                  return true;
+              }
+
+              String bestClipboardCopyText() {
+                  String tr = clipboardTranslationEdit == null ? "" : clipboardTranslationEdit.getText().toString().trim();
+                  if(usableClipboardText(tr)) return tr;
+                  String prep = clipboardPreparedEdit == null ? "" : clipboardPreparedEdit.getText().toString().trim();
+                  if(usableClipboardText(prep)) return prep;
+                  String raw = clipboardRawEdit == null ? "" : clipboardRawEdit.getText().toString().trim();
+                  if(usableClipboardText(raw)) return raw;
+                  return "";
               }
 
               EditText clipboardEditBox(String hint, int textSize, int maxLines) {
@@ -3519,6 +3583,10 @@ jobs:
 
                           LinearLayout buttons = row();
                           Button translate = btn("FORDÍT");
+                          clipboardTranslateButton = translate;
+                          updateClipboardTranslateButtonLabel();
+                          translate.setSingleLine(false);
+                          translate.setGravity(Gravity.CENTER);
                           Button copy = btn("MÁSOL");
                           Button hide = btn("BEZÁR");
                           int cb = Color.rgb(95,95,95);
@@ -3532,12 +3600,19 @@ jobs:
                           copy.setTextSize(15);
                           hide.setTextSize(15);
                           translate.setOnClickListener(v -> runClipboardPanelTranslate());
+                          translate.setOnLongClickListener(v -> {
+                              clipboardAutoTranslateEnabled = !clipboardAutoTranslateEnabled;
+                              updateClipboardTranslateButtonLabel();
+                              Toast.makeText(this, clipboardAutoTranslateEnabled ? "Automatikus fordítás bekapcsolva." : "Manuális fordítás bekapcsolva.", Toast.LENGTH_SHORT).show();
+                              return true;
+                          });
                           copy.setOnClickListener(v -> {
-                              String t = clipboardTranslationEdit == null ? "" : clipboardTranslationEdit.getText().toString().trim();
-                              if(t.length() == 0 && clipboardPreparedEdit != null) t = clipboardPreparedEdit.getText().toString().trim();
-                              if(t.length() > 0 && !t.equals("Fordítás folyamatban…")) {
-                                  setClipboardText(t);
+                              String txt = bestClipboardCopyText();
+                              if(txt.length() > 0) {
+                                  setClipboardText(txt);
                                   Toast.makeText(this, "Vágólapra másolva.", Toast.LENGTH_SHORT).show();
+                              } else {
+                                  Toast.makeText(this, "Nincs másolható szöveg.", Toast.LENGTH_SHORT).show();
                               }
                           });
                           hide.setOnClickListener(v -> { stopClipboardSystemSpeech(false); try { if(clipboardDialog != null) clipboardDialog.dismiss(); } catch(Exception ignored) {} });
@@ -3548,8 +3623,7 @@ jobs:
 
                           clipboardDialog.setContentView(lay);
                       }
-                      boolean huSource = clipboardResponseMode || isClipboardHungarian(source);
-                      int prepVisibility = huSource ? View.VISIBLE : View.GONE;
+                      int prepVisibility = View.VISIBLE;
                       if(clipboardPreparedTitle != null) clipboardPreparedTitle.setVisibility(prepVisibility);
                       if(clipboardPreparedEdit != null) clipboardPreparedEdit.setVisibility(prepVisibility);
                       boolean force = clipboardForceFieldUpdate;
@@ -4464,14 +4538,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V204.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V204.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V206.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V206.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V204
+          name: V206
           path: |
             artifact/*.apk
             artifact/*.aab
