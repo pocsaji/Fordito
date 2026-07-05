@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 185; versionName = "18.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 186; versionName = "18.6" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V185" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V186" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -490,7 +490,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V185");
+                  TextView title = label("Fordito_V186");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2859,7 +2859,7 @@ jobs:
                       final Runnable longPressTask = () -> {
                           if(!moved[0]) {
                               longDone[0] = true;
-                              try { v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); } catch(Exception ignored) {}
+                              try { b.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); } catch(Exception ignored) {}
                               openClipboardReplyMode();
                           }
                       };
