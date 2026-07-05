@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 198; versionName = "19.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 199; versionName = "19.9" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V198" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V199" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -192,6 +192,9 @@ jobs:
               boolean clipboardSpeechActive = false;
               String clipboardSpeechBaseText = "";
               String clipboardSpeechLastPartial = "";
+              String googleSpeechCommittedText = "";
+              String googleSpeechVisiblePartial = "";
+              boolean googleSpeechSessionHasFinal = false;
               boolean clipboardSpeechToMainBox = false;
               Button clipboardMicButton;
               Button micBtn, translateBtn, menuBtn, topLangBtn, bottomLangBtn;
@@ -500,7 +503,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V198");
+                  TextView title = label("Fordito_V199");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -4158,6 +4161,9 @@ jobs:
                           }
                       }
                       clipboardSpeechLastPartial = "";
+                      googleSpeechCommittedText = clipboardSpeechBaseText == null ? "" : clipboardSpeechBaseText.trim();
+                      googleSpeechVisiblePartial = "";
+                      googleSpeechSessionHasFinal = false;
 
                       if(clipboardSpeechRecognizer == null) {
                           clipboardSpeechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
@@ -4178,9 +4184,11 @@ jobs:
                               @Override public void onResults(Bundle results) {
                                   if(!clipboardSpeechActive) return;
                                   ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                                  if(list != null && list.size() > 0) commitClipboardDictationResult(list.get(0));
-                                  else if(clipboardSpeechLastPartial != null && clipboardSpeechLastPartial.trim().length() > 0) commitClipboardDictationResult(clipboardSpeechLastPartial);
+                                  String finalPart = (list != null && list.size() > 0) ? list.get(0) : clipboardSpeechLastPartial;
+                                  commitClipboardDictationResult(finalPart);
+                                  boolean processMain = clipboardSpeechToMainBox;
                                   stopClipboardSystemSpeech(false);
+                                  if(processMain) processMainGoogleDictation();
                               }
 
                               @Override public void onError(int error) {
@@ -4188,7 +4196,9 @@ jobs:
                                   if(clipboardSpeechLastPartial != null && clipboardSpeechLastPartial.trim().length() > 0) {
                                       commitClipboardDictationResult(clipboardSpeechLastPartial);
                                   }
+                                  boolean processMain = clipboardSpeechToMainBox;
                                   stopClipboardSystemSpeech(false);
+                                  if(processMain && googleSpeechCommittedText.trim().length() > 0) processMainGoogleDictation();
                                   Toast.makeText(MainActivity.this, "Diktálás vége.", Toast.LENGTH_SHORT).show();
                               }
                           });
@@ -4225,47 +4235,155 @@ jobs:
                   if(toast) Toast.makeText(this, clipboardSpeechToMainBox ? "Google diktálás leállítva." : "Vágólapos diktálás leállítva.", Toast.LENGTH_SHORT).show();
               }
 
-              void showClipboardDictationPartial(String spoken) {
-                  spoken = spoken == null ? "" : spoken.trim();
-                  if(spoken.length() == 0) return;
-                  clipboardSpeechLastPartial = spoken;
-                  String base = clipboardSpeechBaseText == null ? "" : clipboardSpeechBaseText.trim();
-                  String combined = base.length() == 0 ? spoken : base + " " + spoken;
+              String combineGoogleSpeechText(String committed, String partial) {
+                  String a = committed == null ? "" : committed.trim();
+                  String b = partial == null ? "" : partial.trim();
+                  if(a.length() == 0) return b;
+                  if(b.length() == 0) return a;
+                  return a + " " + b;
+              }
+
+              void renderGoogleSpeechText(String visible) {
+                  visible = visible == null ? "" : visible.trim();
                   if(clipboardSpeechToMainBox) {
-                      topBox.setText(combined);
+                      programmaticChange = true;
+                      topBox.setText(visible);
+                      programmaticChange = false;
                       topBox.requestFocus();
                       topBox.setSelection(topBox.getText().length());
-                      manualTopSource = true;
-                      topActive = true;
                   } else {
                       if(clipboardRawEdit == null) return;
-                      clipboardRawEdit.setText(combined);
+                      clipboardRawEdit.setText(visible);
                       clipboardRawEdit.requestFocus();
                       clipboardRawEdit.setSelection(clipboardRawEdit.getText().length());
                       clipboardResponseMode = true;
                   }
               }
 
+              void showClipboardDictationPartial(String spoken) {
+                  spoken = spoken == null ? "" : spoken.trim();
+                  if(spoken.length() == 0) return;
+                  // A partial eredmény SOHA nem írhatja át a már véglegesített szöveget.
+                  // Csak a pillanatnyi Google-részlet cserélődik.
+                  clipboardSpeechLastPartial = spoken;
+                  googleSpeechVisiblePartial = spoken;
+                  renderGoogleSpeechText(combineGoogleSpeechText(googleSpeechCommittedText, googleSpeechVisiblePartial));
+              }
+
               void commitClipboardDictationResult(String spoken) {
                   spoken = spoken == null ? "" : spoken.trim();
                   if(spoken.length() == 0) return;
-                  String base = clipboardSpeechBaseText == null ? "" : clipboardSpeechBaseText.trim();
-                  String combined = base.length() == 0 ? spoken : base + " " + spoken;
-                  if(clipboardSpeechToMainBox) {
-                      topBox.setText(combined);
-                      topBox.requestFocus();
-                      topBox.setSelection(topBox.getText().length());
-                      manualTopSource = true;
-                      topActive = true;
-                  } else {
-                      if(clipboardRawEdit == null) return;
-                      clipboardRawEdit.setText(combined);
-                      clipboardRawEdit.requestFocus();
-                      clipboardRawEdit.setSelection(clipboardRawEdit.getText().length());
-                      clipboardResponseMode = true;
+                  // Egy recognition session végleges eredményét csak egyszer fűzzük hozzá.
+                  if(!googleSpeechSessionHasFinal) {
+                      googleSpeechCommittedText = combineGoogleSpeechText(googleSpeechCommittedText, spoken);
+                      googleSpeechSessionHasFinal = true;
                   }
-                  clipboardSpeechBaseText = combined;
+                  googleSpeechVisiblePartial = "";
                   clipboardSpeechLastPartial = "";
+                  clipboardSpeechBaseText = googleSpeechCommittedText;
+                  renderGoogleSpeechText(googleSpeechCommittedText);
+              }
+
+              void processMainGoogleDictation() {
+                  final String raw = googleSpeechCommittedText == null ? "" : googleSpeechCommittedText.trim();
+                  if(raw.length() == 0) return;
+                  if(!hasKey()) { showApi(); return; }
+                  translateMainGoogleTextHttp(raw);
+              }
+
+              String mainGoogleTextInstructions() {
+                  return "You process dictated text for a two-window translator. The selected language pair is supplied as TOP_LANG and BOTTOM_LANG. " +
+                    "Detect whether TEXT is spoken in TOP_LANG or BOTTOM_LANG. Repair the dictated source in that SAME language before translating: restore punctuation, sentence boundaries, capitalization and accents; fix obvious speech-recognition errors, repeated fragments, broken words and contextually impossible wording when the intended meaning is reasonably clear. " +
+                    "Preserve the speaker's real meaning, context, relationship and tone. Friendly stays friendly, official stays official, direct stays direct, intimate stays intimate. Do not invent facts and do not censor. " +
+                    "Then translate the repaired source naturally into the OTHER selected language. " +
+                    "Return ONLY valid JSON with exactly these string fields: source_side, prepared, translation. source_side must be exactly TOP or BOTTOM. No markdown and no explanation.";
+              }
+
+              void translateMainGoogleTextHttp(String rawText) {
+                  try {
+                      OkHttpClient http = new OkHttpClient.Builder()
+                          .connectTimeout(25, TimeUnit.SECONDS)
+                          .readTimeout(70, TimeUnit.SECONDS)
+                          .writeTimeout(30, TimeUnit.SECONDS)
+                          .build();
+                      JSONObject root = new JSONObject();
+                      root.put("model", "gpt-4o-mini");
+                      root.put("temperature", 0.1);
+                      JSONArray messages = new JSONArray();
+                      messages.put(new JSONObject().put("role", "system").put("content", mainGoogleTextInstructions()));
+                      messages.put(new JSONObject().put("role", "user").put("content",
+                          "TOP_LANG: " + code(topLang) + "\nBOTTOM_LANG: " + code(bottomLang) + "\nTEXT:\n" + rawText));
+                      root.put("messages", messages);
+                      MediaType mt = MediaType.parse("application/json; charset=utf-8");
+                      RequestBody body = RequestBody.create(root.toString(), mt);
+                      Request req = new Request.Builder()
+                          .url("https://api.openai.com/v1/chat/completions")
+                          .addHeader("Authorization", "Bearer " + apiKey.trim())
+                          .addHeader("Content-Type", "application/json")
+                          .post(body)
+                          .build();
+                      http.newCall(req).enqueue(new Callback() {
+                          @Override public void onFailure(Call call, java.io.IOException ex) {
+                              runOnUiThread(() -> Toast.makeText(MainActivity.this, "Diktálás feldolgozási hiba: kapcsolat nem sikerült.", Toast.LENGTH_LONG).show());
+                          }
+                          @Override public void onResponse(Call call, Response response) throws java.io.IOException {
+                              String bodyText = response.body() == null ? "" : response.body().string();
+                              if(!response.isSuccessful()) {
+                                  runOnUiThread(() -> Toast.makeText(MainActivity.this, "Diktálás feldolgozási hiba: HTTP " + response.code(), Toast.LENGTH_LONG).show());
+                                  return;
+                              }
+                              try {
+                                  JSONObject obj = new JSONObject(bodyText);
+                                  JSONArray choices = obj.optJSONArray("choices");
+                                  String out = "";
+                                  if(choices != null && choices.length() > 0) {
+                                      JSONObject msg = choices.getJSONObject(0).optJSONObject("message");
+                                      if(msg != null) out = msg.optString("content", "");
+                                  }
+                                  final String modelOut = out;
+                                  runOnUiThread(() -> applyMainGoogleTextResult(rawText, modelOut));
+                              } catch(Exception ex) {
+                                  runOnUiThread(() -> Toast.makeText(MainActivity.this, "Diktálás feldolgozási hiba: nem értelmezhető válasz.", Toast.LENGTH_LONG).show());
+                              }
+                          }
+                      });
+                  } catch(Exception ex) {
+                      Toast.makeText(this, "Diktálás feldolgozási hiba: " + ex.getMessage(), Toast.LENGTH_LONG).show();
+                  }
+              }
+
+              void applyMainGoogleTextResult(String rawText, String out) {
+                  try {
+                      String cleaned = out == null ? "" : out.trim();
+                      int a = cleaned.indexOf('{');
+                      int b = cleaned.lastIndexOf('}');
+                      if(a >= 0 && b > a) cleaned = cleaned.substring(a, b + 1);
+                      JSONObject jo = new JSONObject(cleaned);
+                      String side = jo.optString("source_side", "TOP").trim().toUpperCase(Locale.ROOT);
+                      String prepared = cleanClipboardApiText(jo.optString("prepared", ""));
+                      String translation = cleanClipboardApiText(jo.optString("translation", ""));
+                      if(prepared.length() == 0) prepared = rawText;
+                      if(translation.length() == 0) {
+                          Toast.makeText(this, "Diktálás feldolgozási hiba: üres fordítás.", Toast.LENGTH_LONG).show();
+                          return;
+                      }
+                      programmaticChange = true;
+                      if("BOTTOM".equals(side)) {
+                          bottomBox.setText(prepared);
+                          topBox.setText(translation);
+                          topActive = false;
+                          manualTopSource = false;
+                      } else {
+                          topBox.setText(prepared);
+                          bottomBox.setText(translation);
+                          topActive = true;
+                          manualTopSource = true;
+                      }
+                      programmaticChange = false;
+                      applyDisplayMode();
+                  } catch(Exception ex) {
+                      Toast.makeText(this, "Diktálás feldolgozási hiba: hibás AI-válasz.", Toast.LENGTH_LONG).show();
+                  }
               }
 
               @Override public void onBackPressed() {
@@ -4364,14 +4482,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V198.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V198.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V199.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V199.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V198
+          name: V199
           path: |
             artifact/*.apk
             artifact/*.aab
