@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 217; versionName = "21.7" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 220; versionName = "22.0" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V217" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V220" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -165,9 +165,6 @@ jobs:
           import android.speech.RecognizerIntent;
           import android.speech.SpeechRecognizer;
           import android.speech.RecognitionListener;
-          import android.speech.RecognitionSupport;
-          import android.speech.RecognitionSupportCallback;
-          import android.speech.ModelDownloadListener;
           import android.speech.tts.TextToSpeech;
           import android.speech.tts.UtteranceProgressListener;
           import android.os.*;
@@ -260,6 +257,9 @@ jobs:
               boolean clipboardResponseMode = false;
               boolean clipboardAutoTranslateEnabled = false;
               int clipboardAutoPrepareToken = 0;
+              int clipboardPrepareRequestToken = 0;
+              int clipboardTranslateRequestToken = 0;
+              int clipboardFullRequestToken = 0;
               Button clipboardTranslateButton;
               boolean manualTopSource = true;
               boolean responseInProgress = false;
@@ -506,7 +506,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V217");
+                  TextView title = label("Fordito_V220");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -974,6 +974,7 @@ jobs:
               }
 
               void start(boolean withAudio) {
+                  clipboardResponseMode = false;
                   if(!hasKey()) { showApi(); return; }
                   if(withAudio && Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reqMic(); return; }
                   if(withAudio && sessionStart == 0L) sessionStart = System.currentTimeMillis();
@@ -1498,6 +1499,9 @@ jobs:
                   liveTranslateMode = false;
                   pendingLiveBlockId = -1;
                   liveTranslateQueue.clear();
+                  manualResponseMode = false;
+                  clipboardResponseMode = false;
+                  pendingOutput = "";
                   recentLiveBlockHashes.clear();
                   recentLiveBlockHashOrder.clear();
                   try { if(ws != null) ws.close(1000, "stop"); } catch(Exception ignored) {}
@@ -1527,12 +1531,13 @@ jobs:
 
                       if(type.equals("response.done")) {
                           responseInProgress = false;
-                          // V77: ha egy live fordítás válasz nélkül zárult, a blokk nem számít késznek; később pótolható.
+                          // V220: ha egy live fordítás válasz nélkül zárult, a blokk nem veszhet el.
+                          // Korlátozottan újrapróbáljuk, különben marad újrafordíthatóként.
                           if(liveTranslateMode && pendingLiveBlockId >= 0 && pendingOutput.trim().length() == 0) {
                               int missId = pendingLiveBlockId;
                               pendingLiveBlockId = -1;
                               liveTranslateMode = false;
-                              runOnUiThread(() -> renderBlocksKeepView());
+                              runOnUiThread(() -> retryLiveBlockOrRender(missId));
                           }
                           // V55: élő fordítási sor csak akkor induljon tovább,
                           // amikor az előző response ténylegesen lezárult a szerver szerint.
@@ -1622,6 +1627,7 @@ jobs:
               }
 
               void sendManualText(String text) {
+                  clipboardResponseMode = false;
                   topActive = manualTopSource;
                   liveTranslateMode = false;
                   pendingLiveBlockId = -1;
@@ -2457,6 +2463,7 @@ jobs:
               }
 
               void processNextLiveTranslation() {
+                  clipboardResponseMode = false;
                   // V49: a live fordítást nem szabad a globális responseInProgress flag miatt megállítani.
                   // A Realtime transcription közben nem fordítási válasz, ezért ez a flag itt könnyen beragadhat.
                   // Élő beszédnél csak a saját liveTranslateMode zárja ki a párhuzamos blokkfordítást.
@@ -2505,6 +2512,20 @@ jobs:
                   }
               }
 
+              void retryLiveBlockOrRender(int id) {
+                  if(id >= 0 && id < textBlocks.size()) {
+                      TextBlock b = textBlocks.get(id);
+                      b.translatedOk = false;
+                      b.retryCount++;
+                      if(b.retryCount <= 2 && !liveTranslateQueue.contains(id)) {
+                          liveTranslateQueue.add(id);
+                          new Handler().postDelayed(() -> processNextLiveTranslation(), 650);
+                          return;
+                      }
+                  }
+                  renderBlocksKeepView();
+              }
+
               void applyLiveTranslation(String out) {
                   int id = pendingLiveBlockId;
                   String speakText = null;
@@ -2538,10 +2559,10 @@ jobs:
                           b.retryCount = 0;
                           setDetectedSourceSide(sourceIsTop);
                       } else {
-                          // V74: live módban nincs laza fallback. Ha a modell nem ad szabályos,
-                          // kiválasztott nyelvpárba illeszkedő választ, a blokk marad újrafordítható.
-                          b.translatedOk = false;
-                          b.retryCount++;
+                          // V220: nincs laza fallback, de a blokk ne vesszen el.
+                          // Korlátozott újrapróba, utána marad forrásként látható és újrafordítható.
+                          retryLiveBlockOrRender(id);
+                          return;
                       }
                       renderBlocksKeepView();
                       enqueueSpeak(speakText, speakLang);
@@ -2555,10 +2576,12 @@ jobs:
               }
 
               void routeAiOutput(String out) {
-                  if(clipboardResponseMode) {
+                  if(clipboardResponseMode && clipboardDialog != null && clipboardDialog.isShowing()) {
                       clipboardResponseMode = false;
                       applyClipboardTranslation(out);
                       return;
+                  } else {
+                      clipboardResponseMode = false;
                   }
 
                   if(manualResponseMode) {
@@ -2672,12 +2695,13 @@ jobs:
               ArrayList<String[]> parseTriples(String out) {
                   ArrayList<String[]> list = new ArrayList<>();
                   if(out == null) return list;
+                  String upperAll = out.toUpperCase(Locale.ROOT);
                   String marker = "SOURCE_LANG:";
                   int pos = 0;
                   while(true) {
-                      int start = out.indexOf(marker, pos);
+                      int start = upperAll.indexOf(marker, pos);
                       if(start < 0) break;
-                      int next = out.indexOf(marker, start + marker.length());
+                      int next = upperAll.indexOf(marker, start + marker.length());
                       String part = next >= 0 ? out.substring(start, next) : out.substring(start);
                       String sourceLang = extractAfter(part, "SOURCE_LANG:");
                       String original = extractAfter(part, "ORIGINAL:");
@@ -2692,13 +2716,16 @@ jobs:
               }
 
               String extractAfter(String out, String key) {
-                  int i = out.indexOf(key);
+                  if(out == null || key == null) return "";
+                  String upper = out.toUpperCase(Locale.ROOT);
+                  String keyUpper = key.toUpperCase(Locale.ROOT);
+                  int i = upper.indexOf(keyUpper);
                   if(i < 0) return "";
-                  int start = i + key.length();
+                  int start = i + keyUpper.length();
                   int end = out.length();
                   String[] keys = {"SOURCE_LANG:", "ORIGINAL:", "TRANSLATION:"};
                   for(String k: keys) {
-                      int n = out.indexOf(k, start);
+                      int n = upper.indexOf(k, start);
                       if(n >= 0) end = Math.min(end, n);
                   }
                   return out.substring(start, end).trim();
@@ -3033,6 +3060,7 @@ jobs:
                   if(!hasKey()) { bringAppToFrontForClipboardRead(); new Handler().postDelayed(() -> showApi(), 250); return; }
                   hideFloatingResultWindow();
                   bringAppToFrontForClipboardRead();
+                  if(clipboardDialog != null && clipboardDialog.isShowing()) return;
                   new Handler().postDelayed(() -> translateClipboardNow(false), 480);
               }
 
@@ -3076,7 +3104,7 @@ jobs:
                   }
                   String source = raw;
                   if(source.length() == 0) {
-                      showClipboardTranslatorPanel("", "", "Nincs fordítható szöveg.");
+                      Toast.makeText(this, "Nincs fordítható szöveg.", Toast.LENGTH_SHORT).show();
                       return;
                   }
                   clipboardCurrentSource = source;
@@ -3087,6 +3115,7 @@ jobs:
               }
 
               void translateClipboardFullHttp(String sourceText, String targetCode) {
+                  final int requestToken = ++clipboardFullRequestToken;
                   try {
                       OkHttpClient http = new OkHttpClient.Builder()
                           .connectTimeout(25, TimeUnit.SECONDS)
@@ -3131,7 +3160,7 @@ jobs:
                                       if(msg != null) out = msg.optString("content", "");
                                   }
                                   final String modelOut = out;
-                                  runOnUiThread(() -> applyClipboardFullResult(sourceText, modelOut));
+                                  runOnUiThread(() -> { if(requestToken == clipboardFullRequestToken) applyClipboardFullResult(sourceText, modelOut); });
                               } catch(Exception ex) {
                                   runOnUiThread(() -> showClipboardTranslatorPanel(sourceText, "", "Vágólap-fordítási hiba: nem értelmezhető válasz."));
                               }
@@ -3174,6 +3203,7 @@ jobs:
               }
 
               void prepareClipboardOnlyHttp(String rawText) {
+                  final int requestToken = ++clipboardPrepareRequestToken;
                   try {
                       OkHttpClient http = new OkHttpClient.Builder()
                           .connectTimeout(25, TimeUnit.SECONDS)
@@ -3197,12 +3227,12 @@ jobs:
                           .build();
                       http.newCall(req).enqueue(new Callback() {
                           @Override public void onFailure(Call call, java.io.IOException e) {
-                              runOnUiThread(() -> { if(clipboardPreparedEdit != null) clipboardPreparedEdit.setText(rawText); });
+                              runOnUiThread(() -> { if(requestToken == clipboardPrepareRequestToken && clipboardPreparedEdit != null) clipboardPreparedEdit.setText(rawText); });
                           }
                           @Override public void onResponse(Call call, Response response) throws java.io.IOException {
                               String rawResp = response.body() == null ? "" : response.body().string();
                               if(!response.isSuccessful()) {
-                                  runOnUiThread(() -> { if(clipboardPreparedEdit != null) clipboardPreparedEdit.setText(rawText); });
+                                  runOnUiThread(() -> { if(requestToken == clipboardPrepareRequestToken && clipboardPreparedEdit != null) clipboardPreparedEdit.setText(rawText); });
                                   return;
                               }
                               try {
@@ -3215,6 +3245,7 @@ jobs:
                                   }
                                   final String clean = cleanClipboardApiText(out).trim();
                                   runOnUiThread(() -> {
+                                      if(requestToken != clipboardPrepareRequestToken) return;
                                       String prepared = clean.length() == 0 ? rawText : clean;
                                       if(clipboardPreparedEdit != null) clipboardPreparedEdit.setText(prepared);
                                       clipboardCurrentPrepared = prepared;
@@ -3225,7 +3256,7 @@ jobs:
                                       }
                                   });
                               } catch(Exception ex) {
-                                  runOnUiThread(() -> { if(clipboardPreparedEdit != null) clipboardPreparedEdit.setText(rawText); });
+                                  runOnUiThread(() -> { if(requestToken == clipboardPrepareRequestToken && clipboardPreparedEdit != null) clipboardPreparedEdit.setText(rawText); });
                               }
                           }
                       });
@@ -3235,6 +3266,7 @@ jobs:
               }
 
               void translateClipboardOnlyHttp(String preparedText, String targetCode) {
+                  final int requestToken = ++clipboardTranslateRequestToken;
                   try {
                       OkHttpClient http = new OkHttpClient.Builder()
                           .connectTimeout(25, TimeUnit.SECONDS)
@@ -3258,12 +3290,12 @@ jobs:
                           .build();
                       http.newCall(req).enqueue(new Callback() {
                           @Override public void onFailure(Call call, java.io.IOException e) {
-                              runOnUiThread(() -> showClipboardTranslatorPanel(clipboardCurrentSource, preparedText, "Vágólap-fordítási hiba: kapcsolat nem sikerült."));
+                              runOnUiThread(() -> { if(requestToken == clipboardTranslateRequestToken) showClipboardTranslatorPanel(clipboardCurrentSource, preparedText, "Vágólap-fordítási hiba: kapcsolat nem sikerült."); });
                           }
                           @Override public void onResponse(Call call, Response response) throws java.io.IOException {
                               String raw = response.body() == null ? "" : response.body().string();
                               if(!response.isSuccessful()) {
-                                  runOnUiThread(() -> showClipboardTranslatorPanel(clipboardCurrentSource, preparedText, "Vágólap-fordítási hiba: HTTP " + response.code()));
+                                  runOnUiThread(() -> { if(requestToken == clipboardTranslateRequestToken) showClipboardTranslatorPanel(clipboardCurrentSource, preparedText, "Vágólap-fordítási hiba: HTTP " + response.code()); });
                                   return;
                               }
                               try {
@@ -3275,9 +3307,9 @@ jobs:
                                       if(msg != null) out = msg.optString("content", "");
                                   }
                                   final String result = cleanClipboardApiText(out);
-                                  runOnUiThread(() -> applyClipboardTranslationOnly(preparedText, result));
+                                  runOnUiThread(() -> { if(requestToken == clipboardTranslateRequestToken) applyClipboardTranslationOnly(preparedText, result); });
                               } catch(Exception ex) {
-                                  runOnUiThread(() -> showClipboardTranslatorPanel(clipboardCurrentSource, preparedText, "Vágólap-fordítási hiba: nem értelmezhető válasz."));
+                                  runOnUiThread(() -> { if(requestToken == clipboardTranslateRequestToken) showClipboardTranslatorPanel(clipboardCurrentSource, preparedText, "Vágólap-fordítási hiba: nem értelmezhető válasz."); });
                               }
                           }
                       });
@@ -3307,14 +3339,12 @@ jobs:
                       if(a >= 0 && b > a) cleaned = cleaned.substring(a, b + 1);
                       JSONObject jo = new JSONObject(cleaned);
                       prepared = cleanClipboardApiText(jo.optString("prepared", ""));
-                      translation = cleanClipboardApiText(jo.optString("translation", ""));
+                      translation = stripClipboardTranslationLabels(jo.optString("translation", ""));
                   } catch(Exception ignored) {
                       prepared = source == null ? "" : source.trim();
-                      translation = cleanClipboardApiText(out);
+                      translation = stripClipboardTranslationLabels(out);
                   }
-                  boolean huSource = clipboardResponseMode || isClipboardHungarian(source);
-                  if(!huSource) prepared = "";
-                  else if(prepared.length() == 0) prepared = source == null ? "" : source.trim();
+                  if(prepared.length() == 0) prepared = source == null ? "" : source.trim();
                   if(translation.length() == 0) {
                       showClipboardTranslatorPanel(source, prepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
                       return;
@@ -3325,8 +3355,35 @@ jobs:
                   Toast.makeText(this, "Fordítás elkészült.", Toast.LENGTH_SHORT).show();
               }
 
+              String stripClipboardTranslationLabels(String s) {
+                  String t = cleanClipboardApiText(s);
+                  if(t.length() == 0) return "";
+                  String[] lines = t.split("\\r?\\n");
+                  StringBuilder translation = new StringBuilder();
+                  boolean foundTranslation = false;
+                  for(String line : lines) {
+                      String l = line == null ? "" : line.trim();
+                      String upper = l.toUpperCase(Locale.ROOT);
+                      if(upper.startsWith("TRANSLATION:")) {
+                          foundTranslation = true;
+                          String rest = l.substring(l.indexOf(':') + 1).trim();
+                          if(rest.length() > 0) translation.append(rest);
+                          continue;
+                      }
+                      if(upper.startsWith("SOURCE_LANG:") || upper.startsWith("ORIGINAL:") || upper.startsWith("TARGET_LANG:") || upper.startsWith("TEXT:")) {
+                          continue;
+                      }
+                      if(foundTranslation) {
+                          if(translation.length() > 0) translation.append("\n");
+                          translation.append(l);
+                      }
+                  }
+                  if(translation.length() > 0) return translation.toString().trim();
+                  return t;
+              }
+
               void applyClipboardTranslationOnly(String prepared, String tr) {
-                  String clean = cleanClipboardApiText(tr);
+                  String clean = stripClipboardTranslationLabels(tr);
                   if(clean.length() == 0) {
                       showClipboardTranslatorPanel(clipboardCurrentSource, prepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
                       return;
@@ -3462,8 +3519,9 @@ jobs:
               String clipboardFullInstructions() {
                   return clipboardContextPrompt() + "Never censor, mask, redact, soften, sanitize or replace any word, including profanity, vulgarity, insults, sexual language, slang or rude wording. Preserve every such word in full, with its original spelling and meaning. Never use asterisks, partial masking, euphemisms, square-bracket placeholders or category labels. " + "You are a standalone clipboard text repair and translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
                     "Return ONLY valid JSON with exactly two string fields: prepared and translation. No markdown, no labels outside JSON. " +
-                    "Detect the source language from TEXT. If the source is Hungarian, prepared must be a corrected Hungarian version of TEXT: add punctuation, sentence boundaries and capitalization; correct obvious typos, missing accents, broken words, accidental repeated words and grammar when the intended meaning is clear from context. Be context-aware but conservative: do NOT invent new content and do NOT replace strange, test-like or unclear words with a different meaning. If a word is odd but could be intentional, keep it. Then translate prepared to TARGET_LANG. " +
-                    "If the source is NOT Hungarian, prepared must be an empty string, and translation must be a natural Hungarian translation/interpretation of TEXT. Do not return the foreign source text as the translation. " +
+                    "Detect the source language from TEXT. prepared must ALWAYS be the corrected source-language version of TEXT. In prepared, translation is forbidden: keep the original input language, only repair punctuation, sentence boundaries, capitalization, accents, obvious speech-recognition mistakes, repeated fragments and grammar when the intended meaning is clear. " +
+                    "Then translate prepared to TARGET_LANG. translation must contain only the translated text. Do not write SOURCE_LANG, ORIGINAL, TRANSLATION, labels, markdown, quotes or explanation. " +
+                    "Be context-aware but conservative: do NOT invent new content and do NOT replace strange, test-like or unclear words with a different meaning. If a word is odd but could be intentional, keep it. " +
                     "Keep the user's practical meaning, tone, register, emotional intensity and context. Friendly stays friendly; official stays official; direct work messages stay direct; intimate or sexual text stays intimate or sexual instead of being made formal. Make the result natural and native-sounding. " +
                     "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording.";
               }
@@ -4398,50 +4456,6 @@ jobs:
                   }
               }
 
-              void startClipboardSpeechWithSupportCheck() {
-                  if(clipboardSpeechRecognizer == null || clipboardSpeechIntent == null) return;
-                  if(Build.VERSION.SDK_INT >= 33) {
-                      try {
-                          clipboardSpeechRecognizer.checkRecognitionSupport(
-                              clipboardSpeechIntent,
-                              getMainExecutor(),
-                              new RecognitionSupportCallback() {
-                                  @Override public void onSupportResult(RecognitionSupport recognitionSupport) {
-                                      startClipboardSpeechNow();
-                                  }
-                                  @Override public void onError(int error) {
-                                      try {
-                                          clipboardSpeechRecognizer.triggerModelDownload(
-                                              clipboardSpeechIntent,
-                                              getMainExecutor(),
-                                              new ModelDownloadListener() {
-                                                  @Override public void onSuccess() {
-                                                      startClipboardSpeechNow();
-                                                  }
-                                                  @Override public void onScheduled() {
-                                                      Toast.makeText(MainActivity.this, "Nyelvi modell letöltése ütemezve. Próbáld újra pár perc múlva.", Toast.LENGTH_LONG).show();
-                                                      stopClipboardSystemSpeech(false);
-                                                  }
-                                                  @Override public void onProgress(int completedPercent) {}
-                                                  @Override public void onError(int errorCode) {
-                                                      Toast.makeText(MainActivity.this, "A két kiválasztott nyelv automata felismerése ezen a készüléken nem támogatott vagy a modell nem tölthető le. Hibakód: " + errorCode, Toast.LENGTH_LONG).show();
-                                                      stopClipboardSystemSpeech(false);
-                                                  }
-                                              }
-                                          );
-                                      } catch(Exception ex) {
-                                          Toast.makeText(MainActivity.this, "A két nyelv támogatásellenőrzése nem sikerült. Hibakód: " + error, Toast.LENGTH_LONG).show();
-                                          stopClipboardSystemSpeech(false);
-                                      }
-                                  }
-                              }
-                          );
-                          return;
-                      } catch(Exception ignored) {}
-                  }
-                  startClipboardSpeechNow();
-              }
-
               void startClipboardSpeechNow() {
                   try {
                       clipboardSpeechRecognizer.startListening(clipboardSpeechIntent);
@@ -4627,14 +4641,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V217.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V217.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V220.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V220.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V217
+          name: V220
           path: |
             artifact/*.apk
             artifact/*.aab
