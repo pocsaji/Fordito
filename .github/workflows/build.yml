@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 182; versionName = "18.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 183; versionName = "18.3" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V182" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V183" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -229,6 +229,7 @@ jobs:
               boolean mirrorBottomMode = false;
               boolean backgroundScreenAllowed = false;
               boolean floatingTranslatorEnabled = false;
+              Handler floatingLongPressHandler = new Handler(Looper.getMainLooper());
               android.view.WindowManager floatingWindowManager;
               android.view.View floatingButtonView;
               android.view.View floatingResultView;
@@ -489,7 +490,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V182");
+                  TextView title = label("Fordito_V183");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2849,22 +2850,34 @@ jobs:
                       b.setMinimumHeight(0);
                       b.setBackgroundColor(Color.rgb(30,120,75));
                       b.setOnClickListener(v -> floatingTranslatorButtonAction());
-                      b.setOnLongClickListener(v -> { openClipboardReplyMode(); return true; });
                       final android.view.WindowManager.LayoutParams lp = floatingParams(96, 96, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
                       lp.x = floatingButtonX;
                       lp.y = floatingButtonY;
                       final int[] down = new int[4];
                       final boolean[] moved = new boolean[1];
+                      final boolean[] longDone = new boolean[1];
+                      final Runnable longPressTask = () -> {
+                          if(floatingButtonView != null && !moved[0]) {
+                              longDone[0] = true;
+                              openClipboardReplyMode();
+                          }
+                      };
                       b.setOnTouchListener((v, ev) -> {
                           if(ev.getAction() == android.view.MotionEvent.ACTION_DOWN) {
                               down[0] = lp.x; down[1] = lp.y; down[2] = (int)ev.getRawX(); down[3] = (int)ev.getRawY();
                               moved[0] = false;
+                              longDone[0] = false;
+                              floatingLongPressHandler.removeCallbacks(longPressTask);
+                              floatingLongPressHandler.postDelayed(longPressTask, 650);
                               return true;
                           }
                           if(ev.getAction() == android.view.MotionEvent.ACTION_MOVE) {
                               int dx = (int)ev.getRawX() - down[2];
                               int dy = (int)ev.getRawY() - down[3];
-                              if(Math.abs(dx) > 8 || Math.abs(dy) > 8) moved[0] = true;
+                              if(Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+                                  moved[0] = true;
+                                  floatingLongPressHandler.removeCallbacks(longPressTask);
+                              }
                               lp.x = Math.max(0, down[0] - dx);
                               lp.y = down[1] + dy;
                               try {
@@ -2877,10 +2890,15 @@ jobs:
                               return true;
                           }
                           if(ev.getAction() == android.view.MotionEvent.ACTION_UP) {
+                              floatingLongPressHandler.removeCallbacks(longPressTask);
                               floatingButtonX = lp.x;
                               floatingButtonY = lp.y;
                               save();
-                              if(!moved[0]) floatingTranslatorButtonAction();
+                              if(!moved[0] && !longDone[0]) floatingTranslatorButtonAction();
+                              return true;
+                          }
+                          if(ev.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
+                              floatingLongPressHandler.removeCallbacks(longPressTask);
                               return true;
                           }
                           return true;
@@ -3145,9 +3163,13 @@ jobs:
                   clipboardCurrentTarget = translation;
                   lastClipboardTranslatedSource = source == null ? "" : source.trim();
                   clipboardForceFieldUpdate = true;
-                  setClipboardText(translation);
                   showClipboardTranslatorPanel(source, prepared, translation);
-                  Toast.makeText(this, "Fordítás a vágólapra másolva.", Toast.LENGTH_SHORT).show();
+                  if(isClipboardHungarian(source)) {
+                      setClipboardText(translation);
+                      Toast.makeText(this, "Fordítás a vágólapra másolva.", Toast.LENGTH_SHORT).show();
+                  } else {
+                      Toast.makeText(this, "Magyar fordítás elkészült. Nem került automatikusan a vágólapra.", Toast.LENGTH_SHORT).show();
+                  }
               }
 
               void applyClipboardTranslationOnly(String prepared, String tr) {
