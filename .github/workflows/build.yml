@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 193; versionName = "19.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 194; versionName = "19.4" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V193" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V194" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -163,6 +163,8 @@ jobs:
           import android.media.*;
           import android.media.audiofx.*;
           import android.speech.RecognizerIntent;
+          import android.speech.SpeechRecognizer;
+          import android.speech.RecognitionListener;
           import android.speech.tts.TextToSpeech;
           import android.speech.tts.UtteranceProgressListener;
           import android.os.*;
@@ -185,6 +187,11 @@ jobs:
               static final int CLIPBOARD_SPEECH_REQUEST = 7301;
               TextView state;
               EditText topBox, bottomBox;
+              SpeechRecognizer clipboardSpeechRecognizer;
+              Intent clipboardSpeechIntent;
+              boolean clipboardSpeechActive = false;
+              String clipboardSpeechBaseText = "";
+              String clipboardSpeechLastPartial = "";
               Button clipboardMicButton;
               Button micBtn, translateBtn, menuBtn, topLangBtn, bottomLangBtn;
               SharedPreferences sp;
@@ -491,7 +498,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V193");
+                  TextView title = label("Fordito_V194");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2827,9 +2834,16 @@ jobs:
 
               void toggleFloatingTranslator() {
                   floatingTranslatorEnabled = !floatingTranslatorEnabled;
+                  if(floatingTranslatorEnabled && backgroundScreenAllowed) {
+                      backgroundScreenAllowed = false;
+                      stopBackgroundForegroundService();
+                  }
                   save();
                   if(floatingTranslatorEnabled) ensureFloatingTranslator();
-                  else hideFloatingTranslator();
+                  else {
+                      stopClipboardSystemSpeech(false);
+                      hideFloatingTranslator();
+                  }
               }
 
               void ensureFloatingTranslator() {
@@ -2936,6 +2950,7 @@ jobs:
               void floatingTranslatorButtonAction() {
                   try {
                       if(clipboardDialog != null && clipboardDialog.isShowing()) {
+                          stopClipboardSystemSpeech(false);
                           clipboardDialog.dismiss();
                           moveTaskToBack(true);
                           return;
@@ -3348,6 +3363,7 @@ jobs:
 
               void showClipboardTranslatorPanel(String source, String prepared, String translation) {
                   try {
+                      if(streaming) stop();
                       if(clipboardDialog == null) {
                           clipboardDialog = new Dialog(this);
                           LinearLayout lay = new LinearLayout(this);
@@ -3588,8 +3604,18 @@ jobs:
 
               void toggleBackgroundScreenMode() {
                   backgroundScreenAllowed = !backgroundScreenAllowed;
-                  if(!backgroundScreenAllowed) stopBackgroundForegroundService();
-                  Toast.makeText(this, backgroundScreenAllowed ? "Háttér mód aktív erre az indításra." : "Háttér mód kikapcsolva.", Toast.LENGTH_SHORT).show();
+                  if(backgroundScreenAllowed) {
+                      if(floatingTranslatorEnabled) {
+                          floatingTranslatorEnabled = false;
+                          hideFloatingTranslator();
+                          stopClipboardSystemSpeech(false);
+                          try { if(clipboardDialog != null && clipboardDialog.isShowing()) clipboardDialog.dismiss(); } catch(Exception ignored) {}
+                          save();
+                      }
+                  } else {
+                      stopBackgroundForegroundService();
+                  }
+                  Toast.makeText(this, backgroundScreenAllowed ? "Háttér mód aktív. Lebegő vágólap mód kikapcsolva." : "Háttér mód kikapcsolva.", Toast.LENGTH_SHORT).show();
                   updateButtons();
               }
 
@@ -4062,11 +4088,133 @@ jobs:
               }
 
               void startClipboardSystemSpeech() {
-                  Toast.makeText(this, "A vágólapos diktálás ideiglenesen kikapcsolva. A fő mikrofon érintetlen.", Toast.LENGTH_SHORT).show();
+                  try {
+                      if(clipboardSpeechActive) {
+                          stopClipboardSystemSpeech(true);
+                      } else {
+                          startClipboardGoogleSpeech();
+                      }
+                  } catch(Exception e) {
+                      Toast.makeText(this, "Vágólapos diktálás hiba: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                  }
+              }
+
+              void startClipboardGoogleSpeech() {
+                  try {
+                      // Ágváltás: a főprogram mikrofonja teljesen álljon le, a vágólapos ág kapja a mikrofont.
+                      if(streaming) stop();
+                      backgroundScreenAllowed = false;
+                      stopBackgroundForegroundService();
+
+                      if(!SpeechRecognizer.isRecognitionAvailable(this)) {
+                          Toast.makeText(this, "Google/Android beszédfelismerő nem elérhető ezen a készüléken.", Toast.LENGTH_LONG).show();
+                          return;
+                      }
+
+                      clipboardSpeechActive = true;
+                      if(clipboardMicButton != null) {
+                          clipboardMicButton.setText("STOP");
+                          clipboardMicButton.setTextSize(13);
+                          clipboardMicButton.setBackgroundColor(Color.rgb(150,55,50));
+                      }
+                      if(clipboardDialog == null || !clipboardDialog.isShowing()) {
+                          clipboardForceFieldUpdate = true;
+                          showClipboardTranslatorPanel("", "", "");
+                      }
+                      if(clipboardRawEdit != null) {
+                          clipboardRawEdit.requestFocus();
+                          clipboardSpeechBaseText = clipboardRawEdit.getText() == null ? "" : clipboardRawEdit.getText().toString().trim();
+                      } else {
+                          clipboardSpeechBaseText = "";
+                      }
+                      clipboardSpeechLastPartial = "";
+
+                      if(clipboardSpeechRecognizer == null) {
+                          clipboardSpeechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+                          clipboardSpeechRecognizer.setRecognitionListener(new RecognitionListener() {
+                              @Override public void onReadyForSpeech(Bundle params) {}
+                              @Override public void onBeginningOfSpeech() {}
+                              @Override public void onRmsChanged(float rmsdB) {}
+                              @Override public void onBufferReceived(byte[] buffer) {}
+                              @Override public void onEndOfSpeech() {}
+                              @Override public void onEvent(int eventType, Bundle params) {}
+
+                              @Override public void onPartialResults(Bundle partialResults) {
+                                  if(!clipboardSpeechActive) return;
+                                  ArrayList<String> list = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                                  if(list != null && list.size() > 0) showClipboardDictationPartial(list.get(0));
+                              }
+
+                              @Override public void onResults(Bundle results) {
+                                  if(!clipboardSpeechActive) return;
+                                  ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                                  if(list != null && list.size() > 0) commitClipboardDictationResult(list.get(0));
+                                  else if(clipboardSpeechLastPartial != null && clipboardSpeechLastPartial.trim().length() > 0) commitClipboardDictationResult(clipboardSpeechLastPartial);
+                                  stopClipboardSystemSpeech(false);
+                              }
+
+                              @Override public void onError(int error) {
+                                  if(!clipboardSpeechActive) return;
+                                  if(clipboardSpeechLastPartial != null && clipboardSpeechLastPartial.trim().length() > 0) {
+                                      commitClipboardDictationResult(clipboardSpeechLastPartial);
+                                  }
+                                  stopClipboardSystemSpeech(false);
+                                  Toast.makeText(MainActivity.this, "Diktálás vége.", Toast.LENGTH_SHORT).show();
+                              }
+                          });
+                      }
+
+                      clipboardSpeechIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hu-HU");
+                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 7000);
+                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 5000);
+                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 15000);
+
+                      clipboardSpeechRecognizer.startListening(clipboardSpeechIntent);
+                      Toast.makeText(this, "Vágólapos Google diktálás indul.", Toast.LENGTH_SHORT).show();
+                  } catch(Exception e) {
+                      stopClipboardSystemSpeech(false);
+                      Toast.makeText(this, "A vágólapos Google diktálás nem indítható: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                  }
               }
 
               void stopClipboardSystemSpeech(boolean toast) {
-                  // V193: a külön vágólapos diktálást kivettük, hogy a fő mikrofon modul ne sérüljön.
+                  clipboardSpeechActive = false;
+                  try { if(clipboardSpeechRecognizer != null) clipboardSpeechRecognizer.cancel(); } catch(Exception ignored) {}
+                  if(clipboardMicButton != null) {
+                      clipboardMicButton.setText("🎙");
+                      clipboardMicButton.setTextSize(20);
+                      clipboardMicButton.setBackgroundColor(Color.rgb(30,120,75));
+                  }
+                  if(toast) Toast.makeText(this, "Vágólapos diktálás leállítva.", Toast.LENGTH_SHORT).show();
+              }
+
+              void showClipboardDictationPartial(String spoken) {
+                  spoken = spoken == null ? "" : spoken.trim();
+                  if(spoken.length() == 0 || clipboardRawEdit == null) return;
+                  clipboardSpeechLastPartial = spoken;
+                  String base = clipboardSpeechBaseText == null ? "" : clipboardSpeechBaseText.trim();
+                  String combined = base.length() == 0 ? spoken : base + " " + spoken;
+                  clipboardRawEdit.setText(combined);
+                  clipboardRawEdit.requestFocus();
+                  clipboardRawEdit.setSelection(clipboardRawEdit.getText().length());
+                  clipboardResponseMode = true;
+              }
+
+              void commitClipboardDictationResult(String spoken) {
+                  spoken = spoken == null ? "" : spoken.trim();
+                  if(spoken.length() == 0 || clipboardRawEdit == null) return;
+                  String base = clipboardSpeechBaseText == null ? "" : clipboardSpeechBaseText.trim();
+                  String combined = base.length() == 0 ? spoken : base + " " + spoken;
+                  clipboardRawEdit.setText(combined);
+                  clipboardRawEdit.requestFocus();
+                  clipboardRawEdit.setSelection(clipboardRawEdit.getText().length());
+                  clipboardSpeechBaseText = combined;
+                  clipboardSpeechLastPartial = "";
+                  clipboardResponseMode = true;
               }
 
               @Override public void onBackPressed() {
@@ -4114,6 +4262,7 @@ jobs:
               @Override public void onDestroy() {
                   hideFloatingTranslator();
                   stopClipboardSystemSpeech(false);
+                  try { if(clipboardSpeechRecognizer != null) { clipboardSpeechRecognizer.destroy(); clipboardSpeechRecognizer = null; } } catch(Exception ignored) {}
                   if(streaming) stop();
                   else stopBackgroundForegroundService();
                   try {
@@ -4164,14 +4313,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V193.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V193.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V194.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V194.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V193
+          name: V194
           path: |
             artifact/*.apk
             artifact/*.aab
