@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 203; versionName = "20.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 204; versionName = "20.4" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V203" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V204" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -500,7 +500,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V203");
+                  TextView title = label("Fordito_V204");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -3104,9 +3104,10 @@ jobs:
               String clipboardPrepareOnlyInstructions() {
                   return "You repair raw dictated text for the middle field of a 3-window translator. Return ONLY the corrected text, no labels, no markdown, no quotes, no explanation. " +
                     "The input may contain raw Hungarian speech recognition with pauses, repeated fragments, broken phrases, odd test words, or background noise. " +
-                    "Your job: make it a usable Hungarian source message: punctuation, capitalization, accents, sentence boundaries, obvious grammar and obvious speech-recognition mistakes. " +
-                    "Be context-aware but conservative. Do NOT invent new content. Do NOT replace a strange or test word with a different meaning. If a word is odd but could be intentional, keep it. If a phrase is unclear, keep the closest wording instead of explaining or interpreting it. " +
-                    "Do not add comments such as 'this is absurd' or change the speaker's intent. Preserve tone, style, vulgarity, intimacy, friendliness or official register.";
+                    "Your job: turn the raw Hungarian speech-recognition text into a natural, culturally well-formed Hungarian source message. Correct punctuation, capitalization, accents, sentence boundaries, obvious grammar, broken sentence structure and clear speech-recognition errors. " +
+                    "Preserve the speaker's meaning, intent, facts and tone, but do not behave like a literal transcript. Remove obvious dictation noise, accidental filler words, false starts, repeated fragments, self-corrections and words that clearly do not belong in the sentence when the surrounding context makes that clear. " +
+                    "You may rewrite awkward wording into natural Hungarian when this does not change the meaning. Do NOT invent facts, explanations, opinions or new content. If an unusual or test word could genuinely be intentional in context, keep it. If a phrase is genuinely ambiguous, prefer the closest plausible wording rather than guessing a new meaning. " +
+                    "Do not add comments or explain the text. Preserve vulgarity, intimacy, friendliness and official or informal register.";
               }
 
               void scheduleClipboardAutoPrepare() {
@@ -3115,7 +3116,7 @@ jobs:
                       if(token != clipboardAutoPrepareToken) return;
                       if(clipboardSpeechActive) return;
                       autoPrepareClipboardRawText();
-                  }, 850);
+                  }, 5000);
               }
 
               void autoPrepareClipboardRawText() {
@@ -4463,14 +4464,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V203.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V203.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V204.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V204.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V203
+          name: V204
           path: |
             artifact/*.apk
             artifact/*.aab
