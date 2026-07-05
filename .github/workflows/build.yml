@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 187; versionName = "18.7" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 188; versionName = "18.8" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V187" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V188" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -231,6 +231,7 @@ jobs:
               boolean mirrorBottomMode = false;
               boolean backgroundScreenAllowed = false;
               boolean floatingTranslatorEnabled = false;
+              Handler floatingLongPressHandler = new Handler();
               android.view.WindowManager floatingWindowManager;
               android.view.View floatingButtonView;
               android.view.View floatingResultView;
@@ -489,7 +490,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V187");
+                  TextView title = label("Fordito_V188");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2849,22 +2850,35 @@ jobs:
                       b.setMinimumHeight(0);
                       b.setBackgroundColor(Color.rgb(30,120,75));
                       b.setOnClickListener(v -> floatingTranslatorButtonAction());
-                      b.setOnLongClickListener(v -> { hideFloatingTranslator(); floatingTranslatorEnabled = false; save(); return true; });
                       final android.view.WindowManager.LayoutParams lp = floatingParams(96, 96, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
                       lp.x = floatingButtonX;
                       lp.y = floatingButtonY;
                       final int[] down = new int[4];
                       final boolean[] moved = new boolean[1];
+                      final boolean[] longDone = new boolean[1];
+                      final Runnable longPressTask = () -> {
+                          if(!moved[0]) {
+                              longDone[0] = true;
+                              try { b.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); } catch(Exception ignored) {}
+                              openClipboardReplyMode();
+                          }
+                      };
                       b.setOnTouchListener((v, ev) -> {
                           if(ev.getAction() == android.view.MotionEvent.ACTION_DOWN) {
                               down[0] = lp.x; down[1] = lp.y; down[2] = (int)ev.getRawX(); down[3] = (int)ev.getRawY();
                               moved[0] = false;
+                              longDone[0] = false;
+                              floatingLongPressHandler.removeCallbacks(longPressTask);
+                              floatingLongPressHandler.postDelayed(longPressTask, 500);
                               return true;
                           }
                           if(ev.getAction() == android.view.MotionEvent.ACTION_MOVE) {
                               int dx = (int)ev.getRawX() - down[2];
                               int dy = (int)ev.getRawY() - down[3];
-                              if(Math.abs(dx) > 8 || Math.abs(dy) > 8) moved[0] = true;
+                              if(Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+                                  moved[0] = true;
+                                  floatingLongPressHandler.removeCallbacks(longPressTask);
+                              }
                               lp.x = Math.max(0, down[0] - dx);
                               lp.y = down[1] + dy;
                               try {
@@ -2877,10 +2891,15 @@ jobs:
                               return true;
                           }
                           if(ev.getAction() == android.view.MotionEvent.ACTION_UP) {
+                              floatingLongPressHandler.removeCallbacks(longPressTask);
                               floatingButtonX = lp.x;
                               floatingButtonY = lp.y;
                               save();
-                              if(!moved[0]) floatingTranslatorButtonAction();
+                              if(!moved[0] && !longDone[0]) floatingTranslatorButtonAction();
+                              return true;
+                          }
+                          if(ev.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
+                              floatingLongPressHandler.removeCallbacks(longPressTask);
                               return true;
                           }
                           return true;
@@ -2919,6 +2938,30 @@ jobs:
                       }
                   } catch(Exception ignored) {}
                   translateClipboardFromFloatingButton();
+              }
+
+              void openClipboardReplyMode() {
+                  try {
+                      setClipboardText(" ");
+                      clipboardResponseMode = true;
+                      clipboardCurrentSource = "";
+                      clipboardCurrentPrepared = "";
+                      clipboardCurrentTarget = "";
+                      clipboardForceFieldUpdate = true;
+                      hideFloatingResultWindow();
+                      bringAppToFrontForClipboardRead();
+                      new Handler().postDelayed(() -> {
+                          showClipboardTranslatorPanel("", "", "");
+                          try {
+                              if(clipboardRawEdit != null) {
+                                  clipboardRawEdit.requestFocus();
+                                  clipboardRawEdit.setSelection(clipboardRawEdit.getText().length());
+                              }
+                          } catch(Exception ignored) {}
+                      }, 220);
+                  } catch(Exception e) {
+                      Toast.makeText(this, "Új válasz mód hiba: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                  }
               }
 
               void translateClipboardFromFloatingButton() {
@@ -3313,12 +3356,12 @@ jobs:
                           title.setTextSize(13);
                           title.setTextColor(Color.rgb(255, 210, 80));
                           Button sysMic = btn("🎙");
-                          sysMic.setTextSize(16);
+                          sysMic.setTextSize(20);
                           sysMic.setTextColor(Color.WHITE);
                           sysMic.setBackgroundColor(Color.rgb(65, 70, 80));
                           sysMic.setOnClickListener(v -> startClipboardSystemSpeech());
                           clipboardTitleRow.addView(title, new LinearLayout.LayoutParams(0, 52, 1));
-                          clipboardTitleRow.addView(sysMic, new LinearLayout.LayoutParams(76, 52));
+                          clipboardTitleRow.addView(sysMic, new LinearLayout.LayoutParams(96, 64));
                           lay.addView(clipboardTitleRow, new LinearLayout.LayoutParams(-1, -2));
 
                           TextView rawTitle = label("Nyers beolvasott szöveg:");
@@ -3346,6 +3389,16 @@ jobs:
                           Button translate = btn("FORDÍT");
                           Button copy = btn("MÁSOL");
                           Button hide = btn("BEZÁR");
+                          int cb = Color.rgb(95,95,95);
+                          translate.setBackgroundColor(cb);
+                          copy.setBackgroundColor(cb);
+                          hide.setBackgroundColor(cb);
+                          translate.setTextColor(Color.WHITE);
+                          copy.setTextColor(Color.WHITE);
+                          hide.setTextColor(Color.WHITE);
+                          translate.setTextSize(15);
+                          copy.setTextSize(15);
+                          hide.setTextSize(15);
                           translate.setOnClickListener(v -> runClipboardPanelTranslate());
                           copy.setOnClickListener(v -> {
                               String t = clipboardTranslationEdit == null ? "" : clipboardTranslationEdit.getText().toString().trim();
@@ -4128,14 +4181,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V187.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V187.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V188.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V188.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V187
+          name: V188
           path: |
             artifact/*.apk
             artifact/*.aab
