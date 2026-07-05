@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 224; versionName = "22.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 225; versionName = "22.5" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V224" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V225" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -507,7 +507,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V224");
+                  TextView title = label("Fordito_V225");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1112,13 +1112,13 @@ jobs:
               String instructions() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
-                  return "You are a live two-language interpreter. Output text only. No explanations. " +
+                  return "Every word must be output in full. Never replace letters with asterisks or symbols. Never mask, redact, soften, sanitize, euphemize, hide, or partially replace any profanity, insult, slang, vulgar, sexual, rude, or emotional wording. If such wording appears in the input or is required by the translation, write the complete word exactly in the target language. " + "You are a live two-language interpreter. Output text only. No explanations. " +
                     pairRules() +
                     "The user may switch between TOP and BOTTOM while the microphone is running. Every completed speech block must be classified again using only the selected pair. " +
                     "Do not turn background noise, engine hum, wind, radio, clicks or breathing into speech. If meaningful human speech is not present, output nothing. " +
                     "Do not wait for a long monologue. Treat every complete sentence, short clause, numbered item, or list item as a finished block. " +
                     "For every completed block return exactly three lines: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <verbatim original text in the detected selected language> then TRANSLATION: <natural translation into the other selected language>. " +
-                    "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly in ORIGINAL and TRANSLATION. Never output square-bracket category placeholders or asterisk-masked words. " +
+                    "Every word must be output in full. Never replace letters with asterisks or symbols. Do not mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly in ORIGINAL and TRANSLATION. Never output square-bracket category placeholders or asterisk-masked words. " +
                     "Keep ORIGINAL short and readable. Correct only obvious speech recognition mistakes; do not invent missing facts. " +
                     "Conversation profile: " + profilePrompt() + " " +
                     "Translation mode: " + modePrompt();
@@ -1127,13 +1127,13 @@ jobs:
               String manualBlockInstructions() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
-                  return "You are a translation engine for the FULL edited window text. " +
+                  return "Every word must be output in full. Never replace letters with asterisks or symbols. Never mask, redact, soften, sanitize, euphemize, hide, or partially replace any profanity, insult, slang, vulgar, sexual, rude, or emotional wording. If such wording appears in the input or is required by the translation, write the complete word exactly in the target language. " + "You are a translation engine for the FULL edited window text. " +
                     "The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. " +
                     "Translate the entire TEXT from SOURCE_LANG to TARGET_LANG. " +
                     "The selected languages are " + top + " and " + bottom + ". " +
                     "Return ONLY the translated full text. Preserve paragraphs and line breaks where reasonable. " +
                     "Never include labels such as SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT or TRANSLATION. " +
-                    "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly in the translation. Never output square-bracket category placeholders or asterisk-masked words. " +
+                    "Every word must be output in full. Never replace letters with asterisks or symbols. Do not mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly in the translation. Never output square-bracket category placeholders or asterisk-masked words. " +
                     "No markdown, no quotes, no explanation. " +
                     "Keep meaning, context and tone. " + modePrompt();
               }
@@ -1141,7 +1141,7 @@ jobs:
               String liveBlockInstructions(boolean ignoredSourceIsTop) {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
-                  return "Translate exactly ONE speech block. " +
+                  return "Every word must be output in full. Never replace letters with asterisks or symbols. Never mask, redact, soften, sanitize, euphemize, hide, or partially replace any profanity, insult, slang, vulgar, sexual, rude, or emotional wording. If such wording appears in the input or is required by the translation, write the complete word exactly in the target language. " + "Translate exactly ONE speech block. " +
                     pairRules() +
                     "The user message contains TEXT containing the rough speech transcript. " +
                     "Classify TEXT as exactly one selected source language: " + top + " or " + bottom + ". " +
@@ -1153,7 +1153,7 @@ jobs:
                     "Do not invent missing words, facts, subjects, objects, intentions, or test descriptions. " +
                     "TRANSLATION must contain only the translation into the other selected language, with no explanation or labels. " +
                     "If the block cannot reasonably be resolved as one of the two selected languages, return no content. " +
-                    "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly. Never output square-bracket category placeholders or asterisk-masked words. " +
+                    "Every word must be output in full. Never replace letters with asterisks or symbols. Do not mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly. Never output square-bracket category placeholders or asterisk-masked words. " +
                     "Conversation profile: " + profilePrompt() + " Translation mode: " + modePrompt();
               }
 
@@ -1674,7 +1674,7 @@ jobs:
                       JSONObject c = new JSONObject();
                       c.put("type", "input_text");
                       manualResponseMode = true;
-                      c.put("text", "MANUAL_FULL_WINDOW_TRANSLATION\n" + text + "\n\nReturn ONLY the translated full text. Preserve paragraphs and line breaks where reasonable. Do not write SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT, TRANSLATION, markdown, quotes or explanation. Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording.");
+                      c.put("text", "MANUAL_FULL_WINDOW_TRANSLATION\n" + text + "\n\nReturn ONLY the translated full text. Preserve paragraphs and line breaks where reasonable. Do not write SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT, TRANSLATION, markdown, quotes or explanation. Every word must be output in full. Never replace letters with asterisks or symbols. Do not mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording.");
                       content.put(c);
                       item.put("content", content);
                       msg.put("item", item);
@@ -2426,51 +2426,15 @@ jobs:
                   return s.equals(top) || s.equals(bottom);
               }
 
-              boolean looksLikeMetaExplanationText(String text) {
-                  if(text == null) return false;
-                  String x = text.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
-                  String padded = " " + x + " ";
-
-                  // Csak valódi modellmagyarázatot fogunk meg.
-                  // Önmagában a "magyarul", "franciául", "en hongrois" stb. lehet valós beszéd vagy valós fordítás,
-                  // ezért azt nem tiltjuk.
-                  if((x.contains("«") || x.contains("»") || x.contains("\"")) &&
-                     (padded.contains(" en hongrois ") || padded.contains(" en français ") ||
-                      padded.contains(" in hungarian ") || padded.contains(" in french ") ||
-                      padded.contains(" magyarul ") || padded.contains(" franciául "))) return true;
-
-                  if(x.startsWith("the text means") || x.startsWith("this means") ||
-                     x.startsWith("it means") || x.startsWith("translation:") ||
-                     x.startsWith("original:") || x.startsWith("source_lang:") ||
-                     x.startsWith("target_lang:")) return true;
-
-                  if(padded.contains(" translates as ") || padded.contains(" translation of ")) return true;
-                  return false;
-              }
-
-              boolean tripleKeepsSourceAndTargetSeparate(String[] trp) {
-                  if(trp == null || trp.length < 3) return false;
-                  String original = trp[1] == null ? "" : trp[1].trim();
-                  String translation = trp[2] == null ? "" : trp[2].trim();
-
-                  // Meta-szűrés csak az ORIGINAL mezőn kötelező.
-                  // A fordításban nyelvnevek előfordulhatnak értelmesen.
-                  if(looksLikeMetaExplanationText(original)) return false;
-
-                  String no = normalizeLiveBlockHash(original);
-                  String nt = normalizeLiveBlockHash(translation);
-                  if(no.length() >= 12 && no.equals(nt)) return false;
-                  return true;
-              }
-
               boolean isStrictValidTriple(String[] trp) {
                   if(trp == null || trp.length < 3) return false;
                   if(!isSelectedSourceLang(trp[0])) return false;
-                  if(!tripleKeepsSourceAndTargetSeparate(trp)) return false;
                   String original = trp[1] == null ? "" : cleanTranscriptForSelectedPair(trp[1]).trim();
                   String translation = trp[2] == null ? "" : cleanTranscriptForSelectedPair(cleanOneBlockTranslation(trp[2])).trim();
                   if(original.length() == 0 || translation.length() == 0) return false;
-                  if(looksLikeMetaExplanationText(original)) return false;
+                  String no = normalizeLiveBlockHash(original);
+                  String nt = normalizeLiveBlockHash(translation);
+                  if(no.length() >= 12 && no.equals(nt)) return false;
                   return true;
               }
 
@@ -2485,16 +2449,19 @@ jobs:
               }
 
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
-                  // V223: a nyers STT csak rejtett pending adat.
-                  // Nem írjuk be ideiglenesen egyik ablakba sem, mert a valódi oldalról
-                  // az AI SOURCE_LANG dönt. Így a HU beszéd nem ragad a FR felső ablakban.
+                  // V225: gyors visszajelzés. A nyers STT azonnal látható az aktuális oldalon,
+                  // ugyanakkor pendingSourceText-ben is megmarad, hogy a valid AI-válasz után
+                  // a blokk átkerülhessen a valódi SOURCE_LANG szerinti oldalra.
                   if(isRecentlyDisplayedSourceDuplicate(sourceIsTop, original)) return -1;
 
                   TextBlock b = new TextBlock();
                   b.sourceTop = sourceIsTop;
                   b.translatedOk = false;
                   b.pendingSourceText = original == null ? "" : original.trim();
+                  if(sourceIsTop) b.topText = b.pendingSourceText;
+                  else b.bottomText = b.pendingSourceText;
                   textBlocks.add(b);
+                  renderBlocksKeepView();
                   return textBlocks.size() - 1;
               }
 
@@ -3226,7 +3193,7 @@ jobs:
               }
 
               String clipboardPrepareOnlyInstructions() {
-                  return clipboardContextPrompt() + "Never censor, mask, redact, soften, sanitize or replace any word, including profanity, vulgarity, insults, sexual language, slang or rude wording. Preserve every such word in full, with its original spelling and meaning. Never use asterisks, partial masking, euphemisms, square-bracket placeholders or category labels. " + "You repair raw dictated or clipboard text for the middle field of a 3-window translator. Return ONLY the corrected source-language text, no labels, no markdown, no quotes, no explanation. " +
+                  return clipboardContextPrompt() + "Every word must be output in full. Never replace letters with asterisks or symbols. Never mask, redact, soften, sanitize, euphemize, hide, or partially replace any profanity, insult, slang, vulgar, sexual, rude, or emotional wording. If such wording appears in the input or is required by the translation, write the complete word exactly in the target language. " + "Never censor, mask, redact, soften, sanitize or replace any word, including profanity, vulgarity, insults, sexual language, slang or rude wording. Preserve every such word in full, with its original spelling and meaning. Never use asterisks, partial masking, euphemisms, square-bracket placeholders or category labels. " + "You repair raw dictated or clipboard text for the middle field of a 3-window translator. Return ONLY the corrected source-language text, no labels, no markdown, no quotes, no explanation. " +
                     "The user may provide text in either one of the selected language pair. You must keep the ORIGINAL input language. In this middle step translation is strictly forbidden. " +
                     "Make the original-language source message natural and culturally well-formed: punctuation, capitalization, accents, sentence boundaries, grammar, broken sentence structure and clear speech-recognition errors. " +
                     "Preserve the speaker's meaning, intent, facts and tone, but do not behave like a literal transcript. Remove obvious dictation noise, accidental filler words, false starts, repeated fragments, self-corrections and words that clearly do not belong when the surrounding context makes that clear. " +
@@ -3579,14 +3546,14 @@ jobs:
                     "Then translate prepared to TARGET_LANG. translation must contain only the translated text. Do not write SOURCE_LANG, ORIGINAL, TRANSLATION, labels, markdown, quotes or explanation. " +
                     "Be context-aware but conservative: do NOT invent new content and do NOT replace strange, test-like or unclear words with a different meaning. If a word is odd but could be intentional, keep it. " +
                     "Keep the user's practical meaning, tone, register, emotional intensity and context. Friendly stays friendly; official stays official; direct work messages stay direct; intimate or sexual text stays intimate or sexual instead of being made formal. Make the result natural and native-sounding. " +
-                    "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording.";
+                    "Every word must be output in full. Never replace letters with asterisks or symbols. Do not mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording.";
               }
 
               String clipboardTranslationInstructions() {
                   return clipboardContextPrompt() + "Never censor, mask, redact, soften, sanitize or replace any word, including profanity, vulgarity, insults, sexual language, slang or rude wording. Preserve every such word in full, with its original spelling and meaning. Never use asterisks, partial masking, euphemisms, square-bracket placeholders or category labels. " + "You are a standalone clipboard translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
                     "If SOURCE_LANG is AUTO, detect the source language from TEXT. Translate the entire TEXT to TARGET_LANG. If TARGET_LANG is HU, the answer must be Hungarian. " +
                     "Return ONLY the translated text. Preserve paragraphs where reasonable. No labels, no markdown, no quotes, no explanation. Preserve the original style, register and emotional tone: friendly stays friendly, official stays official, intimate or sexual stays intimate or sexual, and practical work messages stay natural and direct. " +
-                    "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Keep meaning, context and tone.";
+                    "Every word must be output in full. Never replace letters with asterisks or symbols. Do not mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Keep meaning, context and tone.";
               }
 
               void applyClipboardTranslation(String out) {
@@ -4697,14 +4664,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V224.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V224.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V225.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V225.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V224
+          name: V225
           path: |
             artifact/*.apk
             artifact/*.aab
