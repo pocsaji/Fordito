@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 222; versionName = "22.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 224; versionName = "22.4" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V222" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V224" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -294,6 +294,7 @@ jobs:
               static class TextBlock {
                   String topText = "";
                   String bottomText = "";
+                  String pendingSourceText = "";
                   boolean sourceTop = true;
                   boolean translatedOk = false;
                   int retryCount = 0;
@@ -506,7 +507,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V222");
+                  TextView title = label("Fordito_V224");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -815,20 +816,28 @@ jobs:
                   topRanges.clear();
                   bottomRanges.clear();
 
+                  int visibleIndex = 0;
                   for(int i=0;i<textBlocks.size();i++) {
                       TextBlock b = textBlocks.get(i);
+                      String bt = b.topText == null ? "" : b.topText;
+                      String bb = b.bottomText == null ? "" : b.bottomText;
+                      if(bt.trim().length() == 0 && bb.trim().length() == 0) continue;
+
+                      if(visibleIndex > 0) {
+                          top.append("\n");
+                          bottom.append("\n");
+                      }
 
                       int ts = top.length();
-                      top.append(b.topText == null ? "" : b.topText);
+                      top.append(bt);
                       int te = top.length();
                       topRanges.add(new int[]{ts, te});
-                      if(i < textBlocks.size()-1) top.append("\n");
 
                       int bs = bottom.length();
-                      bottom.append(b.bottomText == null ? "" : b.bottomText);
+                      bottom.append(bb);
                       int be = bottom.length();
                       bottomRanges.add(new int[]{bs, be});
-                      if(i < textBlocks.size()-1) bottom.append("\n");
+                      visibleIndex++;
                   }
 
                   programmaticChange = true;
@@ -1138,7 +1147,7 @@ jobs:
                     "Classify TEXT as exactly one selected source language: " + top + " or " + bottom + ". " +
                     "Return exactly three lines and nothing else: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <cleaned source-language speech> then TRANSLATION: <natural translation into the other selected language>. " +
                     "CRITICAL ORIGINAL RULE: ORIGINAL must stay in SOURCE_LANG. It is never a translation, explanation, definition, commentary, language label, quotation analysis, or paraphrase. " +
-                    "Never add phrases such as in Hungarian, in French, en hongrois, en français, magyarul, franciául, means, translates as, or equivalent meta-commentary. " +
+                    "Never add meta-commentary, explanations, definitions, or language labels unless those words were actually spoken by the user as part of the message. " +
                     "Do not wrap the source in quotation marks and do not describe what the speaker said. " +
                     "Correct only obvious recognition mistakes when the intended word is strongly supported by the full sentence and conversation context. Otherwise preserve the spoken wording. " +
                     "Do not invent missing words, facts, subjects, objects, intentions, or test descriptions. " +
@@ -2419,15 +2428,23 @@ jobs:
 
               boolean looksLikeMetaExplanationText(String text) {
                   if(text == null) return false;
-                  String x = " " + text.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim() + " ";
-                  String[] markers = {
-                      " en hongrois ", " en français ", " en francais ",
-                      " in hungarian ", " in french ", " auf ungarisch ", " auf französisch ",
-                      " magyarul ", " franciául ", " franciaul ",
-                      " jelentése ", " jelentese ", " azt jelenti ", " means ",
-                      " translates as ", " translation of ", " fordítása ", " forditasa "
-                  };
-                  for(String m: markers) if(x.contains(m)) return true;
+                  String x = text.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
+                  String padded = " " + x + " ";
+
+                  // Csak valódi modellmagyarázatot fogunk meg.
+                  // Önmagában a "magyarul", "franciául", "en hongrois" stb. lehet valós beszéd vagy valós fordítás,
+                  // ezért azt nem tiltjuk.
+                  if((x.contains("«") || x.contains("»") || x.contains("\"")) &&
+                     (padded.contains(" en hongrois ") || padded.contains(" en français ") ||
+                      padded.contains(" in hungarian ") || padded.contains(" in french ") ||
+                      padded.contains(" magyarul ") || padded.contains(" franciául "))) return true;
+
+                  if(x.startsWith("the text means") || x.startsWith("this means") ||
+                     x.startsWith("it means") || x.startsWith("translation:") ||
+                     x.startsWith("original:") || x.startsWith("source_lang:") ||
+                     x.startsWith("target_lang:")) return true;
+
+                  if(padded.contains(" translates as ") || padded.contains(" translation of ")) return true;
                   return false;
               }
 
@@ -2435,7 +2452,11 @@ jobs:
                   if(trp == null || trp.length < 3) return false;
                   String original = trp[1] == null ? "" : trp[1].trim();
                   String translation = trp[2] == null ? "" : trp[2].trim();
-                  if(looksLikeMetaExplanationText(original) || looksLikeMetaExplanationText(translation)) return false;
+
+                  // Meta-szűrés csak az ORIGINAL mezőn kötelező.
+                  // A fordításban nyelvnevek előfordulhatnak értelmesen.
+                  if(looksLikeMetaExplanationText(original)) return false;
+
                   String no = normalizeLiveBlockHash(original);
                   String nt = normalizeLiveBlockHash(translation);
                   if(no.length() >= 12 && no.equals(nt)) return false;
@@ -2449,7 +2470,7 @@ jobs:
                   String original = trp[1] == null ? "" : cleanTranscriptForSelectedPair(trp[1]).trim();
                   String translation = trp[2] == null ? "" : cleanTranscriptForSelectedPair(cleanOneBlockTranslation(trp[2])).trim();
                   if(original.length() == 0 || translation.length() == 0) return false;
-                  if(looksLikeMetaExplanationText(original) || looksLikeMetaExplanationText(translation)) return false;
+                  if(looksLikeMetaExplanationText(original)) return false;
                   return true;
               }
 
@@ -2464,18 +2485,16 @@ jobs:
               }
 
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
-                  // V151: végső, nagyon óvatos UI-szintű duplázásvédelem.
-                  // Nem nyúl a blokkdaraboláshoz és nem épít új logikát; csak azt akadályozza meg,
-                  // hogy ugyanaz a kész mondat egymás után kétszer bekerüljön az ablakba.
+                  // V223: a nyers STT csak rejtett pending adat.
+                  // Nem írjuk be ideiglenesen egyik ablakba sem, mert a valódi oldalról
+                  // az AI SOURCE_LANG dönt. Így a HU beszéd nem ragad a FR felső ablakban.
                   if(isRecentlyDisplayedSourceDuplicate(sourceIsTop, original)) return -1;
 
                   TextBlock b = new TextBlock();
                   b.sourceTop = sourceIsTop;
                   b.translatedOk = false;
-                  if(sourceIsTop) b.topText = original;
-                  else b.bottomText = original;
+                  b.pendingSourceText = original == null ? "" : original.trim();
                   textBlocks.add(b);
-                  renderBlocksKeepView();
                   return textBlocks.size() - 1;
               }
 
@@ -2489,7 +2508,9 @@ jobs:
                       TextBlock b = textBlocks.get(i);
                       if(b == null || b.sourceTop != sourceIsTop) continue;
                       checked++;
-                      String oldText = sourceIsTop ? b.topText : b.bottomText;
+                      String oldText = b.pendingSourceText != null && b.pendingSourceText.trim().length() > 0
+                              ? b.pendingSourceText
+                              : (sourceIsTop ? b.topText : b.bottomText);
                       String oh = normalizeLiveBlockHash(oldText);
                       if(oh.length() < 8) continue;
                       if(h.equals(oh)) return true;
@@ -2517,7 +2538,9 @@ jobs:
                   if(id < 0 || id >= textBlocks.size()) { processNextLiveTranslation(); return; }
                   TextBlock b = textBlocks.get(id);
                   boolean sourceIsTop = b.sourceTop;
-                  String src = sourceIsTop ? b.topText : b.bottomText;
+                  String src = b.pendingSourceText != null && b.pendingSourceText.trim().length() > 0
+                      ? b.pendingSourceText
+                      : (sourceIsTop ? b.topText : b.bottomText);
                   if(src == null || src.trim().length() == 0) { processNextLiveTranslation(); return; }
 
                   try {
@@ -2564,6 +2587,8 @@ jobs:
                           return;
                       }
                   }
+                  // Ha az újrapróbálás elfogyott, nem írjuk ki a nyers STT-t rossz oldalra,
+                  // de a pendingSourceText megmarad, hogy a blokk később még újrafordítható legyen.
                   renderBlocksKeepView();
               }
 
@@ -2585,6 +2610,7 @@ jobs:
                           boolean sourceIsTop = sourceIsTopFromAi(sourceLang, b.sourceTop);
 
                           b.sourceTop = sourceIsTop;
+                          b.pendingSourceText = "";
                           if(sourceIsTop) {
                               b.topText = original;
                               b.bottomText = translation;
@@ -2684,6 +2710,7 @@ jobs:
                   b.topText = topBox.getText().toString().trim();
                   b.bottomText = bottomBox.getText().toString().trim();
                   b.sourceTop = manualTopSource;
+                  b.pendingSourceText = "";
                   b.translatedOk = true;
                   b.retryCount = 0;
                   textBlocks.clear();
@@ -4670,14 +4697,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V222.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V222.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V224.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V224.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V222
+          name: V224
           path: |
             artifact/*.apk
             artifact/*.aab
