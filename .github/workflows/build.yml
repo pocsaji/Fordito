@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 197; versionName = "19.7" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 198; versionName = "19.8" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V197" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V198" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -192,6 +192,7 @@ jobs:
               boolean clipboardSpeechActive = false;
               String clipboardSpeechBaseText = "";
               String clipboardSpeechLastPartial = "";
+              boolean clipboardSpeechToMainBox = false;
               Button clipboardMicButton;
               Button micBtn, translateBtn, menuBtn, topLangBtn, bottomLangBtn;
               SharedPreferences sp;
@@ -499,7 +500,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V197");
+                  TextView title = label("Fordito_V198");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -555,16 +556,8 @@ jobs:
                           if(streaming) stop();
                           stopBackgroundForegroundService();
                           backgroundScreenAllowed = false;
-                          clipboardResponseMode = true;
-                          clipboardCurrentSource = "";
-                          clipboardCurrentPrepared = "";
-                          clipboardCurrentTarget = "";
-                          clipboardForceFieldUpdate = true;
-                          bringAppToFrontForClipboardRead();
-                          new Handler().postDelayed(() -> {
-                              showClipboardTranslatorPanel("", "", "");
-                              startClipboardSystemSpeech();
-                          }, 220);
+                          clipboardSpeechToMainBox = true;
+                          startClipboardSystemSpeech();
                       }
                   });
                   translateBtn.setOnClickListener(v -> manualTranslate());
@@ -2979,6 +2972,7 @@ jobs:
 
               void openClipboardReplyMode() {
                   try {
+                      clipboardSpeechToMainBox = false;
                       setClipboardText(" ");
                       clipboardResponseMode = true;
                       clipboardReplyCleanMode = true;
@@ -3413,7 +3407,7 @@ jobs:
                           clipboardMicButton.setMinimumHeight(0);
                           clipboardMicButton.setBackgroundColor(Color.rgb(30,120,75));
                           clipboardMicButton.setTranslationY(0f);
-                          clipboardMicButton.setOnClickListener(v -> startClipboardSystemSpeech());
+                          clipboardMicButton.setOnClickListener(v -> { clipboardSpeechToMainBox = false; startClipboardSystemSpeech(); });
                           clipboardTitleRow.addView(title, new LinearLayout.LayoutParams(0, 96, 1));
                           clipboardTitleRow.addView(clipboardMicButton, new LinearLayout.LayoutParams(96, 96));
                           lay.addView(clipboardTitleRow, new LinearLayout.LayoutParams(-1, -2));
@@ -4138,22 +4132,30 @@ jobs:
                       }
 
                       clipboardSpeechActive = true;
-                      if(clipboardMicButton != null) {
-                          clipboardMicButton.setText("STOP");
-                          clipboardMicButton.setTextSize(13);
-                          clipboardMicButton.setBackgroundColor(Color.rgb(150,55,50));
-                      }
-                      if(clipboardDialog == null || !clipboardDialog.isShowing()) {
-                          clipboardForceFieldUpdate = true;
-                          showClipboardTranslatorPanel("", "", "");
-                      }
-                      if(clipboardRawEdit != null) {
-                          clipboardRawEdit.requestFocus();
-                          String baseNow = clipboardRawEdit.getText() == null ? "" : clipboardRawEdit.getText().toString().trim();
-                          if(baseNow.equalsIgnoreCase("vágólap szövege") || baseNow.equalsIgnoreCase("fordítás") || baseNow.equalsIgnoreCase("javított vagy fordítandó szöveg")) baseNow = "";
+                      if(clipboardSpeechToMainBox) {
+                          micBtn.setText("STOP");
+                          micBtn.setBackgroundColor(Color.rgb(150,55,50));
+                          topBox.requestFocus();
+                          String baseNow = topBox.getText() == null ? "" : topBox.getText().toString().trim();
                           clipboardSpeechBaseText = baseNow;
                       } else {
-                          clipboardSpeechBaseText = "";
+                          if(clipboardMicButton != null) {
+                              clipboardMicButton.setText("STOP");
+                              clipboardMicButton.setTextSize(13);
+                              clipboardMicButton.setBackgroundColor(Color.rgb(150,55,50));
+                          }
+                          if(clipboardDialog == null || !clipboardDialog.isShowing()) {
+                              clipboardForceFieldUpdate = true;
+                              showClipboardTranslatorPanel("", "", "");
+                          }
+                          if(clipboardRawEdit != null) {
+                              clipboardRawEdit.requestFocus();
+                              String baseNow = clipboardRawEdit.getText() == null ? "" : clipboardRawEdit.getText().toString().trim();
+                              if(baseNow.equalsIgnoreCase("vágólap szövege") || baseNow.equalsIgnoreCase("fordítás") || baseNow.equalsIgnoreCase("javított vagy fordítandó szöveg")) baseNow = "";
+                              clipboardSpeechBaseText = baseNow;
+                          } else {
+                              clipboardSpeechBaseText = "";
+                          }
                       }
                       clipboardSpeechLastPartial = "";
 
@@ -4202,7 +4204,7 @@ jobs:
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 15000);
 
                       clipboardSpeechRecognizer.startListening(clipboardSpeechIntent);
-                      Toast.makeText(this, "Vágólapos Google diktálás indul.", Toast.LENGTH_SHORT).show();
+                      Toast.makeText(this, clipboardSpeechToMainBox ? "Google diktálás indul." : "Vágólapos Google diktálás indul.", Toast.LENGTH_SHORT).show();
                   } catch(Exception e) {
                       stopClipboardSystemSpeech(false);
                       Toast.makeText(this, "A vágólapos Google diktálás nem indítható: " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -4212,37 +4214,58 @@ jobs:
               void stopClipboardSystemSpeech(boolean toast) {
                   clipboardSpeechActive = false;
                   try { if(clipboardSpeechRecognizer != null) clipboardSpeechRecognizer.cancel(); } catch(Exception ignored) {}
-                  if(clipboardMicButton != null) {
+                  if(clipboardSpeechToMainBox) {
+                      micBtn.setText(interpreterMode ? "MIKROFON" : "DIKTÁL");
+                      micBtn.setBackgroundColor(Color.rgb(165,55,50));
+                  } else if(clipboardMicButton != null) {
                       clipboardMicButton.setText("🎙");
                       clipboardMicButton.setTextSize(20);
                       clipboardMicButton.setBackgroundColor(Color.rgb(30,120,75));
                   }
-                  if(toast) Toast.makeText(this, "Vágólapos diktálás leállítva.", Toast.LENGTH_SHORT).show();
+                  if(toast) Toast.makeText(this, clipboardSpeechToMainBox ? "Google diktálás leállítva." : "Vágólapos diktálás leállítva.", Toast.LENGTH_SHORT).show();
               }
 
               void showClipboardDictationPartial(String spoken) {
                   spoken = spoken == null ? "" : spoken.trim();
-                  if(spoken.length() == 0 || clipboardRawEdit == null) return;
+                  if(spoken.length() == 0) return;
                   clipboardSpeechLastPartial = spoken;
                   String base = clipboardSpeechBaseText == null ? "" : clipboardSpeechBaseText.trim();
                   String combined = base.length() == 0 ? spoken : base + " " + spoken;
-                  clipboardRawEdit.setText(combined);
-                  clipboardRawEdit.requestFocus();
-                  clipboardRawEdit.setSelection(clipboardRawEdit.getText().length());
-                  clipboardResponseMode = true;
+                  if(clipboardSpeechToMainBox) {
+                      topBox.setText(combined);
+                      topBox.requestFocus();
+                      topBox.setSelection(topBox.getText().length());
+                      manualTopSource = true;
+                      topActive = true;
+                  } else {
+                      if(clipboardRawEdit == null) return;
+                      clipboardRawEdit.setText(combined);
+                      clipboardRawEdit.requestFocus();
+                      clipboardRawEdit.setSelection(clipboardRawEdit.getText().length());
+                      clipboardResponseMode = true;
+                  }
               }
 
               void commitClipboardDictationResult(String spoken) {
                   spoken = spoken == null ? "" : spoken.trim();
-                  if(spoken.length() == 0 || clipboardRawEdit == null) return;
+                  if(spoken.length() == 0) return;
                   String base = clipboardSpeechBaseText == null ? "" : clipboardSpeechBaseText.trim();
                   String combined = base.length() == 0 ? spoken : base + " " + spoken;
-                  clipboardRawEdit.setText(combined);
-                  clipboardRawEdit.requestFocus();
-                  clipboardRawEdit.setSelection(clipboardRawEdit.getText().length());
+                  if(clipboardSpeechToMainBox) {
+                      topBox.setText(combined);
+                      topBox.requestFocus();
+                      topBox.setSelection(topBox.getText().length());
+                      manualTopSource = true;
+                      topActive = true;
+                  } else {
+                      if(clipboardRawEdit == null) return;
+                      clipboardRawEdit.setText(combined);
+                      clipboardRawEdit.requestFocus();
+                      clipboardRawEdit.setSelection(clipboardRawEdit.getText().length());
+                      clipboardResponseMode = true;
+                  }
                   clipboardSpeechBaseText = combined;
                   clipboardSpeechLastPartial = "";
-                  clipboardResponseMode = true;
               }
 
               @Override public void onBackPressed() {
@@ -4341,14 +4364,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V197.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V197.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V198.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V198.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V197
+          name: V198
           path: |
             artifact/*.apk
             artifact/*.aab
