@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 206; versionName = "20.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 207; versionName = "20.7" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V206" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V207" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -503,7 +503,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V206");
+                  TextView title = label("Fordito_V207");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -3137,7 +3137,7 @@ jobs:
               }
 
               String clipboardPrepareOnlyInstructions() {
-                  return clipboardContextPrompt() + "You repair raw dictated or clipboard text for the middle field of a 3-window translator. Return ONLY the corrected source-language text, no labels, no markdown, no quotes, no explanation. " +
+                  return clipboardContextPrompt() + "Never censor, mask, redact, soften, sanitize or replace any word, including profanity, vulgarity, insults, sexual language, slang or rude wording. Preserve every such word in full, with its original spelling and meaning. Never use asterisks, partial masking, euphemisms, square-bracket placeholders or category labels. " + "You repair raw dictated or clipboard text for the middle field of a 3-window translator. Return ONLY the corrected source-language text, no labels, no markdown, no quotes, no explanation. " +
                     "The user may provide text in either one of the selected language pair. You must keep the ORIGINAL input language. In this middle step translation is strictly forbidden. " +
                     "Make the original-language source message natural and culturally well-formed: punctuation, capitalization, accents, sentence boundaries, grammar, broken sentence structure and clear speech-recognition errors. " +
                     "Preserve the speaker's meaning, intent, facts and tone, but do not behave like a literal transcript. Remove obvious dictation noise, accidental filler words, false starts, repeated fragments, self-corrections and words that clearly do not belong when the surrounding context makes that clear. " +
@@ -3454,7 +3454,7 @@ jobs:
               }
 
               String clipboardFullInstructions() {
-                  return clipboardContextPrompt() + "You are a standalone clipboard text repair and translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
+                  return clipboardContextPrompt() + "Never censor, mask, redact, soften, sanitize or replace any word, including profanity, vulgarity, insults, sexual language, slang or rude wording. Preserve every such word in full, with its original spelling and meaning. Never use asterisks, partial masking, euphemisms, square-bracket placeholders or category labels. " + "You are a standalone clipboard text repair and translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
                     "Return ONLY valid JSON with exactly two string fields: prepared and translation. No markdown, no labels outside JSON. " +
                     "Detect the source language from TEXT. If the source is Hungarian, prepared must be a corrected Hungarian version of TEXT: add punctuation, sentence boundaries and capitalization; correct obvious typos, missing accents, broken words, accidental repeated words and grammar when the intended meaning is clear from context. Be context-aware but conservative: do NOT invent new content and do NOT replace strange, test-like or unclear words with a different meaning. If a word is odd but could be intentional, keep it. Then translate prepared to TARGET_LANG. " +
                     "If the source is NOT Hungarian, prepared must be an empty string, and translation must be a natural Hungarian translation/interpretation of TEXT. Do not return the foreign source text as the translation. " +
@@ -3463,7 +3463,7 @@ jobs:
               }
 
               String clipboardTranslationInstructions() {
-                  return clipboardContextPrompt() + "You are a standalone clipboard translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
+                  return clipboardContextPrompt() + "Never censor, mask, redact, soften, sanitize or replace any word, including profanity, vulgarity, insults, sexual language, slang or rude wording. Preserve every such word in full, with its original spelling and meaning. Never use asterisks, partial masking, euphemisms, square-bracket placeholders or category labels. " + "You are a standalone clipboard translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
                     "If SOURCE_LANG is AUTO, detect the source language from TEXT. Translate the entire TEXT to TARGET_LANG. If TARGET_LANG is HU, the answer must be Hungarian. " +
                     "Return ONLY the translated text. Preserve paragraphs where reasonable. No labels, no markdown, no quotes, no explanation. Preserve the original style, register and emotional tone: friendly stays friendly, official stays official, intimate or sexual stays intimate or sexual, and practical work messages stay natural and direct. " +
                     "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Keep meaning, context and tone.";
@@ -4538,14 +4538,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V206.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V206.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V207.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V207.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V206
+          name: V207
           path: |
             artifact/*.apk
             artifact/*.aab
