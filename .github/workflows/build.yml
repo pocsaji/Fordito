@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 201; versionName = "20.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 202; versionName = "20.2" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V201" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V202" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -499,7 +499,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V201");
+                  TextView title = label("Fordito_V202");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -3024,7 +3024,15 @@ jobs:
                       translateClipboardOnlyHttp(prep, clipboardCurrentTarget);
                       return;
                   }
-                  String source = raw.length() > 0 ? raw : prep;
+                  if(prep.length() > 0) {
+                      clipboardCurrentSource = raw;
+                      clipboardCurrentPrepared = prep;
+                      clipboardCurrentTarget = clipboardTargetCode(prep);
+                      showClipboardTranslatorPanel(raw, prep, "Fordítás folyamatban…");
+                      translateClipboardOnlyHttp(prep, clipboardCurrentTarget);
+                      return;
+                  }
+                  String source = raw;
                   if(source.length() == 0) {
                       showClipboardTranslatorPanel("", "", "Nincs fordítható szöveg.");
                       return;
@@ -3089,6 +3097,81 @@ jobs:
                       });
                   } catch(Exception e) {
                       showClipboardTranslatorPanel(sourceText, "", "Vágólap-fordítási hiba: " + e.getMessage());
+                  }
+              }
+
+              String clipboardPrepareOnlyInstructions() {
+                  return "You repair raw dictated text for the middle field of a 3-window translator. Return ONLY the corrected text, no labels, no markdown, no quotes, no explanation. " +
+                    "The input may contain raw Hungarian speech recognition with pauses, repeated fragments, broken phrases, odd test words, or background noise. " +
+                    "Your job: make it a usable Hungarian source message: punctuation, capitalization, accents, sentence boundaries, obvious grammar and obvious speech-recognition mistakes. " +
+                    "Be context-aware but conservative. Do NOT invent new content. Do NOT replace a strange or test word with a different meaning. If a word is odd but could be intentional, keep it. If a phrase is unclear, keep the closest wording instead of explaining or interpreting it. " +
+                    "Do not add comments such as 'this is absurd' or change the speaker's intent. Preserve tone, style, vulgarity, intimacy, friendliness or official register.";
+              }
+
+              void autoPrepareClipboardRawText() {
+                  try {
+                      if(clipboardRawEdit == null || clipboardPreparedEdit == null) return;
+                      String raw = clipboardRawEdit.getText() == null ? "" : clipboardRawEdit.getText().toString().trim();
+                      if(raw.length() == 0) return;
+                      clipboardCurrentSource = raw;
+                      clipboardForceFieldUpdate = false;
+                      clipboardPreparedEdit.setText("Értelmezés folyamatban…");
+                      prepareClipboardOnlyHttp(raw);
+                  } catch(Exception ignored) {}
+              }
+
+              void prepareClipboardOnlyHttp(String rawText) {
+                  try {
+                      OkHttpClient http = new OkHttpClient.Builder()
+                          .connectTimeout(25, TimeUnit.SECONDS)
+                          .readTimeout(70, TimeUnit.SECONDS)
+                          .writeTimeout(30, TimeUnit.SECONDS)
+                          .build();
+                      JSONObject root = new JSONObject();
+                      root.put("model", "gpt-4o-mini");
+                      root.put("temperature", 0.05);
+                      JSONArray messages = new JSONArray();
+                      messages.put(new JSONObject().put("role", "system").put("content", clipboardPrepareOnlyInstructions()));
+                      messages.put(new JSONObject().put("role", "user").put("content", rawText));
+                      root.put("messages", messages);
+                      MediaType mt = MediaType.parse("application/json; charset=utf-8");
+                      RequestBody body = RequestBody.create(root.toString(), mt);
+                      Request req = new Request.Builder()
+                          .url("https://api.openai.com/v1/chat/completions")
+                          .addHeader("Authorization", "Bearer " + apiKey.trim())
+                          .addHeader("Content-Type", "application/json")
+                          .post(body)
+                          .build();
+                      http.newCall(req).enqueue(new Callback() {
+                          @Override public void onFailure(Call call, java.io.IOException e) {
+                              runOnUiThread(() -> { if(clipboardPreparedEdit != null) clipboardPreparedEdit.setText(rawText); });
+                          }
+                          @Override public void onResponse(Call call, Response response) throws java.io.IOException {
+                              String rawResp = response.body() == null ? "" : response.body().string();
+                              if(!response.isSuccessful()) {
+                                  runOnUiThread(() -> { if(clipboardPreparedEdit != null) clipboardPreparedEdit.setText(rawText); });
+                                  return;
+                              }
+                              try {
+                                  JSONObject obj = new JSONObject(rawResp);
+                                  JSONArray choices = obj.optJSONArray("choices");
+                                  String out = "";
+                                  if(choices != null && choices.length() > 0) {
+                                      JSONObject msg = choices.getJSONObject(0).optJSONObject("message");
+                                      if(msg != null) out = msg.optString("content", "");
+                                  }
+                                  final String clean = cleanClipboardApiText(out).trim();
+                                  runOnUiThread(() -> {
+                                      if(clipboardPreparedEdit != null) clipboardPreparedEdit.setText(clean.length() == 0 ? rawText : clean);
+                                      clipboardCurrentPrepared = clean.length() == 0 ? rawText : clean;
+                                  });
+                              } catch(Exception ex) {
+                                  runOnUiThread(() -> { if(clipboardPreparedEdit != null) clipboardPreparedEdit.setText(rawText); });
+                              }
+                          }
+                      });
+                  } catch(Exception e) {
+                      if(clipboardPreparedEdit != null) clipboardPreparedEdit.setText(rawText);
                   }
               }
 
@@ -3322,7 +3405,7 @@ jobs:
               String clipboardFullInstructions() {
                   return "You are a standalone clipboard text repair and translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
                     "Return ONLY valid JSON with exactly two string fields: prepared and translation. No markdown, no labels outside JSON. " +
-                    "Detect the source language from TEXT. If the source is Hungarian, prepared must be a corrected Hungarian version of TEXT: add punctuation, sentence boundaries and capitalization; correct obvious typos, missing accents, broken words, accidental repeated words and grammar when the intended meaning is clear from context. If a mistake is not clear, keep it instead of inventing content. Then translate prepared to TARGET_LANG. " +
+                    "Detect the source language from TEXT. If the source is Hungarian, prepared must be a corrected Hungarian version of TEXT: add punctuation, sentence boundaries and capitalization; correct obvious typos, missing accents, broken words, accidental repeated words and grammar when the intended meaning is clear from context. Be context-aware but conservative: do NOT invent new content and do NOT replace strange, test-like or unclear words with a different meaning. If a word is odd but could be intentional, keep it. Then translate prepared to TARGET_LANG. " +
                     "If the source is NOT Hungarian, prepared must be an empty string, and translation must be a natural Hungarian translation/interpretation of TEXT. Do not return the foreign source text as the translation. " +
                     "Keep the user's practical meaning, tone, register, emotional intensity and context. Friendly stays friendly; official stays official; direct work messages stay direct; intimate or sexual text stays intimate or sexual instead of being made formal. Make the result natural and native-sounding. " +
                     "Do not censor, mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording.";
@@ -3397,22 +3480,22 @@ jobs:
                           rawTitle.setTextSize(13);
                           rawTitle.setTextColor(Color.rgb(255, 210, 80));
                           lay.addView(rawTitle, new LinearLayout.LayoutParams(-1, -2));
-                          clipboardRawEdit = clipboardEditBox("vágólap szövege", 15, 5);
-                          lay.addView(clipboardRawEdit, new LinearLayout.LayoutParams(-1, 0, 1));
+                          clipboardRawEdit = clipboardEditBox("vágólap szövege", 14, 5);
+                          lay.addView(clipboardRawEdit, new LinearLayout.LayoutParams(-1, 0, 0.90f));
 
                           clipboardPreparedTitle = label("Értelmezett / fordítandó szöveg:");
                           clipboardPreparedTitle.setTextSize(13);
                           clipboardPreparedTitle.setTextColor(Color.rgb(255, 210, 80));
                           lay.addView(clipboardPreparedTitle, new LinearLayout.LayoutParams(-1, -2));
                           clipboardPreparedEdit = clipboardEditBox("javított vagy fordítandó szöveg", 15, 5);
-                          lay.addView(clipboardPreparedEdit, new LinearLayout.LayoutParams(-1, 0, 1));
+                          lay.addView(clipboardPreparedEdit, new LinearLayout.LayoutParams(-1, 0, 1.05f));
 
                           TextView trTitle = label("Fordítás:");
                           trTitle.setTextSize(13);
                           trTitle.setTextColor(Color.rgb(255, 210, 80));
                           lay.addView(trTitle, new LinearLayout.LayoutParams(-1, -2));
                           clipboardTranslationEdit = clipboardEditBox("fordítás", 16, 7);
-                          lay.addView(clipboardTranslationEdit, new LinearLayout.LayoutParams(-1, 0, 1));
+                          lay.addView(clipboardTranslationEdit, new LinearLayout.LayoutParams(-1, 0, 1.05f));
 
                           LinearLayout buttons = row();
                           Button translate = btn("FORDÍT");
@@ -4154,6 +4237,7 @@ jobs:
                                   if(list != null && list.size() > 0) commitClipboardDictationResult(list.get(0));
                                   else if(clipboardSpeechLastPartial != null && clipboardSpeechLastPartial.trim().length() > 0) commitClipboardDictationResult(clipboardSpeechLastPartial);
                                   stopClipboardSystemSpeech(false);
+                                  autoPrepareClipboardRawText();
                               }
 
                               @Override public void onError(int error) {
@@ -4162,6 +4246,7 @@ jobs:
                                       commitClipboardDictationResult(clipboardSpeechLastPartial);
                                   }
                                   stopClipboardSystemSpeech(false);
+                                  autoPrepareClipboardRawText();
                                   Toast.makeText(MainActivity.this, "Diktálás vége.", Toast.LENGTH_SHORT).show();
                               }
                           });
@@ -4352,14 +4437,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V201.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V201.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V202.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V202.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V201
+          name: V202
           path: |
             artifact/*.apk
             artifact/*.aab
