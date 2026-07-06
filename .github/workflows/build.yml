@@ -1395,6 +1395,12 @@ jobs:
                   return makeAudioRecord(MediaRecorder.AudioSource.MIC, sr, bs);
               }
 
+              boolean shouldMuteMicForSpeakerTts() {
+                  return interpreterMode
+                      && "speaker".equals(interpreterAudioMode)
+                      && (ttsSpeaking || System.currentTimeMillis() < ttsMuteUntilMs);
+              }
+
               void audioLoop() {
                   int sr = 24000;
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
@@ -1420,10 +1426,14 @@ jobs:
                           int read = rec.read(buf, 0, buf.length);
                           if(read > 0) {
                               try {
-                                  if("speaker".equals(interpreterAudioMode) && (ttsSpeaking || System.currentTimeMillis() < ttsMuteUntilMs)) {
+                                  // Tolmács mód nem módosíthatja a bemeneti beszédfelismerést.
+                                  // Egyetlen kivétel: kihangosított telefon módnál TTS közben a mikrofon nem küld hangot,
+                                  // hogy a saját felolvasott fordítás ne kerüljön vissza bemenetként.
+                                  // A pre-rollt nem töröljük, és TTS alatti hangot sem pufferezzük,
+                                  // így a saját felolvasás nem kerülhet vissza később bemenetként.
+                                  if(shouldMuteMicForSpeakerTts()) {
                                       trailingSilenceOpen = false;
                                       voiceSendActive = false;
-                                      clearPreRollAudio();
                                       continue;
                                   }
 
