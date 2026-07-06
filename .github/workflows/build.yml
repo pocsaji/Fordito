@@ -1,4 +1,4 @@
-name: Build Android APK V233
+name: Build Android APK V235
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 233; versionName = "23.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 235; versionName = "23.5" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V233" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V235" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -263,7 +263,7 @@ jobs:
               long liveBufferStartedAt = 0L;
               long liveLastTranscriptDeltaAt = 0L;
               int liveIdleFlushToken = 0;
-              // V233: eseménysorrend-védelem. Nem várakoztat, csak megjegyzi,
+              // V235: eseménysorrend-védelem. Nem várakoztat, csak megjegyzi,
               // hogy a delta útvonal már adott ki blokkot, ezért a közvetlen completed/idle
               // nem zárhatja le ugyanazt még egyszer.
               long lastLiveBlockReleasedAt = 0L;
@@ -400,7 +400,7 @@ jobs:
                   interpreterMode = false;
                   interpreterAudioMode = "off";
                   openAiNoiseMode = "off";
-                  applyV233StableDefaultsOnce();
+                  applyV235StableDefaultsOnce();
                   ui();
                   reqMic();
                   reqNotifications();
@@ -411,7 +411,7 @@ jobs:
               void load() {
                   apiKey = sp.getString("apiKey", "");
                   model = sp.getString("model", "gpt-realtime-2");
-                  // V233: ehhez a kétirányú FR/HU tolmács-logikához maradunk a standard /v1/realtime + gpt-realtime-2 útvonalon.
+                  // V235: ehhez a kétirányú FR/HU tolmács-logikához maradunk a standard /v1/realtime + gpt-realtime-2 útvonalon.
                   // A gpt-realtime-translate külön /v1/realtime/translations végpontot és egyirányú target output nyelvet várna,
                   // ezért itt nem engedjük visszatölteni régi mentésből sem.
                   if(!"gpt-realtime-2".equals(model)) model = "gpt-realtime-2";
@@ -423,7 +423,7 @@ jobs:
                   micGateMode = sp.getString("micGateMode", "sensitive");
                   audioSourceMode = sp.getString("audioSourceMode", "unprocessed");
                   androidEffectsMode = sp.getString("androidEffectsMode", "recommended");
-                  openAiNoiseMode = "off"; // V233: OpenAI zajszűrés fixen kikapcsolva
+                  openAiNoiseMode = "off"; // V235: OpenAI zajszűrés fixen kikapcsolva
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   lastInterpreterAudioMode = sp.getString("lastInterpreterAudioMode", "headset");
                   if(!"speaker".equals(lastInterpreterAudioMode) && !"headset".equals(lastInterpreterAudioMode)) lastInterpreterAudioMode = "headset";
@@ -442,8 +442,8 @@ jobs:
                   if("normal".equals(vadMode)) vadMode = "medium";
               }
 
-              void applyV233StableDefaultsOnce() {
-                  // V233: menü-átszervezés. A V233 beállításokat nem írjuk felül frissítéskor.
+              void applyV235StableDefaultsOnce() {
+                  // V235: menü-átszervezés. A V235 beállításokat nem írjuk felül frissítéskor.
                   // Új telepítésnél a korábbi stabil alapok maradnak, a háttér mód továbbra is minden induláskor kikapcsolt.
                   int last = sp.getInt("stableDefaultsVersion", 0);
                   if(last < 233) {
@@ -499,7 +499,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V233");
+                  TextView title = label("Fordito_V235");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -533,7 +533,7 @@ jobs:
                   controls.addView(menuBtn, new LinearLayout.LayoutParams(0,85,1));
                   root.addView(controls);
 
-                  // V233: sima kattintás / fókuszváltás ne állítsa le a mikrofont.
+                  // V235: sima kattintás / fókuszváltás ne állítsa le a mikrofont.
                   // Az aktív oldalt továbbra is átállítjuk, de live munkát nem törlünk.
                   topBox.setOnClickListener(v -> selectActiveBox(true));
                   bottomBox.setOnClickListener(v -> selectActiveBox(false));
@@ -657,7 +657,7 @@ jobs:
                       }
                       public void afterTextChanged(Editable e) {
                           if(programmaticChange) return;
-                                  // V233: nincs kézi blokkállapot.
+                                  // V235: nincs kézi blokkállapot.
                           // Gépelés közben nem bontjuk újra a blokkokat.
                           // FORDÍT gombnál a teljes aktív ablak fordul újra a másik ablakba.
                           updateButtons();
@@ -677,7 +677,7 @@ jobs:
                   manualTopSource = top;
                   topActive = top;
 
-                  // V233: kattintás, fókusz és gépelés miatt nem állítjuk le a mikrofont.
+                  // V235: kattintás, fókusz és gépelés miatt nem állítjuk le a mikrofont.
                   // Kézi FORDÍT gombnál külön útvonal dolgozik, ezért nem kell itt élő
                   // mikrofon-stop. Csak a régi kézi válasz maradékát takarítjuk, ha volt.
                   if(!streaming) {
@@ -789,7 +789,7 @@ jobs:
               }
 
               void renderBlocksKeepView() {
-                  // V233: élő fordítás alatt ne őrizze meg a régi scroll pozíciót,
+                  // V235: élő fordítás alatt ne őrizze meg a régi scroll pozíciót,
                   // mert ettől nem megy le az ablak az új sorokra.
                   // Kézi/készenléti módban marad a régi nézetmegőrzés.
                   renderBlocks(!(streaming || uiLockedForLive || finalizingStop));
@@ -1034,7 +1034,7 @@ jobs:
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
 
-                      // V233: hanglánc-próba: Android hangforrás + Android effektek + OpenAI zajszűrés menüből állítható.
+                      // V235: hanglánc-próba: Android hangforrás + Android effektek + OpenAI zajszűrés menüből állítható.
                       // Tapasztalat: kamionfülkében a túl szigorú helyi kapu levágta a beszéd elejét.
                       // Ezért az alapérték érzékenyebb: a beszéd sértetlenül menjen át, az OpenAI VAD dönt.
                       JSONObject vad = new JSONObject();
@@ -1052,7 +1052,7 @@ jobs:
                       input.put("format", format);
                       input.put("turn_detection", vad);
 
-                      // V233: OpenAI Realtime oldali zajszűrés menüből.
+                      // V235: OpenAI Realtime oldali zajszűrés menüből.
                       // near_field: telefon/headset közeli beszéd. far_field: távolabb lévő mikrofon.
                       if(!"off".equals(openAiNoiseMode)) {
                           JSONObject nr = new JSONObject();
@@ -1062,7 +1062,7 @@ jobs:
 
                       JSONObject tr = new JSONObject();
                       tr.put("model", "gpt-realtime-whisper");
-                      // V233: gpt-realtime-whisper GA alatt promptot nem használunk, és language hintet sem állítunk fixre,
+                      // V235: gpt-realtime-whisper GA alatt promptot nem használunk, és language hintet sem állítunk fixre,
                       // mert a mikrofon egy munkameneten belül TOP és BOTTOM nyelven is megszólalhat.
                       // A kiválasztott nyelvpárt a BEVITEL után, még fordítás előtt zárjuk:
                       // csak TOP/BOTTOM nyelvpárba illő, tisztított transcript blokk mehet tovább.
@@ -1087,11 +1087,12 @@ jobs:
               String pairRules() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
-                  return "Selected language pair is locked to exactly these two languages: TOP=" + top + ", BOTTOM=" + bottom + ". " +
-                    "Only these two languages exist for this session. Never classify, output, or translate as any third language. " +
-                    "If the rough transcript looks like any language other than the selected TOP or BOTTOM language, treat it as a recognition error or background noise. " +
-                    "Resolve meaningful speech only as " + top + " or " + bottom + ". If it cannot be reasonably repaired as one of those two selected languages, output nothing for that block. " +
-                    "If unsure between the two selected languages, choose the closer of " + top + " and " + bottom + "; do not invent a third option. ";
+                  return "Selected conversation pair is locked to exactly two languages: TOP=" + top + ", BOTTOM=" + bottom + ". " +
+                    "For live microphone translation, do not consider or name any third language. " +
+                    "Every meaningful input must be resolved as either TOP or BOTTOM, then translated into the other one. " +
+                    "Short answers and short questions are valid speech and must be translated. " +
+                    "If the transcript is uncertain, repair it only toward the closer of TOP or BOTTOM. " +
+                    "Only ignore the block when it is clearly not human speech or has no translatable content. ";
               }
 
               String instructions() {
@@ -1126,19 +1127,18 @@ jobs:
               String liveBlockInstructions(boolean ignoredSourceIsTop) {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
-                  return "Every word must be output in full. Never replace letters with asterisks or symbols. Never mask, redact, soften, sanitize, euphemize, hide, or partially replace any profanity, insult, slang, vulgar, sexual, rude, or emotional wording. If such wording appears in the input or is required by the translation, write the complete word exactly in the target language. " + "Translate exactly ONE speech block. " +
+                  return "Every word must be output in full. Never replace letters with asterisks or symbols. Never mask, redact, soften, sanitize, euphemize, hide, or partially replace any profanity, insult, slang, vulgar, sexual, rude, or emotional wording. If such wording appears in the input or is required by the translation, write the complete word exactly in the target language. " +
+                    "You are a live two-language interpreter. Translate exactly ONE completed speech block. " +
                     pairRules() +
-                    "The user message contains TEXT containing the rough speech transcript. " +
-                    "Classify TEXT as exactly one selected source language: " + top + " or " + bottom + ". No third language is valid. If TEXT cannot be read as one of these two selected languages, return empty content. " +
+                    "The user message contains TEXT with a rough live speech transcript. " +
+                    "Choose SOURCE_LANG as exactly " + top + " or " + bottom + "; no other source language is valid. " +
+                    "Translate into the other selected language. " +
+                    "Do not reject short speech: one-word answers, two-word answers, short questions and fragments are valid when meaningful. " +
                     "Return exactly three lines and nothing else: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <cleaned source-language speech> then TRANSLATION: <natural translation into the other selected language>. " +
-                    "CRITICAL ORIGINAL RULE: ORIGINAL must stay in SOURCE_LANG. It is never a translation, explanation, definition, commentary, language label, quotation analysis, or paraphrase. " +
-                    "Never add meta-commentary, explanations, definitions, or language labels unless those words were actually spoken by the user as part of the message. " +
-                    "Do not wrap the source in quotation marks and do not describe what the speaker said. " +
-                    "Correct only obvious recognition mistakes when the intended word is strongly supported by the full sentence and conversation context. Otherwise preserve the spoken wording. " +
-                    "Do not invent missing words, facts, subjects, objects, intentions, or test descriptions. " +
-                    "TRANSLATION must contain only the translation into the other selected language, with no explanation or labels. " +
-                    "If the block cannot reasonably be resolved as one of the two selected languages, return no content. " +
-                    "Every word must be output in full. Never replace letters with asterisks or symbols. Do not mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly. Never output square-bracket category placeholders or asterisk-masked words. " +
+                    "ORIGINAL must stay in SOURCE_LANG. It is never an explanation, language label, commentary, or paraphrase. " +
+                    "Correct only obvious recognition mistakes when strongly supported; otherwise preserve the spoken wording. " +
+                    "Do not invent missing facts. Do not output markdown, quotes, explanations, or labels beyond the required three labels. " +
+                    "If the input is clearly only noise and not human speech, return SOURCE_LANG: " + top + " then ORIGINAL: then TRANSLATION: with empty ORIGINAL and TRANSLATION. " +
                     "Conversation profile: " + profilePrompt() + " Translation mode: " + modePrompt();
               }
 
@@ -1193,13 +1193,13 @@ jobs:
 
               double vadThreshold() {
                   if("high".equals(vadMode)) return 0.70;     // gyors: könnyebben indul, csendesebb helyre
-                  if("medium".equals(vadMode)) return 0.74;   // V233 alap: normál, nem vágja túl a beszédet
+                  if("medium".equals(vadMode)) return 0.74;   // V235 alap: normál, nem vágja túl a beszédet
                   if("auto".equals(vadMode)) return 0.74;
                   return 0.76;                                // várakozó: hosszabb, óvatosabb blokkzárás
               }
 
               int vadSilenceMs() {
-                  // V233: a szerver VAD mondatzárása sehol nem várhat tovább 500 ms-nál,
+                  // V235: a szerver VAD mondatzárása sehol nem várhat tovább 500 ms-nál,
                   // mert a helyi küldési kapu legfeljebb 600 ms lezáró csendet enged fel.
                   if("high".equals(vadMode)) return 300;
                   if("medium".equals(vadMode)) return 450;
@@ -1208,7 +1208,7 @@ jobs:
               }
 
               int micGateThreshold() {
-                  // V233: a kapu már nem csak nulláz, hanem üresjáratban a küldést is megfogja.
+                  // V235: a kapu már nem csak nulláz, hanem üresjáratban a küldést is megfogja.
                   // sensitive = kikapcsolva: minden hangcsomag megy, a régi folyamatos stream viselkedéshez.
                   if("sensitive".equals(micGateMode)) return 0;
                   if("gate_low".equals(micGateMode)) return 100;
@@ -1391,7 +1391,7 @@ jobs:
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4800);
 
-                  // V233: 24 kHz PCM16 mono marad. Buffer cél kb. 100 ms.
+                  // V235: 24 kHz PCM16 mono marad. Buffer cél kb. 100 ms.
                   // Hangforrás és Android/OpenAI zajszűrés menüből tesztelhető.
                   rec = makeBestAudioRecord(sr, bs);
                   if(rec == null) { runOnUiThread(() -> state.setText("mikrofon hiba")); return; }
@@ -1464,7 +1464,7 @@ jobs:
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
 
-                  // V233: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+                  // V235: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
                   if(clipboardResponseMode) {
                       clipboardResponseMode = false;
                       pendingClipboardText = "";
@@ -1473,7 +1473,7 @@ jobs:
                       return;
                   }
 
-                  // V233: kézi fordításnál nincs blokkállapot. Hiba esetén nem írunk semmit az ablakokba.
+                  // V235: kézi fordításnál nincs blokkállapot. Hiba esetén nem írunk semmit az ablakokba.
                   if(manualResponseMode) {
                       manualResponseMode = false;
                       pendingManualText = "";
@@ -1544,7 +1544,7 @@ jobs:
 
                       if(type.equals("response.done")) {
                           responseInProgress = false;
-                          // V233: ha egy live fordítás válasz nélkül zárult, a blokk nem veszhet el.
+                          // V235: ha egy live fordítás válasz nélkül zárult, a blokk nem veszhet el.
                           // Korlátozottan újrapróbáljuk, különben marad újrafordíthatóként.
                           if(liveTranslateMode && pendingLiveBlockId >= 0 && pendingOutput.trim().length() == 0) {
                               int missId = pendingLiveBlockId;
@@ -1552,7 +1552,7 @@ jobs:
                               liveTranslateMode = false;
                               runOnUiThread(() -> retryLiveBlockOrRender(missId));
                           }
-                          // V233: élő fordítási sor csak akkor induljon tovább,
+                          // V235: élő fordítási sor csak akkor induljon tovább,
                           // amikor az előző response ténylegesen lezárult a szerver szerint.
                           // Különben a következő response.create könnyen "response in progress" hibára fut,
                           // és a fordítás az első blokk után megáll.
@@ -1587,7 +1587,7 @@ jobs:
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
                           if(msg.contains("response in progress")) {
                               responseInProgress = true;
-                              // V233: ha live fordítás közben túl korán próbáltunk új választ indítani,
+                              // V235: ha live fordítás közben túl korán próbáltunk új választ indítani,
                               // ne nyeljük le végleg a sort: röviden visszarakjuk a blokkot és újrapróbáljuk.
                               if(liveTranslateMode && pendingLiveBlockId >= 0) {
                                   int retryId = pendingLiveBlockId;
@@ -1700,11 +1700,11 @@ jobs:
                   int released = flushReadyTranscriptBlocks(false);
                   if(released > 0) {
                       liveDeltaReleasedSinceLastCompleted = true;
-                      // V233: a már kiadott delta-blokkhoz tartozó korábbi idle flush ne futhasson rá később.
+                      // V235: a már kiadott delta-blokkhoz tartozó korábbi idle flush ne futhasson rá később.
                       liveIdleFlushToken++;
                   }
 
-                  // V233: csak akkor ütemezünk utóflush-t, ha tényleg maradt pufferben szöveg.
+                  // V235: csak akkor ütemezünk utóflush-t, ha tényleg maradt pufferben szöveg.
                   // Ez nem lassítás: nincs plusz várakozás, csak a régi tokenek érvénytelenítése.
                   if(liveTranscriptBuffer.trim().length() > 0) {
                       final int token = ++liveIdleFlushToken;
@@ -1717,7 +1717,7 @@ jobs:
               }
 
               void handleTranscriptCompleted(String transcript) {
-                  // V233 duplázás-javítás:
+                  // V235 duplázás-javítás:
                   // A completed esemény sokszor ugyanazt a teljes mondatot küldi újra,
                   // amit a delta eseményekből már kiírtunk és fordítottunk.
                   // Ha volt delta ebben a körben, NEM töltjük vissza a teljes transcriptet,
@@ -1730,7 +1730,7 @@ jobs:
                           liveTranscriptBuffer = transcript;
                       }
                   }
-                  // V233: completed nem írhatja ki újra azt, amit a delta útvonal már kiadott.
+                  // V235: completed nem írhatja ki újra azt, amit a delta útvonal már kiadott.
                   // Ha viszont valódi maradék van a pufferben, azonnal kiengedjük; nincs lassítás.
                   int released = completedIsOnlyAlreadyReleased ? 0 : flushReadyTranscriptBlocks(true);
                   if(released > 0) lastLiveBlockReleasedAt = System.currentTimeMillis();
@@ -1740,7 +1740,7 @@ jobs:
               }
 
               void resetLiveRecognitionTimingState() {
-                  // V233: beszédfelismerési időzítés váltásakor nem várunk és nem építünk új kaput.
+                  // V235: beszédfelismerési időzítés váltásakor nem várunk és nem építünk új kaput.
                   // Csak az élő, még le nem zárt transcript állapotot nullázzuk, hogy a régi mód
                   // puffer/időzítője ne zárhasson rá az új mód szabályaira. A már kiadott blokkok
                   // dedupe-cache-e szándékosan megmarad, így egy későn érkező régi completed esemény
@@ -1762,7 +1762,7 @@ jobs:
 
               int flushReadyTranscriptBlocks(boolean flushAll) {
                   int releasedCount = 0;
-                  // V233: az első élő blokkot nem engedjük ki azonnal 1-2 bizonytalan szóból.
+                  // V235: az első élő blokkot nem engedjük ki azonnal 1-2 bizonytalan szóból.
                   // Ez szűri a kezdő "Microfoonprobe / Kazakhstan / UFO" jellegű félrehallást,
                   // de nem nyúl az audiohoz és nem épít új nyelvfelismerőt.
                   if(!firstSpeechBlockReleased && !initialSpeechGateOpen()) return 0;
@@ -1770,16 +1770,16 @@ jobs:
                       String b = popReadySpeechBlock(flushAll);
                       if(b == null || b.trim().length() == 0) break;
 
-                      // V233: egyetlen beviteli normalizáló blokk.
+                      // V235: egyetlen beviteli normalizáló blokk.
                       // Itt történik a tisztítás, a közvetlen ismétlés összehúzása,
                       // az előző blokk végével való átfedés levágása és a biztos duplázás kiszűrése.
                       // Alapelv: ha bizonytalan, átengedjük, nem nyeljük el a beszédet.
                       b = normalizeAndDeduplicateLiveBlock(b);
                       if(b.length() == 0) continue;
-                      // V233: nyelvpár-zárás a BEVITELI oldalon.
+                      // V235: nyelvpár-zárás a BEVITELI oldalon.
                       // A fordító csak akkor kap blokkot, ha az átirat nem tűnik harmadik nyelvű zajnak.
                       if(!passesSelectedPairInputGate(b)) continue;
-                      // V233: a forrásoldalt először helyben, kizárólag a kiválasztott TOP/BOTTOM
+                      // V235: a forrásoldalt először helyben, kizárólag a kiválasztott TOP/BOTTOM
                       // nyelvpárból döntjük el. Harmadik nyelv nem létezik az élő mikrofonos ágban.
                       boolean sourceGuessTop = sourceIsTopBySelectedPair(b, topActive);
                       int id = addSourceOnlyBlock(sourceGuessTop, b);
@@ -1790,7 +1790,7 @@ jobs:
                       lastLiveBlockReleasedAt = System.currentTimeMillis();
                   }
                   if(releasedCount > 0) {
-                      // V233: sikeres kiírás után a régi idle flush már nem zárhat ugyanarra.
+                      // V235: sikeres kiírás után a régi idle flush már nem zárhat ugyanarra.
                       liveIdleFlushToken++;
                   }
                   processNextLiveTranslation();
@@ -1803,14 +1803,11 @@ jobs:
                   int words = s.split("\\s+").length;
                   long age = firstSpeechHeardAt > 0L ? System.currentTimeMillis() - firstSpeechHeardAt : 0L;
 
-                  // V233: az első blokkot nem engedjük át pusztán azért, mert a bizonytalan STT
-                  // tett a végére pontot. Ez fogta meg a Microfoonprobe/Kazakhstan jellegű kezdést.
-                  // Ugyanakkor ha a felhasználó tényleg csak 2-3 szót mond és utána hosszú csend van,
-                  // 2 mp után fordítjuk, nem nyeljük el.
-                  if(age >= 2000 && words >= 2) return true;
-                  if(looksLikeObviousThirdLanguageNoise(s) && words < 5) return false;
-                  if(firstHardSentenceEnd(s) >= 0 && words >= 3) return true;
-                  if(s.length() >= 42 && words >= 4) return true;
+                  // V235: nincs külön szótáras nyelvkapu az első blokknál.
+                  // Rövid válasz is beszéd. Csak minimális stabilizálást várunk, hogy ne fél karakter menjen fordításra.
+                  if(age >= 650 && s.length() >= 2 && words >= 1) return true;
+                  if(firstHardSentenceEnd(s) >= 0 && words >= 1) return true;
+                  if(s.length() >= 18 && words >= 2) return true;
                   return false;
               }
 
@@ -1847,7 +1844,7 @@ jobs:
                   if(raw == null) return "";
                   String b = cleanTranscriptForSelectedPair(raw);
 
-                  // V233: egyetlen beviteli normalizáló lánc, nem új kapu.
+                  // V235: egyetlen beviteli normalizáló lánc, nem új kapu.
                   // Előbb a blokkon belüli közvetlen ismétlést húzzuk össze bárhol,
                   // nem csak a blokk elején. Ez fogja meg a mondat közepén jelentkező
                   // közvetlen ismétlést is.
@@ -1865,7 +1862,7 @@ jobs:
                   String h = normalizeLiveBlockHash(b);
                   if(h.length() < 3) return "";
 
-                  // V233: legutolsó lépésként, minden tisztítás után hasonlítunk a közvetlenül
+                  // V235: legutolsó lépésként, minden tisztítás után hasonlítunk a közvetlenül
                   // frissen kiadott blokkokhoz. Nem új kapu: ugyanennek a normalizáló blokknak
                   // a vége. Csak teljes vagy majdnem teljes ismétlést dobunk el.
                   if(matchesVeryRecentReleasedBlock(h)) return "";
@@ -1929,7 +1926,7 @@ jobs:
                   String t = raw.trim().replaceAll("\\s+", " ");
                   while(t.startsWith(",") || t.startsWith(";") || t.startsWith(":")) t = t.substring(1).trim();
                   if(t.length() == 0) return "";
-                  // V233: vesszőből / pontosvesszőből / kettőspontból nem gyártunk pontot.
+                  // V235: vesszőből / pontosvesszőből / kettőspontból nem gyártunk pontot.
                   // Ezek sokszor folytatást jelölnek, a hamis pont pedig rossz blokk- és
                   // nagybetűs mondatkezdést okozott.
                   return t;
@@ -1965,7 +1962,7 @@ jobs:
                   String x = raw.trim().replaceAll("\\s+", " ");
                   if(x.length() == 0) return x;
 
-                  // V233: NEM általános szótár. Csak pár, tesztben sokszor félrehallott fix kifejezés.
+                  // V235: NEM általános szótár. Csak pár, tesztben sokszor félrehallott fix kifejezés.
                   x = x.replaceAll("(?iu)\\bblu\\s*t[uú]+t[h]?\\b", "Bluetooth");
                   x = x.replaceAll("(?iu)\\bbluetooth[- ]?ot\\b", "Bluetoothot");
                   x = x.replaceAll("(?iu)\\bbluetooth[- ]?on\\b", "Bluetoothon");
@@ -1985,130 +1982,34 @@ jobs:
                   if(block == null) return false;
                   String t = cleanTranscriptForSelectedPair(block).trim();
                   if(t.length() == 0) return false;
-                  int words = t.split("\\s+").length;
-                  if(words <= 1 && !isAllowedShortReply(t)) return false;
+                  if(isClipboardSystemMessage(t.toLowerCase(Locale.ROOT))) return false;
 
-                  // V233: élő mikrofonos nyelvzár. Ha TOP és BOTTOM is konkrét nyelv,
-                  // akkor a beviteli oldalon csak ebből a két nyelvből lehet választani.
-                  // Nem tiltólistákat pakolunk egymásra, hanem egyetlen whitelist döntést használunk.
-                  String top = code(topLang).toUpperCase(Locale.ROOT);
-                  String bottom = code(bottomLang).toUpperCase(Locale.ROOT);
-                  if(!"AUTO".equals(top) && !"AUTO".equals(bottom)) {
-                      return selectedPairLanguageCode(t).length() > 0;
-                  }
-
-                  // AUTO nyelvválasztásnál marad az óvatos zajszűrés, mert ott nincs két konkrét célpont.
-                  if(looksLikeObviousThirdLanguageNoise(t)) return false;
-                  if(isLikelyNoisyTranscriptBlock(t)) return false;
-                  return true;
+                  // V235: a korábbi szótáras TOP/BOTTOM nyelvdetektor és harmadiknyelv-tiltó kapuk kikerültek
+                  // az élő mikrofonos útból. Ezek rövid FR/HU válaszokat dobtak el.
+                  // Itt csak azt döntjük el, hogy van-e emberi szövegnek látszó beviteli blokk.
+                  // A két kiválasztott nyelv közötti döntést a fordítómodell végzi a pairRules() alapján.
+                  return t.length() >= 1;
               }
 
               boolean sourceIsTopBySelectedPair(String text, boolean fallback) {
-                  String lang = selectedPairLanguageCode(text);
-                  if(lang.length() == 0) return fallback;
-                  return lang.equalsIgnoreCase(code(topLang));
+                  // V235: előzetes szótáras nyelvdöntés nincs.
+                  // A nyers blokk ideiglenesen az aktuális oldalra kerül, majd az AI SOURCE_LANG alapján átkerülhet.
+                  return fallback;
               }
 
               String selectedPairLanguageCode(String text) {
-                  if(text == null) return "";
-                  String top = code(topLang).toUpperCase(Locale.ROOT);
-                  String bottom = code(bottomLang).toUpperCase(Locale.ROOT);
-                  if("AUTO".equals(top) || "AUTO".equals(bottom)) return "";
-                  if(top.equals(bottom)) return top;
-
-                  int topScore = scoreTextForSelectedLang(text, top);
-                  int bottomScore = scoreTextForSelectedLang(text, bottom);
-                  int words = text.trim().length() == 0 ? 0 : text.trim().split("\\s+").length;
-
-                  if(words <= 2) {
-                      if(topScore >= 3 && topScore > bottomScore) return top;
-                      if(bottomScore >= 3 && bottomScore > topScore) return bottom;
-                      return "";
-                  }
-
-                  int best = Math.max(topScore, bottomScore);
-                  int diff = Math.abs(topScore - bottomScore);
-                  if(best >= 4 && diff >= 2) return topScore > bottomScore ? top : bottom;
-                  if(best >= 7 && diff >= 1) return topScore > bottomScore ? top : bottom;
                   return "";
               }
 
-              int scoreTextForSelectedLang(String text, String lang) {
-                  if(text == null || lang == null) return 0;
-                  String lc = lang.toUpperCase(Locale.ROOT);
-                  String lower = text.toLowerCase(Locale.ROOT);
-                  String pad = " " + lower.replaceAll("[^a-záéíóöőúüűàâçèéêëîïôùûüÿñæœßăâîșțčćđšžľĺňôŕýäöü\\s']", " ").replaceAll("\\s+", " ").trim() + " ";
-                  int score = 0;
-
-                  if("HU".equals(lc)) {
-                      for(int i=0;i<lower.length();i++) if("áíóöőúüű".indexOf(lower.charAt(i)) >= 0) score += 2;
-                      String[] strong = {" hogy "," vagy "," nem "," igen "," ezt "," azt "," akkor "," most "," lehet "," kérlek "," kerlek "," szeretném "," szeretnem "," miért "," miert "," mert "," tehát "," tehat "," van "," lesz "," volt "," kell "," kétszer "," ketszer "," nyelv "," nyelvszűrés "," mikrofon "," aktív "," aktiv "," felolvas "," fordítás "," forditas "," szöveg "," szoveg "," működik "," mukodik "," tudom "};
-                      for(String w: strong) if(pad.contains(w)) score += 3;
-                      if(pad.matches(".*\\b\\p{L}+(ban|ben|nak|nek|val|vel|hoz|hez|höz|ról|ről|tól|től|ként|unk|ünk|tok|tek)\\b.*")) score += 2;
-                  } else if("FR".equals(lc)) {
-                      for(int i=0;i<lower.length();i++) if("àâçéèêëîïôùûüÿœæ".indexOf(lower.charAt(i)) >= 0) score += 2;
-                      String[] strong = {" je "," tu "," vous "," nous "," il "," elle "," est "," sont "," pas "," que "," quoi "," pourquoi "," parce "," avec "," dans "," pour "," une "," des "," les "," le "," la "," mais "," donc "," alors "," merci "," bonjour "," monsieur "," madame "," micro "," microphone "," actif "," filtrage "," langue "," horrible "," arrêter "," arreter "," attendre "," attendu "," dire "," deux fois "};
-                      for(String w: strong) if(pad.contains(w)) score += 3;
-                      if(pad.contains(" l'") || pad.contains(" d'") || pad.contains(" qu'") || pad.contains(" j'") || pad.contains(" c'")) score += 3;
-                  } else if("EN".equals(lc)) {
-                      String[] wds = {" the "," and "," you "," that "," this "," with "," for "," why "," because "," have "," not "};
-                      for(String w: wds) if(pad.contains(w)) score += 3;
-                  } else if("DE".equals(lc)) {
-                      for(int i=0;i<lower.length();i++) if("äöüß".indexOf(lower.charAt(i)) >= 0) score += 2;
-                      String[] wds = {" ich "," du "," sie "," wir "," nicht "," und "," oder "," dass "," mit "," für "," ein "," eine "," der "," die "," das "," warum "," bitte "," danke "};
-                      for(String w: wds) if(pad.contains(w)) score += 3;
-                  } else if("IT".equals(lc)) {
-                      String[] wds = {" io "," tu "," noi "," non "," che "," per "," con "," una "," gli "," sono "," perché "," allora "};
-                      for(String w: wds) if(pad.contains(w)) score += 3;
-                  } else if("ES".equals(lc)) {
-                      String[] wds = {" yo "," tú "," usted "," nosotros "," no "," que "," para "," con "," una "," los "," porque "," entonces "," ahora "};
-                      for(String w: wds) if(pad.contains(w)) score += 3;
-                  } else if("RO".equals(lc)) {
-                      String[] wds = {" eu "," tu "," noi "," nu "," este "," sunt "," pentru "," cu "," că "," daca "," dacă "," atunci "};
-                      for(String w: wds) if(pad.contains(w)) score += 3;
-                  } else if("HR".equals(lc) || "SK".equals(lc) || "SL".equals(lc)) {
-                      String[] wds = {" ja "," ti "," mi "," ne "," je "," za "," kako "," sada "," dobro "," prosim "," hvala "};
-                      for(String w: wds) if(pad.contains(w)) score += 2;
-                  }
-                  return score;
-              }
-
-              boolean looksLikeNonFrHuNoise(String text) {
-                  if(text == null) return false;
-                  String locked = selectedPairLanguageCode(text);
-                  if(locked.length() > 0) return false;
-                  String top = code(topLang).toUpperCase(Locale.ROOT);
-                  String bottom = code(bottomLang).toUpperCase(Locale.ROOT);
-                  boolean frHu = (top.equals("FR") && bottom.equals("HU")) || (top.equals("HU") && bottom.equals("FR"));
-                  if(frHu) return true;
-                  return false;
-              }
+              int scoreShortReplyForSelectedLang(String text, String lang) { return 0; }
+              int scoreTextForSelectedLang(String text, String lang) { return 0; }
+              boolean looksLikeNonFrHuNoise(String text) { return false; }
 
               boolean isLikelyNoisyTranscriptBlock(String block) {
                   if(block == null) return true;
-                  String t = block.trim();
+                  String t = cleanTranscriptForSelectedPair(block).trim();
                   if(t.length() == 0) return true;
-                  String lower = " " + t.toLowerCase(Locale.ROOT)
-                          .replaceAll("[^a-záéíóöőúüűàâçèéêëîïôùûüÿñæœß\\s]", " ")
-                          .replaceAll("\\s+", " ").trim() + " ";
-                  int words = lower.trim().length() == 0 ? 0 : lower.trim().split("\\s+").length;
-                  if(words <= 1) return true;
-
-                  int foreignHits = 0;
-                  if(!selectedContains("nl")) {
-                      String[] nl = {" het ", " een ", " wel ", " geen ", " niet ", " maar ", " jullie ", " reserver ", " gereserveerd ", "wasergadas"};
-                      for(String w: nl) if(lower.contains(w)) foreignHits++;
-                  }
-                  if(!selectedContains("de")) {
-                      String[] de = {" ich ", " nicht ", " und ", " oder ", " danke ", " bitte ", " aber ", " wasser "};
-                      for(String w: de) if(lower.contains(w)) foreignHits++;
-                  }
-                  if(!selectedContains("en")) {
-                      String[] en = {" allò ", " hello ", " that ", " this ", " would ", " reserved ", " microphone "};
-                      for(String w: en) if(lower.contains(w)) foreignHits++;
-                  }
-                  if(foreignHits >= 3) return true;
-                  if(words < 6 && foreignHits >= 1) return true;
+                  // V235: nincs idegen nyelves tiltólista az élő útban.
                   return false;
               }
 
@@ -2180,7 +2081,7 @@ jobs:
                       int min = Math.min(h.length(), old.length());
                       int max = Math.max(h.length(), old.length());
 
-                      // V233: gyors mondatzárásnál a delta és a completed/flush sokszor átfedő blokkot ad.
+                      // V235: gyors mondatzárásnál a delta és a completed/flush sokszor átfedő blokkot ad.
                       // Nem hanghoz nyúlunk, csak az utolsó blokkokkal való szöveg-átfedést fogjuk meg.
                       if(min >= 10 && (h.contains(old) || old.contains(h)) && (min * 100 / Math.max(1, max)) >= 58) return true;
 
@@ -2242,7 +2143,7 @@ jobs:
                   String t = s.trim();
                   if(t.length() == 0) return -1;
 
-                  // V233: egyszerűsített, egyirányú blokkhatár-döntés.
+                  // V235: egyszerűsített, egyirányú blokkhatár-döntés.
                   // Delta közben csak biztos mondatvégnél vagy természetes hosszú vágásnál adunk ki.
                   // Completed/idle esetén viszont nincs nyelvtani várakoztatás: ami bent maradt,
                   // azt kiadjuk. A rövid puffer nem ragadhat bent és nem kell szótár hozzá.
@@ -2265,7 +2166,7 @@ jobs:
                   int words = t.split("\\s+").length;
                   long sinceDelta = liveLastTranscriptDeltaAt > 0L ? System.currentTimeMillis() - liveLastTranscriptDeltaAt : 99999L;
 
-                  // V233: 1-5 szavas puffer esetén nincs szótár, nincs nyelvtani kapu,
+                  // V235: 1-5 szavas puffer esetén nincs szótár, nincs nyelvtani kapu,
                   // nincs "hátha majd mondat lesz" várakozás. A meglévő completed/idle esemény
                   // kiadja, ami bent van. Ez javítja az igen/nem/működik jellegű beragadást.
                   if(words <= 5) return s.length();
@@ -2311,7 +2212,7 @@ jobs:
               }
 
               boolean shouldFlushShortIdleBlock(String s) {
-                  // V233: kompatibilitási segédfüggvény. A blokkzárás fő döntése már a
+                  // V235: kompatibilitási segédfüggvény. A blokkzárás fő döntése már a
                   // findLiveBlockCut(flushAll) ágban történik, ezért itt nincs szótár és nincs
                   // nyelvtani visszatartás. Rövid puffer idle esetén kiadható.
                   if(s == null) return false;
@@ -2324,7 +2225,7 @@ jobs:
               }
 
               boolean shouldForceFlushWholeBuffer(String s) {
-                  // V233: nincs külön nyelvtani kapu. Completed/idle esetén a központi
+                  // V235: nincs külön nyelvtani kapu. Completed/idle esetén a központi
                   // safeWholeBufferFlushCut dönt, ezért ez csak régi hívásokhoz marad egyszerűen.
                   return s != null && s.trim().length() > 0;
               }
@@ -2364,7 +2265,7 @@ jobs:
                   int preferredEnd = Math.min(len, 185);
                   int preferredStart = Math.min(len, 75);
 
-                  // V233: V233 alap, de kevésbé engedékeny hosszú blokkoknál.
+                  // V235: V235 alap, de kevésbé engedékeny hosszú blokkoknál.
                   // Nem audio, nem VAD, nem időzítő. Csak a már beérkezett szöveg stabil elejét vágjuk le,
                   // hogy hosszú folyamatos beszédnél se legyen egyetlen óriás blokk.
 
@@ -2375,7 +2276,7 @@ jobs:
                   });
                   if(cut > 0) return cut;
 
-                  // 2) Feltételes / következő gondolat kezdete. V233-höz képest kicsit bátrabb,
+                  // 2) Feltételes / következő gondolat kezdete. V235-höz képest kicsit bátrabb,
                   // mert a beszélt nyelvben sokszor nincs pont, csak új gondolat kezdődik.
                   cut = lastConnectorCut(lower, 90, preferredEnd, new String[]{
                           ", és akkor ", ", akkor ", ", hogyha ", ", ha ", ", amikor ",
@@ -2445,7 +2346,7 @@ jobs:
 
               String cleanTranscriptForSelectedPair(String text) {
                   if(text == null) return "";
-                  // V233: ez továbbra sem saját nagy nyelvfelismerő. Csak biztonsági tisztítás:
+                  // V235: ez továbbra sem saját nagy nyelvfelismerő. Csak biztonsági tisztítás:
                   // idegen írásrendszeres STT-szemét nem kerülhet ki az ablakokba vagy fordításba.
                   String x = text.replaceAll("[^A-Za-z0-9\\u00C0-\\u024F\\p{Punct}\\s]", " ");
                   return x.replaceAll("\\s+", " ").trim();
@@ -2457,15 +2358,8 @@ jobs:
               }
 
               boolean looksLikeObviousThirdLanguageNoise(String text) {
-                  if(text == null) return false;
-                  String x = text.toLowerCase(Locale.ROOT).replaceAll("[^a-záéíóöőúüűàâçèéêëîïôùûüÿñæœß\\s]", " ");
-                  x = " " + x.replaceAll("\\s+", " ").trim() + " ";
-                  // Csak nagyon tipikus, korábbi tesztekben is látott hamis kezdéseket fogunk meg.
-                  // Nem általános szótárazás, nem új nyelvdetektor.
-                  if(!selectedContains("nl") && (x.contains(" microfoon") || x.contains(" microfoonprobe") || x.contains(" foneprover"))) return true;
-                  if(!selectedContains("en") && (x.contains(" that s ") || x.contains(" that's ") || x.contains(" like it was ") || x.contains(" like it "))) return true;
-                  if(!selectedContains("de") && (x.contains(" danke ") || x.contains(" bitte ") || x.contains(" nicht "))) return true;
-                  if(!selectedContains("tr") && (x.contains(" kazan ") || x.contains(" büyük ") || x.contains(" odul ") || x.contains(" ödül ") || x.contains(" ütü ") || x.contains(" her zaman "))) return true;
+                  // V235: harmadik nyelv szótáras tiltólista kikapcsolva az élő fordításban.
+                  // A két nyelvre zárást a liveBlockInstructions/pairRules és a SOURCE_LANG feldolgozás végzi.
                   return false;
               }
 
@@ -2479,7 +2373,7 @@ jobs:
 
               boolean isUsableLiveTriple(String[] trp) {
                   if(trp == null || trp.length < 3) return false;
-                  // V233: SOURCE_LANG hiánya vagy pontatlan címkéje nem dobhatja el a fordítást.
+                  // V235: SOURCE_LANG hiánya vagy pontatlan címkéje nem dobhatja el a fordítást.
                   // A forrásoldal ilyenkor a meglévő blokk oldala marad.
                   String original = trp[1] == null ? "" : cleanTranscriptForSelectedPair(trp[1]).trim();
                   String translation = trp[2] == null ? "" : cleanTranscriptForSelectedPair(cleanOneBlockTranslation(trp[2])).trim();
@@ -2501,7 +2395,7 @@ jobs:
               }
 
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
-                  // V233: gyors visszajelzés. A nyers STT azonnal látható az aktuális oldalon,
+                  // V235: gyors visszajelzés. A nyers STT azonnal látható az aktuális oldalon,
                   // ugyanakkor pendingSourceText-ben is megmarad, hogy a valid AI-válasz után
                   // a blokk átkerülhessen a valódi SOURCE_LANG szerinti oldalra.
                   if(isRecentlyDisplayedSourceDuplicate(sourceIsTop, original)) return -1;
@@ -2536,7 +2430,7 @@ jobs:
 
                       int min = Math.min(h.length(), oh.length());
                       int max = Math.max(h.length(), oh.length());
-                      // V233: csak majdnem teljes azonosságot fogunk meg.
+                      // V235: csak majdnem teljes azonosságot fogunk meg.
                       // A hasonló, de eltérő blokk ne essen ki, mert az beszédvesztéshez vezetett.
                       if(min >= 24 && (h.contains(oh) || oh.contains(h)) && (min * 100 / Math.max(1, max)) >= 92) return true;
                   }
@@ -2545,7 +2439,7 @@ jobs:
 
               void processNextLiveTranslation() {
                   clipboardResponseMode = false;
-                  // V233: a live fordítást nem szabad a globális responseInProgress flag miatt megállítani.
+                  // V235: a live fordítást nem szabad a globális responseInProgress flag miatt megállítani.
                   // A Realtime transcription közben nem fordítási válasz, ezért ez a flag itt könnyen beragadhat.
                   // Élő beszédnél csak a saját liveTranslateMode zárja ki a párhuzamos blokkfordítást.
                   if(liveTranslateMode) return;
@@ -2636,7 +2530,7 @@ jobs:
                           translation = trp[2] == null ? "" : trp[2];
                           sourceIsTop = sourceIsTopFromAi(sourceLang, b.sourceTop);
                       } else {
-                          // V233: túl szigorú AI-válasz szűrés kivéve.
+                          // V235: túl szigorú AI-válasz szűrés kivéve.
                           // Ha a modell nem címkézett hármas blokkot ad, de használható fordított szöveg jött,
                           // azt a meglévő forrásblokk fordításaként fogadjuk el. Nem indítunk új blokkot, nem újrapróbálunk végtelenül.
                           translation = out;
@@ -2680,7 +2574,7 @@ jobs:
                   }
                   pendingLiveBlockId = -1;
                   liveTranslateMode = false;
-                  // V233: nem indítjuk azonnal a következő live fordítást itt.
+                  // V235: nem indítjuk azonnal a következő live fordítást itt.
                   // Megvárjuk a response.done eseményt, mert a text.done után
                   // a szerver oldalon még lehet aktív válasz, és a következő
                   // response.create különben megakaszthatja a sort.
@@ -2706,7 +2600,7 @@ jobs:
                       return;
                   }
 
-                  // V233: állapot nélküli / késve érkező AI-válasz nem hibaüzenet a felhasználónak.
+                  // V235: állapot nélküli / késve érkező AI-válasz nem hibaüzenet a felhasználónak.
                   // Nem hozunk létre belőle új blokkot, de nem is zavarjuk meg az aktív mikrofonos munkát toasttal.
                   android.util.Log.w("Fordito", "Állapot nélküli AI-válasz figyelmen kívül hagyva: " + out);
                   if(streaming) state.setText("mikrofon aktív");
@@ -2961,7 +2855,7 @@ jobs:
                   String text = title + "\n" + sub;
                   SpannableString ss = new SpannableString(text);
 
-                  // V233: olvashatóbb tolmács mód gomb.
+                  // V235: olvashatóbb tolmács mód gomb.
                   // A felső sor kisebb, az állapot nagyobb és félkövér.
                   ss.setSpan(new AbsoluteSizeSpan(13, true), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   ss.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
@@ -3522,7 +3416,7 @@ jobs:
                   }
               }
               String clipboardTargetCode(String text) {
-                  // V233: vágólapos ág saját iránylogikája.
+                  // V235: vágólapos ág saját iránylogikája.
                   // Magyar bemenet: a másik (nem HU) beállított nyelvre fordít.
                   // Idegen bemenet: mindig magyarra fordít, a középső mező üres marad.
                   String bottom = code(bottomLang);
@@ -3552,8 +3446,8 @@ jobs:
                       if("ìòàèù".indexOf(ch) >= 0) it += 2;
                   }
                   String pad = " " + t.replaceAll("[^\\p{L}]+", " ") + " ";
-                  String[] huWords = {" hogy "," vagy "," nem "," igen "," ezt "," azt "," akkor "," most "," lehet "," kérlek "," szeretném "," miért "," mert "," tehát "," van "," lesz "," volt "};
-                  String[] frWords = {" je "," tu "," vous "," nous "," est "," pas "," que "," pour "," avec "," dans "," une "," des "," les "," mais "," donc "," alors "," pourquoi "};
+                  String[] huWords = {" hogy "," vagy "," nem "," igen "," te "," én "," en "," mi "," mit "," mire "," ki "," hol "," mikor "," hallasz "," hallod "," ezt "," azt "," akkor "," most "," lehet "," kérlek "," szeretném "," miért "," mert "," tehát "," van "," lesz "," volt "};
+                  String[] frWords = {" je "," tu "," vous "," nous "," oui "," non "," quoi "," qui "," où "," ou "," quand "," est "," pas "," que "," pour "," avec "," dans "," une "," des "," les "," mais "," donc "," alors "," pourquoi "};
                   String[] deWords = {" ich "," du "," sie "," wir "," nicht "," und "," oder "," dass "," mit "," für "," ein "," eine "," der "," die "," das "," warum "};
                   String[] enWords = {" i "," you "," we "," they "," the "," and "," or "," not "," with "," for "," this "," that "," why "," because "};
                   String[] itWords = {" io "," tu "," noi "," non "," che "," per "," con "," una "," gli "," sono "," perché "," allora "};
@@ -4312,7 +4206,7 @@ jobs:
                   showCenteredMenu(top ? "Felső nyelv" : "Alsó nyelv", labels, (d,w) -> {
                       if(top) topLang = langs[w][2];
                       else bottomLang = langs[w][2];
-                      // V233: nyelvválasztás nem jelent forrásablak-választást.
+                      // V235: nyelvválasztás nem jelent forrásablak-választást.
                       // A beszéd következő transcript blokkjánál automatikusan döntünk a felismert nyelv alapján.
                       topBox.clearFocus();
                       bottomBox.clearFocus();
@@ -4392,7 +4286,7 @@ jobs:
               }
 
               void setLiveUiLocked(boolean locked) {
-                  // V233: élő mikrofon alatt nem zárjuk a kezelőfelületet.
+                  // V235: élő mikrofon alatt nem zárjuk a kezelőfelületet.
                   // A háttérmód miatt a véletlen nyomkodás elleni régi védelemre nincs szükség;
                   // csak a mikrofon gomb színe/szövege jelzi az aktív állapotot.
                   uiLockedForLive = false;
@@ -4436,7 +4330,7 @@ jobs:
               }
 
               void stopWithFinalizeDelay() {
-                  // V233: a mikrofon leállítása nem tartja lezárva a menüt/fordítás gombot.
+                  // V235: a mikrofon leállítása nem tartja lezárva a menüt/fordítás gombot.
                   // Meghagyjuk kompatibilitásból, de hosszú 1.8 mp várakozás nélkül.
                   try { stop(); } catch(Exception ignored) {}
                   finalizingStop = false;
@@ -4539,12 +4433,12 @@ jobs:
 
                       clipboardSpeechIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-                      // V233: stabil visszaállás. A vágólapos Google diktálás fixen magyar.
+                      // V235: stabil visszaállás. A vágólapos Google diktálás fixen magyar.
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hu-HU");
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hu-HU");
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, true);
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-                      // V233: a Google/Android beszédfelismerő ne csillagozza ki a sértőnek ítélt szavakat.
+                      // V235: a Google/Android beszédfelismerő ne csillagozza ki a sértőnek ítélt szavakat.
                       // A nyers felismerési eredmény változtatás nélkül jusson tovább.
                       if(Build.VERSION.SDK_INT >= 33) {
                           clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_MASK_OFFENSIVE_WORDS, false);
@@ -4746,14 +4640,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V233.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V233.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V235.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V235.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V233
+          name: V235
           path: |
             artifact/*.apk
             artifact/*.aab
