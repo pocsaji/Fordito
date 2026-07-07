@@ -1,4 +1,4 @@
-name: Build Android APK V276
+name: Build Android APK V277
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 276; versionName = "27.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 277; versionName = "27.7" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V276" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V277" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -271,6 +271,7 @@ jobs:
               boolean firstSpeechBlockReleased = false;
               int pendingLiveBlockId = -1;
               final ArrayDeque<Integer> liveTranslateQueue = new ArrayDeque<>();
+              int liveSourceBlockSeq = 0;
               final HashSet<String> recentLiveBlockHashes = new HashSet<>();
               final ArrayDeque<String> recentLiveBlockHashOrder = new ArrayDeque<>();
               String pendingManualText = "";
@@ -290,6 +291,7 @@ jobs:
                   boolean translatedOk = false;
                   int retryCount = 0;
                   boolean ttsSpoken = false;
+                  int liveSeq = 0;
               }
 
               final ArrayList<TextBlock> textBlocks = new ArrayList<>();
@@ -495,7 +497,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V276");
+                  TextView title = label("Fordito_V277");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -809,6 +811,11 @@ jobs:
                       TextBlock b = textBlocks.get(i);
                       String bt = b.topText == null ? "" : b.topText;
                       String bb = b.bottomText == null ? "" : b.bottomText;
+                      if(b.liveSeq > 0) {
+                          String pref = String.format(Locale.ROOT, "%03d | ", b.liveSeq);
+                          if(bt.trim().length() > 0) bt = pref + bt;
+                          if(bb.trim().length() > 0) bb = pref + bb;
+                      }
                       if(bt.trim().length() == 0 && bb.trim().length() == 0) continue;
 
                       if(visibleIndex > 0) {
@@ -1621,6 +1628,11 @@ jobs:
                   }
               }
 
+              String stripDisplayBlockNumbers(String s) {
+                  if(s == null) return "";
+                  return s.replaceAll("(?m)^\\s*\\d{3}\\s*\\|\\s*", "").trim();
+              }
+
               void manualTranslate() {
                   if(uiLockedForLive || finalizingStop) return;
                   EditText source = manualTopSource ? topBox : bottomBox;
@@ -1630,7 +1642,7 @@ jobs:
                       imm.hideSoftInputFromWindow(source.getWindowToken(), 0);
                   } catch(Exception ignored) {}
 
-                  String sourceText = source.getText().toString().trim();
+                  String sourceText = stripDisplayBlockNumbers(source.getText().toString()).trim();
                   if(sourceText.length() == 0) {
                       Toast.makeText(this, manualTopSource ? "A felső ablak üres." : "Az alsó ablak üres.", Toast.LENGTH_LONG).show();
                       return;
@@ -1793,7 +1805,8 @@ jobs:
                       int id = addSourceOnlyBlock(sourceGuessTop, b);
                       if(id < 0) continue;
                       firstSpeechBlockReleased = true;
-                      liveTranslateQueue.add(id);
+                      // V277 tesztmód: automatikus élő fordítás kikapcsolva.
+                      // A kézi FORDÍT gomb változatlanul használható.
                       releasedCount++;
                       lastLiveBlockReleasedAt = System.currentTimeMillis();
                   }
@@ -1801,7 +1814,7 @@ jobs:
                       // V240: sikeres kiírás után a régi idle flush már nem zárhat ugyanarra.
                       liveIdleFlushToken++;
                   }
-                  processNextLiveTranslation();
+                  // V277: nincs automatikus élő fordítási hívás.
                   return releasedCount;
               }
 
@@ -2409,6 +2422,7 @@ jobs:
                   if(isRecentlyDisplayedSourceDuplicate(sourceIsTop, original)) return -1;
 
                   TextBlock b = new TextBlock();
+                  b.liveSeq = ++liveSourceBlockSeq;
                   b.sourceTop = sourceIsTop;
                   b.translatedOk = false;
                   b.pendingSourceText = original == null ? "" : original.trim();
@@ -4658,8 +4672,8 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V276.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V276.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V277.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V277.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
