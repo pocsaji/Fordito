@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 268; versionName = "26.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 269; versionName = "26.9" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V268" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V269" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -187,7 +187,7 @@ jobs:
           public class MainActivity extends Activity {
               static final int CLIPBOARD_SPEECH_REQUEST = 7301;
               TextView state;
-              EditText topBox, bottomBox;
+              EditText rawLiveBox, preparedLiveBox, topBox, bottomBox;
               SpeechRecognizer clipboardSpeechRecognizer;
               Intent clipboardSpeechIntent;
               boolean clipboardSpeechActive = false;
@@ -546,11 +546,12 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V268");
+                  TextView title = label("V269");
+                  title.setAlpha(0.45f);
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
-                  bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
-                  bar.addView(state, new LinearLayout.LayoutParams(0,42,1));
+                  bar.addView(title, new LinearLayout.LayoutParams(0,30,1));
+                  bar.addView(state, new LinearLayout.LayoutParams(0,30,1));
                   root.addView(bar);
           
                   LinearLayout langRow = row();
@@ -562,6 +563,15 @@ jobs:
                   langRow.addView(bottomLangBtn, new LinearLayout.LayoutParams(0,85,1));
                   root.addView(langRow);
           
+                  rawLiveBox = box("");
+                  preparedLiveBox = box("");
+                  rawLiveBox.setEnabled(false);
+                  preparedLiveBox.setEnabled(false);
+                  rawLiveBox.setTextSize(14);
+                  preparedLiveBox.setTextSize(14);
+                  root.addView(rawLiveBox, new LinearLayout.LayoutParams(-1,72));
+                  root.addView(preparedLiveBox, new LinearLayout.LayoutParams(-1,72));
+
                   topBox = box("FELSŐ ABLAK — átirat / fordítás");
                   bottomBox = box("ALSÓ ABLAK — átirat / fordítás");
                   manualEditMode=true; setManualEditMode(true);
@@ -1024,6 +1034,14 @@ jobs:
                   if(!hasKey()) { showApi(); return; }
                   if(withAudio && Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reqMic(); return; }
                   if(withAudio) {
+                      // V269: tiszta élő munkamenet. A kijelzett beszélgetést és menübeállításokat nem törli.
+                      try { if(rec != null) rec.stop(); } catch(Exception ignored) {}
+                      try { if(ws != null) ws.cancel(); } catch(Exception ignored) {}
+                      connected = false; streaming = false; responseInProgress = false; liveAwaitingResponseDone = false;
+                      pendingLiveBlockId = -1; liveTranslateMode = false; pendingOutput = ""; liveTranscriptBuffer = "";
+                      liveTranslateQueue.clear(); orderedSttResults.clear(); resetForcedAudioSegmentState();
+                      if(rawLiveBox != null) rawLiveBox.setText("");
+                      if(preparedLiveBox != null) preparedLiveBox.setText("");
                       String startTopCode = apiCode(topLang);
                       String startBottomCode = apiCode(bottomLang);
                       if(startTopCode.length() == 0 || startBottomCode.length() == 0 || startTopCode.equals(startBottomCode)) {
@@ -1363,6 +1381,7 @@ jobs:
                   boolean ok = false;
               }
           
+              // V269: egyetlen STT-gazda. Nincs két párhuzamos felismerés, nincs logprob-verseny.
               void transcribeSelectedPairInParallel(byte[] pcm) {
                   final String topCode = apiCode(topLang);
                   final String bottomCode = apiCode(bottomLang);
@@ -1370,18 +1389,15 @@ jobs:
                   synchronized(dualSttStateLock) { generation = sttRunGeneration; }
                   transcribeSelectedPairInParallel(pcm, topCode, bottomCode, generation);
               }
-          
+
               void transcribeSelectedPairInParallel(byte[] pcm, String topCode, String bottomCode, long runGeneration) {
                   if(pcm == null || pcm.length < minHybridCommitBytes()) return;
                   if(topCode.length() == 0 || bottomCode.length() == 0 || topCode.equals(bottomCode)) return;
-          
                   final long blockSeq;
                   final long blockTimestampMs = System.currentTimeMillis();
                   synchronized(dualSttStateLock) {
                       if(runGeneration != sttRunGeneration || !streaming) return;
                       long outstanding = nextSttBlockSeq - nextSttEmitSeq;
-                      // V268: az érkező blokkot is beleszámoljuk. Így az 5. elmaradó blokk már hiba,
-                      // nem csak a 6. próbálkozásnál vesszük észre.
                       if(outstanding + 1 >= MAX_STT_OUTSTANDING_BLOCKS) {
                           runOnUiThread(() -> failSttPipeline("Rendszerhiba: a beszédfelismerés 5 blokkal lemaradt."));
                           return;
@@ -1389,26 +1405,16 @@ jobs:
                       dualSttBlocksInFlight++;
                       blockSeq = nextSttBlockSeq++;
                   }
-          
                   final byte[] wav = pcmToWav24kMono(pcm);
                   try {
-                      CompletableFuture<SttCandidate> topFuture = CompletableFuture.supplyAsync(
-                          () -> transcribeForcedLanguage(wav, topCode, true), dualSttExec);
-                      CompletableFuture<SttCandidate> bottomFuture = CompletableFuture.supplyAsync(
-                          () -> transcribeForcedLanguage(wav, bottomCode, false), dualSttExec);
-          
-                      topFuture.thenCombine(bottomFuture, (ca, cb) -> {
-                          if(ca.ok && cb.ok) return ca.score >= cb.score ? ca : cb;
-                          if(ca.ok) return ca;
-                          if(cb.ok) return cb;
-                          return null;
-                      }).whenComplete((chosen, error) -> finishParallelSttBlock(
-                          blockSeq, blockTimestampMs, chosen, error, runGeneration, topCode, bottomCode));
+                      CompletableFuture.supplyAsync(() -> transcribeSingleRaw(wav), dualSttExec)
+                          .whenComplete((chosen, error) -> finishParallelSttBlock(
+                              blockSeq, blockTimestampMs, chosen, error, runGeneration, topCode, bottomCode));
                   } catch(RejectedExecutionException e) {
                       finishParallelSttBlock(blockSeq, blockTimestampMs, null, e, runGeneration, topCode, bottomCode);
                   }
               }
-          
+
               void finishParallelSttBlock(long blockSeq, long blockTimestampMs, SttCandidate chosen, Throwable error,
                                           long runGeneration, String topCode, String bottomCode) {
                   ArrayList<OrderedSttResult> ready = new ArrayList<>();
@@ -1466,17 +1472,14 @@ jobs:
                   }
               }
           
-              SttCandidate transcribeForcedLanguage(byte[] wav, String lang, boolean sourceTop) {
+              SttCandidate transcribeSingleRaw(byte[] wav) {
                   SttCandidate out = new SttCandidate();
-                  out.sourceTop = sourceTop;
                   try {
                       RequestBody fileBody = RequestBody.create(wav, MediaType.parse("audio/wav"));
                       MultipartBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
                           .addFormDataPart("file", "speech.wav", fileBody)
                           .addFormDataPart("model", transcriptionModel)
-                          .addFormDataPart("language", lang)
                           .addFormDataPart("response_format", "json")
-                          .addFormDataPart("include[]", "logprobs")
                           .build();
                       Request req = new Request.Builder().url("https://api.openai.com/v1/audio/transcriptions")
                           .addHeader("Authorization", "Bearer " + apiKey.trim())
@@ -1485,27 +1488,25 @@ jobs:
                           if(!resp.isSuccessful() || resp.body() == null) return out;
                           JSONObject root = new JSONObject(resp.body().string());
                           out.text = root.optString("text", "").trim();
-                          if(out.text.length() == 0) return out;
-                          JSONArray lp = root.optJSONArray("logprobs");
-                          double sum = 0.0; int n = 0;
-                          if(lp != null) for(int i=0;i<lp.length();i++) {
-                              JSONObject x = lp.optJSONObject(i);
-                              if(x != null && x.has("logprob")) { sum += x.optDouble("logprob", -20.0); n++; }
-                          }
-                          out.score = n > 0 ? sum / n : -1000.0;
-                          out.ok = true;
+                          out.ok = out.text.length() > 0;
                           return out;
                       }
                   } catch(Exception ignored) { return out; }
               }
-          
+
               void acceptParallelSttWinner(SttCandidate c, String pairTopCode, String pairBottomCode) {
                   if(c == null || !c.ok) return;
-                  String text = cleanTranscriptForSelectedPair(c.text).trim();
-                  text = normalizeAndDeduplicateLiveBlock(text);
+                  final String raw = c.text == null ? "" : c.text.trim();
+                  if(raw.length() == 0) return;
+                  if(rawLiveBox != null) rawLiveBox.setText(raw);
+                  String text = normalizeAndDeduplicateLiveBlock(raw);
                   if(text.length() == 0) return;
-                  int id = addSourceOnlyBlock(c.sourceTop, text, pairTopCode, pairBottomCode);
-                  if(id < 0) return;
+                  TextBlock b = new TextBlock();
+                  b.pendingSourceText = text;
+                  b.pairTopCode = pairTopCode == null ? "" : pairTopCode;
+                  b.pairBottomCode = pairBottomCode == null ? "" : pairBottomCode;
+                  textBlocks.add(b);
+                  int id = textBlocks.size() - 1;
                   firstSpeechBlockReleased = true;
                   liveTranslateQueue.add(id);
                   processNextLiveTranslation();
@@ -2970,6 +2971,7 @@ jobs:
                       }
           
                       original = original == null ? "" : cleanTranscriptForSelectedPair(original).trim();
+                      if(preparedLiveBox != null && original.length() > 0) preparedLiveBox.setText(original);
                       translation = cleanOneBlockTranslation(translation);
           
                       if(original.length() == 0 || translation.length() == 0) {
@@ -3203,11 +3205,6 @@ jobs:
                   addMenuButton(box, "Lebegő gomb", floatingTranslatorLabel(), floatingTranslatorEnabled, v -> {
                       toggleFloatingTranslator();
                       refreshMenuButton((Button)v, "Lebegő gomb", floatingTranslatorLabel(), floatingTranslatorEnabled);
-                      updateButtons();
-                  });
-                  addMenuButton(box, "Tükör mód", displayModeLabel(), mirrorBottomMode, v -> {
-                      toggleDisplayModeQuick();
-                      refreshMenuButton((Button)v, "Tükör mód", displayModeLabel(), mirrorBottomMode);
                       updateButtons();
                   });
                   addMenuButton(box, "Fordítási beállítások", translationMenuLabel(), false, v -> translationMenu());
@@ -5133,8 +5130,8 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V268.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V268.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V269.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V269.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
