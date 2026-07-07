@@ -1,4 +1,4 @@
-name: Build Android APK V277
+name: Build Android APK V279
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ jobs:
 
           cat > settings.gradle.kts <<'EOF'
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
-          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral(); maven { url = uri("https://jitpack.io") } } }
           rootProject.name = "ForditoKonzol"
           include(":app")
           EOF
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 277; versionName = "27.7" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 279; versionName = "27.9" }
 
               signingConfigs {
                   create("release") {
@@ -60,6 +60,8 @@ jobs:
           dependencies {
               implementation("com.squareup.okhttp3:okhttp:4.12.0")
               implementation("org.json:json:20240303")
+              implementation("com.github.gkonovalov.android-vad:webrtc:2.0.10")
+              implementation("com.github.gkonovalov.android-vad:silero:2.0.10")
           }
           EOF
 
@@ -84,7 +86,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V277" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V279" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -181,6 +183,7 @@ jobs:
           import org.json.*;
           import java.util.*;
           import java.util.concurrent.*;
+          import java.io.*;
           import okhttp3.*;
 
           public class MainActivity extends Activity {
@@ -228,6 +231,10 @@ jobs:
               volatile boolean pendingAudioStartAfterSessionUpdate = false;
               final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
               int preRollAudioBytes = 0;
+              String vadEngineMode = "server"; // server / webrtc / silero / raw
+              Object liveVadInstance = null;
+              String liveVadInstanceMode = "";
+              ByteArrayOutputStream vadFrameBuffer = new ByteArrayOutputStream();
               boolean mirrorBottomMode = false;
               boolean backgroundScreenAllowed = false;
               boolean floatingTranslatorEnabled = false;
@@ -370,6 +377,13 @@ jobs:
                   {"Erős – zajos környezet","gate_high"}
               };
 
+              final String[][] vadEngineModes = {
+                  {"Realtime saját VAD", "server"},
+                  {"WebRTC VAD", "webrtc"},
+                  {"Silero VAD", "silero"},
+                  {"VAD nélkül / nyers teszt", "raw"}
+              };
+
               final String[][] audioSourceModes = {
                   {"Beszédfelismerés / ajánlott","recognition"},
                   {"Kommunikáció / régi","communication"},
@@ -423,6 +437,7 @@ jobs:
                   vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "xhigh");
                   micGateMode = sp.getString("micGateMode", "sensitive");
+                  vadEngineMode = sp.getString("vadEngineMode", "server");
                   audioSourceMode = sp.getString("audioSourceMode", "recognition");
                   androidEffectsMode = sp.getString("androidEffectsMode", "recommended");
                   openAiNoiseMode = sp.getString("openAiNoiseMode", "off");
@@ -474,6 +489,7 @@ jobs:
                     .putString("vadMode", vadMode)
                     .putString("delayMode", delayMode)
                     .putString("micGateMode", micGateMode)
+                    .putString("vadEngineMode", vadEngineMode)
                     .putString("audioSourceMode", audioSourceMode)
                     .putString("androidEffectsMode", androidEffectsMode)
                     .putString("openAiNoiseMode", openAiNoiseMode)
@@ -497,7 +513,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V277");
+                  TextView title = label("Fordito_V279");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1202,6 +1218,7 @@ jobs:
 
 
               String micGateLabel() { return labelOf(micGateModes, micGateMode); }
+              String vadEngineLabel() { return labelOf(vadEngineModes, vadEngineMode); }
               String audioSourceLabel() { return labelOf(audioSourceModes, audioSourceMode); }
               String androidEffectsLabel() { return labelOf(androidEffectsModes, androidEffectsMode); }
               String openAiNoiseLabel() { return labelOf(openAiNoiseModes, openAiNoiseMode); }
@@ -1278,6 +1295,121 @@ jobs:
                       preRollAudioBytes = 0;
                   }
                   return out;
+              }
+
+              void closeExternalVad() {
+                  try {
+                      if(liveVadInstance instanceof AutoCloseable) ((AutoCloseable)liveVadInstance).close();
+                      else if(liveVadInstance != null) liveVadInstance.getClass().getMethod("close").invoke(liveVadInstance);
+                  } catch(Exception ignored) {}
+                  liveVadInstance = null;
+                  liveVadInstanceMode = "";
+                  vadFrameBuffer.reset();
+              }
+
+              Object enumConst(String cls, String name) throws Exception {
+                  Class<?> c = Class.forName(cls);
+                  return Enum.valueOf((Class<Enum>)c.asSubclass(Enum.class), name);
+              }
+
+              Object buildVadByReflection(String mode) throws Exception {
+                  if("webrtc".equals(mode)) {
+                      Class<?> vadClass = Class.forName("com.konovalov.vad.webrtc.Vad");
+                      Object b = vadClass.getMethod("builder").invoke(null);
+                      b.getClass().getMethod("setSampleRate", Class.forName("com.konovalov.vad.webrtc.config.SampleRate")).invoke(b, enumConst("com.konovalov.vad.webrtc.config.SampleRate", "SAMPLE_RATE_16K"));
+                      b.getClass().getMethod("setFrameSize", Class.forName("com.konovalov.vad.webrtc.config.FrameSize")).invoke(b, enumConst("com.konovalov.vad.webrtc.config.FrameSize", "FRAME_SIZE_320"));
+                      b.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.webrtc.config.Mode")).invoke(b, enumConst("com.konovalov.vad.webrtc.config.Mode", "VERY_AGGRESSIVE"));
+                      b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, 300);
+                      b.getClass().getMethod("setSpeechDurationMs", int.class).invoke(b, 50);
+                      return b.getClass().getMethod("build").invoke(b);
+                  }
+                  if("silero".equals(mode)) {
+                      Class<?> vadClass = Class.forName("com.konovalov.vad.silero.Vad");
+                      Object b = vadClass.getMethod("builder").invoke(null);
+                      b.getClass().getMethod("setContext", android.content.Context.class).invoke(b, this);
+                      b.getClass().getMethod("setSampleRate", Class.forName("com.konovalov.vad.silero.config.SampleRate")).invoke(b, enumConst("com.konovalov.vad.silero.config.SampleRate", "SAMPLE_RATE_16K"));
+                      b.getClass().getMethod("setFrameSize", Class.forName("com.konovalov.vad.silero.config.FrameSize")).invoke(b, enumConst("com.konovalov.vad.silero.config.FrameSize", "FRAME_SIZE_512"));
+                      b.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.silero.config.Mode")).invoke(b, enumConst("com.konovalov.vad.silero.config.Mode", "NORMAL"));
+                      b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, 300);
+                      b.getClass().getMethod("setSpeechDurationMs", int.class).invoke(b, 50);
+                      return b.getClass().getMethod("build").invoke(b);
+                  }
+                  return null;
+              }
+
+              boolean ensureExternalVadReady() {
+                  if(!"webrtc".equals(vadEngineMode) && !"silero".equals(vadEngineMode)) return false;
+                  if(liveVadInstance != null && vadEngineMode.equals(liveVadInstanceMode)) return true;
+                  closeExternalVad();
+                  try {
+                      liveVadInstance = buildVadByReflection(vadEngineMode);
+                      liveVadInstanceMode = vadEngineMode;
+                      return liveVadInstance != null;
+                  } catch(Exception e) {
+                      final String msg = "VAD nem indult: " + vadEngineMode;
+                      runOnUiThread(() -> state.setText(msg));
+                      vadEngineMode = "server";
+                      save();
+                      return false;
+                  }
+              }
+
+              byte[] downsample24kTo16kPcm16(byte[] data, int len) {
+                  if(data == null || len < 6) return new byte[0];
+                  int inSamples = len / 2;
+                  int outSamples = (inSamples * 2) / 3;
+                  byte[] out = new byte[outSamples * 2];
+                  for(int i=0;i<outSamples;i++) {
+                      int srcSample = (i * 3) / 2;
+                      int si = srcSample * 2;
+                      int oi = i * 2;
+                      if(si + 1 >= len) break;
+                      out[oi] = data[si];
+                      out[oi+1] = data[si+1];
+                  }
+                  return out;
+              }
+
+              boolean vadIsSpeechOn16k(byte[] pcm16k) {
+                  if(liveVadInstance == null || pcm16k == null || pcm16k.length == 0) return false;
+                  try {
+                      int frameBytes = "silero".equals(vadEngineMode) ? 1024 : 640; // 16 kHz: Silero 512 samples, WebRTC 320 samples
+                      vadFrameBuffer.write(pcm16k, 0, pcm16k.length);
+                      byte[] all = vadFrameBuffer.toByteArray();
+                      int pos = 0;
+                      boolean speech = false;
+                      while(pos + frameBytes <= all.length) {
+                          byte[] frame = Arrays.copyOfRange(all, pos, pos + frameBytes);
+                          Object r;
+                          try {
+                              r = liveVadInstance.getClass().getMethod("isSpeech", byte[].class).invoke(liveVadInstance, (Object)frame);
+                          } catch(NoSuchMethodException nsme) {
+                              short[] sf = new short[frame.length / 2];
+                              for(int i=0;i<sf.length;i++) {
+                                  int lo = frame[i*2] & 0xff;
+                                  int hi = frame[i*2+1];
+                                  sf[i] = (short)((hi << 8) | lo);
+                              }
+                              r = liveVadInstance.getClass().getMethod("isSpeech", short[].class).invoke(liveVadInstance, (Object)sf);
+                          }
+                          if(Boolean.TRUE.equals(r)) speech = true;
+                          pos += frameBytes;
+                      }
+                      vadFrameBuffer.reset();
+                      if(pos < all.length) vadFrameBuffer.write(all, pos, all.length - pos);
+                      return speech;
+                  } catch(Exception e) {
+                      vadEngineMode = "server";
+                      save();
+                      return false;
+                  }
+              }
+
+              boolean externalVadOverGate(byte[] data, int len) {
+                  if("raw".equals(vadEngineMode)) return true;
+                  if("server".equals(vadEngineMode)) return avgAbsPcm16(data, len) >= micGateThreshold();
+                  if(!ensureExternalVadReady()) return avgAbsPcm16(data, len) >= micGateThreshold();
+                  return vadIsSpeechOn16k(downsample24kTo16kPcm16(data, len));
               }
 
               void sendAudioChunk(byte[] chunk) throws Exception {
@@ -1438,9 +1570,8 @@ jobs:
                                       continue;
                                   }
 
-                                  int threshold = micGateThreshold();
                                   long now = System.currentTimeMillis();
-                                  if(threshold <= 0) {
+                                  if("raw".equals(vadEngineMode)) {
                                       clearPreRollAudio();
                                       voiceSendActive = true;
                                       trailingSilenceOpen = true;
@@ -1449,7 +1580,7 @@ jobs:
                                       continue;
                                   }
 
-                                  boolean overGate = avgAbsPcm16(buf, read) >= threshold;
+                                  boolean overGate = externalVadOverGate(buf, read);
                                   if(overGate) {
                                       if(!voiceSendActive) {
                                           for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr);
@@ -1796,17 +1927,16 @@ jobs:
                       // Alapelv: ha bizonytalan, átengedjük, nem nyeljük el a beszédet.
                       b = normalizeAndDeduplicateLiveBlock(b);
                       if(b.length() == 0) continue;
-                      // V240: nyelvpár-zárás a BEVITELI oldalon.
-                      // A fordító csak akkor kap blokkot, ha az átirat nem tűnik harmadik nyelvű zajnak.
-                      if(!passesSelectedPairInputGate(b)) continue;
-                      // V240: a forrásoldalt először helyben, kizárólag a kiválasztott TOP/BOTTOM
-                      // nyelvpárból döntjük el. Harmadik nyelv nem létezik az élő mikrofonos ágban.
+                      // V279: valódi tolmács mód. A nyers STT blokkot nem zárjuk magyarra és
+                      // nem dobjuk el helyi nyelvi kapuval. A TOP/BOTTOM forrásnyelvet a meglévő
+                      // AI osztályozó + eredeti nyelvű helyreállító + fordító lépés dönti el.
+                      // A helyi oldalbecslés csak ideiglenes kijelzési hely, az AI válasz után
+                      // a blokk a tényleges SOURCE_LANG szerinti oldalra kerül.
                       boolean sourceGuessTop = sourceIsTopBySelectedPair(b, topActive);
                       int id = addSourceOnlyBlock(sourceGuessTop, b);
                       if(id < 0) continue;
                       firstSpeechBlockReleased = true;
-                      // V277 tesztmód: automatikus élő fordítás kikapcsolva.
-                      // A kézi FORDÍT gomb változatlanul használható.
+                      liveTranslateQueue.add(id);
                       releasedCount++;
                       lastLiveBlockReleasedAt = System.currentTimeMillis();
                   }
@@ -1814,7 +1944,9 @@ jobs:
                       // V240: sikeres kiírás után a régi idle flush már nem zárhat ugyanarra.
                       liveIdleFlushToken++;
                   }
-                  // V277: nincs automatikus élő fordítási hívás.
+                  // V279: a blokkok sorrendben kerülnek a meglévő egyetlen live fordítási sorba.
+                  // Egyszerre csak egy blokk fordul; a kézi FORDÍT lehetőség változatlanul megmarad.
+                  if(releasedCount > 0) processNextLiveTranslation();
                   return releasedCount;
               }
 
@@ -3843,13 +3975,15 @@ jobs:
               void noiseMenu() {
                   if(uiLockedForLive || finalizingStop) return;
                   CharSequence[] items = {
+                      menuItem("VAD motor", vadEngineLabel(), false),
                       menuItem("Hangprofil váltása", soundProfileLabel(), false),
                       menuItem("Aktív hanglánc", activeInputChainLabel(), false)
                   };
 
                   showCenteredMenu("Hang / zajszűrés", items, (d,w) -> {
-                      if(w==0) chooseSoundProfile();
-                      if(w==1) Toast.makeText(this, activeInputChainLabel(), Toast.LENGTH_LONG).show();
+                      if(w==0) chooseVadEngine();
+                      if(w==1) chooseSoundProfile();
+                      if(w==2) Toast.makeText(this, activeInputChainLabel(), Toast.LENGTH_LONG).show();
                       updateButtons();
                   });
               }
@@ -4106,6 +4240,7 @@ jobs:
                   return "profil=" + soundProfileLabel() +
                          " | source=" + audioSourceMode +
                          " | eff=" + androidEffectsMode +
+                         " | VAD-engine=" + vadEngineMode +
                          " | gate=" + micGateMode +
                          " | vad=" + vadMode +
                          " | delay=" + delayMode +
@@ -4126,6 +4261,7 @@ jobs:
                   return "Általános";
               }
 
+              void chooseVadEngine() { chooseFrom("VAD motor", vadEngineModes, vadEngineMode, v -> { vadEngineMode = v; save(); closeExternalVad(); restartIfNeeded(); }); }
               void chooseVad() { chooseFrom("Két mondat közötti szünet", vadModes, vadMode, v -> { vadMode = v; save(); applyRecognitionTimingChange(); }); }
               void chooseMicGate() { chooseFrom("Mikrofon küldési kapu", micGateModes, micGateMode, v -> { micGateMode = v; save(); }); }
               void chooseAudioSource() { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }); }
@@ -4142,6 +4278,7 @@ jobs:
                         soundProfile = "general";
                         mode = "natural";
                         applyInputProfileValues();
+                        vadEngineMode = "server";
                         interpreterMode = false;
                         interpreterAudioMode = "off";
                         ttsMuteUntilMs = 0L;
@@ -4672,8 +4809,8 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V277.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V277.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V279.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V279.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
