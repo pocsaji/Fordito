@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 271; versionName = "27.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 273; versionName = "27.3" }
 
               signingConfigs {
                   create("release") {
@@ -258,7 +258,7 @@ jobs:
               // a mikrofon háttérszintjéhez képest dönti el, mikor kezdődött tényleges beszéd.
               double liveNoiseFloor = 0.0;
               int liveSpeechStartFrames = 0;
-              static final int LIVE_SPEECH_START_FRAMES_REQUIRED = 3;
+              static final int LIVE_SPEECH_START_FRAMES_REQUIRED = 5;
               final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
               int preRollAudioBytes = 0;
               boolean mirrorBottomMode = false;
@@ -343,7 +343,7 @@ jobs:
           
               String apiKey = "";
               String model = "gpt-realtime-2";
-              String transcriptionModel = "gpt-4o-transcribe";
+              String transcriptionModel = "whisper-1";
               String profile = "general";
               String soundProfile = "general";
               String mode = "natural";
@@ -372,7 +372,8 @@ jobs:
           
               final String[][] models = {
                   {"GPT-4o Transcribe / pontosabb","gpt-4o-transcribe"},
-                  {"GPT-4o Mini Transcribe / olcsóbb","gpt-4o-mini-transcribe"}
+                  {"GPT-4o Mini Transcribe / olcsóbb","gpt-4o-mini-transcribe"},
+                  {"Whisper-1 / régi stabil próba","whisper-1"}
               };
           
               final String[][] profiles = {
@@ -459,8 +460,8 @@ jobs:
               void load() {
                   apiKey = sp.getString("apiKey", "");
                   model = "gpt-realtime-2";
-                  transcriptionModel = sp.getString("transcriptionModel", "gpt-4o-transcribe");
-                  if(!"gpt-4o-transcribe".equals(transcriptionModel) && !"gpt-4o-mini-transcribe".equals(transcriptionModel)) transcriptionModel = "gpt-4o-transcribe";
+                  transcriptionModel = sp.getString("transcriptionModel", "whisper-1");
+                  if(!"gpt-4o-transcribe".equals(transcriptionModel) && !"gpt-4o-mini-transcribe".equals(transcriptionModel) && !"whisper-1".equals(transcriptionModel)) transcriptionModel = "whisper-1";
                   // V268: a fordítási Realtime kapcsolat fixen gpt-realtime-2; a menü csak a beszédfelismerő modellt váltja.
                   // A gpt-realtime-translate külön /v1/realtime/translations végpontot és egyirányú target output nyelvet várna,
                   // ezért itt nem engedjük visszatölteni régi mentésből sem.
@@ -546,7 +547,7 @@ jobs:
               void ui() {
                   LinearLayout root = new LinearLayout(this);
                   root.setOrientation(LinearLayout.VERTICAL);
-                  // V271: a felső diagnosztikai mezők ne csússzanak a státuszsáv alá.
+                  // V273: a felső diagnosztikai mezők ne csússzanak a státuszsáv alá.
                   root.setPadding(dp(3), dp(30), dp(3), dp(63));
                   root.setBackgroundColor(Color.rgb(16,19,24));
                   setContentView(root);
@@ -554,7 +555,7 @@ jobs:
                   // V270: nincs külön, egy teljes sort foglaló build-fejléc.
                   // Az állapot és a halvány verzió a nyelvsor fölött egy keskeny sorban marad.
                   LinearLayout bar = row();
-                  TextView title = label("V271");
+                  TextView title = label("V273");
                   title.setAlpha(0.35f);
                   title.setTextSize(10);
                   state = label("készenlét");
@@ -577,18 +578,24 @@ jobs:
                   preparedLiveBox = box("");
                   rawLiveBox.setEnabled(false);
                   preparedLiveBox.setEnabled(false);
-                  // V271: kizárólag kijelző-elrendezés. A hang/STT adatút változatlan.
-                  // Nyers: legfeljebb 3 jól látható sor. Feldolgozott: 3 sor, kissé kisebb betűvel.
-                  rawLiveBox.setTextSize(18);
+                  // V273: kizárólag kijelző-elrendezés. A hang/STT/VAD adatút változatlan.
+                  // A két diagnosztikai mező kicsi: kb. 2 sor, egységes 14sp betűmérettel.
+                  rawLiveBox.setTextSize(14);
                   rawLiveBox.setMinLines(1);
-                  rawLiveBox.setMaxLines(3);
-                  rawLiveBox.setPadding(dp(5), dp(2), dp(5), dp(2));
-                  preparedLiveBox.setTextSize(16);
+                  rawLiveBox.setMaxLines(2);
+                  rawLiveBox.setPadding(dp(4), dp(1), dp(4), dp(1));
+                  preparedLiveBox.setTextSize(14);
                   preparedLiveBox.setMinLines(1);
-                  preparedLiveBox.setMaxLines(3);
-                  preparedLiveBox.setPadding(dp(5), dp(2), dp(5), dp(2));
-                  root.addView(rawLiveBox, new LinearLayout.LayoutParams(-1,dp(76)));
-                  root.addView(preparedLiveBox, new LinearLayout.LayoutParams(-1,dp(68)));
+                  preparedLiveBox.setMaxLines(2);
+                  preparedLiveBox.setPadding(dp(4), dp(1), dp(4), dp(1));
+                  root.addView(rawLiveBox, new LinearLayout.LayoutParams(-1,dp(46)));
+                  android.view.View diagDivider = new android.view.View(this);
+                  diagDivider.setBackgroundColor(Color.rgb(70,75,84));
+                  root.addView(diagDivider, new LinearLayout.LayoutParams(-1,dp(1)));
+                  root.addView(preparedLiveBox, new LinearLayout.LayoutParams(-1,dp(46)));
+                  android.view.View diagDivider2 = new android.view.View(this);
+                  diagDivider2.setBackgroundColor(Color.rgb(95,100,108));
+                  root.addView(diagDivider2, new LinearLayout.LayoutParams(-1,dp(2)));
 
                   topBox = box("FELSŐ ABLAK — átirat / fordítás");
                   bottomBox = box("ALSÓ ABLAK — átirat / fordítás");
@@ -1344,9 +1351,9 @@ jobs:
                       if(liveNoiseFloor <= 0.0) liveNoiseFloor = Math.max(20.0, avg);
                       else if(avg < liveNoiseFloor * 1.8) liveNoiseFloor = liveNoiseFloor * 0.94 + avg * 0.06;
                   }
-                  double adaptive = Math.max(hybridSpeechEnergyThreshold(), liveNoiseFloor * 2.6 + 35.0);
+                  double adaptive = Math.max(hybridSpeechEnergyThreshold(), liveNoiseFloor * 3.2 + 65.0);
                   boolean above = avg >= adaptive;
-                  if(voiceSendActive) return avg >= Math.max(hybridSpeechEnergyThreshold(), liveNoiseFloor * 1.55 + 20.0);
+                  if(voiceSendActive) return avg >= Math.max(hybridSpeechEnergyThreshold(), liveNoiseFloor * 1.75 + 30.0);
                   if(above) liveSpeechStartFrames++; else liveSpeechStartFrames = 0;
                   if(liveSpeechStartFrames >= LIVE_SPEECH_START_FRAMES_REQUIRED) {
                       liveSpeechStartFrames = 0;
@@ -1596,7 +1603,7 @@ jobs:
               int hybridSpeechEnergyThreshold() {
                   // V268: a 100 ms szabály előtt ne legyen túl kemény helyi hangerőkapu.
                   // A rövid, halk válaszok (igen/nem/oui/non) is indulhassanak, de a kapu menüből továbbra is emelhető.
-                  return Math.max(30, micGateThreshold());
+                  return Math.max(55, micGateThreshold());
               }
           
               void noteSpeechForHybridBlockClosing(long now) {
@@ -4625,7 +4632,7 @@ jobs:
                     .setMessage("Visszaállítsam az ajánlott fordítási és beszédfelismerési alapértékeket? Az API kulcs és a nyelvpár nem törlődik.")
                     .setPositiveButton("Igen", (d,w) -> {
                         model = "gpt-realtime-2";
-                        transcriptionModel = "gpt-4o-transcribe";
+                        transcriptionModel = "whisper-1";
                         profile = "general";
                         soundProfile = "general";
                         mode = "natural";
@@ -5179,8 +5186,8 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V271.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V271.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V273.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V273.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
