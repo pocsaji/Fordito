@@ -1895,10 +1895,19 @@ jobs:
                   if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = now;
                   if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
                   liveTranscriptBuffer += delta;
-                  int released = flushReadyTranscriptBlocks(false);
+
+                  // V288: a részleges STT delta még javulhat a completed eseményig.
+                  // Normál esetben nem adjuk ki korán, mert ezzel elveszne a modell későbbi
+                  // önjavítása és a teljes mondat kontextusa. Csak a 8 s abszolút blokkmaximum
+                  // kényszeríthet ki delta közbeni vágást.
+                  int released = 0;
+                  long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
+                  long age = started > 0L ? now - started : 0L;
+                  if(age >= MAX_CONTINUOUS_LIVE_BLOCK_MS) {
+                      released = flushReadyTranscriptBlocks(false);
+                  }
                   if(released > 0) {
                       liveDeltaReleasedSinceLastCompleted = true;
-                      // V240: a már kiadott delta-blokkhoz tartozó korábbi idle flush ne futhasson rá később.
                       liveIdleFlushToken++;
                   }
 
@@ -1921,9 +1930,16 @@ jobs:
                   // Ha volt delta ebben a körben, NEM töltjük vissza a teljes transcriptet,
                   // csak a bufferben maradt befejezetlen részt zárjuk le.
                   boolean completedIsOnlyAlreadyReleased = false;
-                  if(!liveHadTranscriptDelta && liveTranscriptBuffer.trim().length() == 0 && transcript != null && transcript.trim().length() > 0) {
+                  if(transcript != null && transcript.trim().length() > 0) {
                       completedIsOnlyAlreadyReleased = isAlreadyReleasedTranscript(transcript);
-                      if(!completedIsOnlyAlreadyReleased) {
+
+                      // V288: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
+                      // a completed szöveg felülírja a részleges delta puffert. Ez őrzi meg
+                      // a transcribe modell végső javítását és a teljes mondat kontextusát.
+                      if(!completedIsOnlyAlreadyReleased && !liveDeltaReleasedSinceLastCompleted) {
+                          liveBufferStartedAt = System.currentTimeMillis();
+                          liveTranscriptBuffer = transcript;
+                      } else if(!liveHadTranscriptDelta && liveTranscriptBuffer.trim().length() == 0 && !completedIsOnlyAlreadyReleased) {
                           liveBufferStartedAt = System.currentTimeMillis();
                           liveTranscriptBuffer = transcript;
                       }
