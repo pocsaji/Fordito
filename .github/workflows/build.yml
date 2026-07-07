@@ -291,6 +291,13 @@ jobs:
 
               static final int MAX_BLOCK_SENTENCES = 3;
               static final int MAX_BLOCK_CHARS = 260;
+              // V285: központi élő tolmács blokkzárási időzítés.
+              // Egy helyen fut: a transcript puffer lezárását csak a findLiveBlockCut()/liveIdleDelayMsForBuffer() döntse el.
+              static final int MIN_REAL_SPEECH_MS = 150;          // ennél rövidebb kezdő pöccenést nem tekintünk stabil beszédnek
+              static final int MAX_LIVE_SILENCE_MS = 1500;        // csend abszolút maximuma
+              static final int MAX_LIVE_BLOCK_MS = 8000;          // folyamatos beszéd abszolút blokkhatára
+              static final int SHORT_REPLY_SILENCE_MS = 650;      // igen/nem/oké jellegű válaszok gyors zárása
+              static final int SENTENCE_END_SILENCE_MS = 900;     // kész mondat gyors, de nem ideges zárása
 
               static class TextBlock {
                   String topText = "";
@@ -1859,15 +1866,17 @@ jobs:
                       liveIdleFlushToken++;
                   }
 
-                  // V240: csak akkor ütemezünk utóflush-t, ha tényleg maradt pufferben szöveg.
-                  // Ez nem lassítás: nincs plusz várakozás, csak a régi tokenek érvénytelenítése.
+                  // V285: egyetlen központi utóflush-időzítő.
+                  // Nem több helyen szétszórt késleltetés: a puffer tartalma alapján választ gyors rövid-válasz,
+                  // kész-mondat vagy max. 1,5 mp csendzárást. Minden új delta érvényteleníti az előző időzítőt.
                   if(liveTranscriptBuffer.trim().length() > 0) {
                       final int token = ++liveIdleFlushToken;
+                      final int delayMs = liveIdleDelayMsForBuffer(liveTranscriptBuffer);
                       topBox.postDelayed(() -> {
                           if(token == liveIdleFlushToken && streaming && liveTranscriptBuffer.trim().length() > 0) {
                               flushReadyTranscriptBlocks(true);
                           }
-                      }, 1400);
+                      }, delayMs);
                   }
               }
 
@@ -1960,9 +1969,9 @@ jobs:
                   int words = s.split("\\s+").length;
                   long age = firstSpeechHeardAt > 0L ? System.currentTimeMillis() - firstSpeechHeardAt : 0L;
 
-                  // V240: nincs külön szótáras nyelvkapu az első blokknál.
-                  // Rövid válasz is beszéd. Csak minimális stabilizálást várunk, hogy ne fél karakter menjen fordításra.
-                  if(age >= 650 && s.length() >= 2 && words >= 1) return true;
+                  // V285: nincs minimális blokkhossz. A 150 ms csak technikai stabilizáló küszöb,
+                  // hogy egy induló zajpöccenés vagy fél karakter ne menjen ki fordításra.
+                  if(age >= MIN_REAL_SPEECH_MS && s.length() >= 2 && words >= 1) return true;
                   if(firstHardSentenceEnd(s) >= 0 && words >= 1) return true;
                   if(s.length() >= 18 && words >= 2) return true;
                   return false;
@@ -2300,19 +2309,77 @@ jobs:
                   String t = s.trim();
                   if(t.length() == 0) return -1;
 
-                  // V240: egyszerűsített, egyirányú blokkhatár-döntés.
-                  // Delta közben csak biztos mondatvégnél vagy természetes hosszú vágásnál adunk ki.
-                  // Completed/idle esetén viszont nincs nyelvtani várakoztatás: ami bent maradt,
-                  // azt kiadjuk. A rövid puffer nem ragadhat bent és nem kell szótár hozzá.
+                  // V285: központi blokkzáró motor.
+                  // Minden élő transcript lezárási döntés itt fut át egyszer: nincs külön szétszórt időzítőlogika.
+                  // 1) biztos mondatvég azonnal mehet,
+                  // 2) hosszú szövegnél természetes vágás,
+                  // 3) csend/completed esetén max. 1,5 mp után a maradék is megy,
+                  // 4) folyamatos beszédnél 8 mp után kötelező blokkzárás.
                   int cut = firstHardSentenceEnd(s);
                   if(cut >= 0) return cut;
 
                   cut = smartLinguisticCut(s);
                   if(cut >= 0) return cut;
 
+                  if(isLiveBlockOverAbsoluteLimit()) return forceTimedLiveBlockCut(s);
+
                   if(flushAll) return safeWholeBufferFlushCut(s);
 
                   return -1;
+              }
+
+              boolean isLiveBlockOverAbsoluteLimit() {
+                  long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
+                  if(started <= 0L) return false;
+                  return System.currentTimeMillis() - started >= MAX_LIVE_BLOCK_MS;
+              }
+
+              int liveIdleDelayMsForBuffer(String s) {
+                  if(s == null) return MAX_LIVE_SILENCE_MS;
+                  String t = s.trim();
+                  if(t.length() == 0) return MAX_LIVE_SILENCE_MS;
+                  if(isShortLiveReply(t)) return SHORT_REPLY_SILENCE_MS;
+                  if(firstHardSentenceEnd(t) >= 0) return SENTENCE_END_SILENCE_MS;
+                  return MAX_LIVE_SILENCE_MS;
+              }
+
+              boolean isShortLiveReply(String text) {
+                  if(text == null) return false;
+                  String t = text.trim().toLowerCase(Locale.ROOT).replaceAll("[\p{Punct}]+$", "").replaceAll("\s+", " ");
+                  if(t.length() == 0) return false;
+                  int words = t.split("\s+").length;
+                  if(words > 3) return false;
+                  String[] shortReplies = {
+                      "igen", "nem", "ok", "oké", "oke", "rendben", "jó", "jo", "lehet", "talán", "talan", "holnap", "ma", "most", "persze", "köszönöm", "koszonom",
+                      "oui", "non", "ok", "d accord", "peut être", "peut-etre", "demain", "merci", "bien",
+                      "yes", "no", "okay", "maybe", "tomorrow", "thanks"
+                  };
+                  for(String r: shortReplies) if(t.equals(r)) return true;
+                  return words <= 2 && t.length() <= 14;
+              }
+
+              int forceTimedLiveBlockCut(String s) {
+                  if(s == null) return -1;
+                  String t = s.trim();
+                  if(t.length() == 0) return -1;
+
+                  int cut = smartLinguisticCut(s);
+                  if(cut > 0) return cut;
+
+                  int end = s.length();
+                  while(end > 0 && Character.isWhitespace(s.charAt(end - 1))) end--;
+                  if(end <= 0) return -1;
+
+                  // 8 mp-nél nincs további várakozás. Legfeljebb az utolsó nagyon friss, rövid token marad bent,
+                  // de csak akkor, ha előtte már van értelmes prefix. Így nem vágunk fél szót, de nem áll meg a tolmács.
+                  if(hasPossiblyUnstableTrailingToken(t)) {
+                      int cut2 = lastWhitespaceBeforeLastToken(s);
+                      if(cut2 > 0) {
+                          String prefix = s.substring(0, cut2).trim();
+                          if(prefix.length() >= 2) return cut2;
+                      }
+                  }
+                  return end;
               }
 
               int safeWholeBufferFlushCut(String s) {
@@ -2378,7 +2445,7 @@ jobs:
                   int words = t.split("\\s+").length;
                   long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
                   long age = started > 0L ? System.currentTimeMillis() - started : 0L;
-                  return age >= 1000 && words <= 5;
+                  return age >= MIN_REAL_SPEECH_MS && words <= 5;
               }
 
               boolean shouldForceFlushWholeBuffer(String s) {
