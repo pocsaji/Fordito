@@ -1,4 +1,4 @@
-name: Build Android APK V279
+name: Build Android APK V281
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 279; versionName = "27.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 281; versionName = "28.1" }
 
               signingConfigs {
                   create("release") {
@@ -86,7 +86,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V279" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V281" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -231,7 +231,7 @@ jobs:
               volatile boolean pendingAudioStartAfterSessionUpdate = false;
               final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
               int preRollAudioBytes = 0;
-              String vadEngineMode = "server"; // server / webrtc / silero / raw
+              String vadEngineMode = "silero"; // server / webrtc / silero / raw
               Object liveVadInstance = null;
               String liveVadInstanceMode = "";
               ByteArrayOutputStream vadFrameBuffer = new ByteArrayOutputStream();
@@ -279,6 +279,8 @@ jobs:
               int pendingLiveBlockId = -1;
               final ArrayDeque<Integer> liveTranslateQueue = new ArrayDeque<>();
               int liveSourceBlockSeq = 0;
+              String lastSureLiveSourceLang = "";
+              String lastSureLiveOriginal = "";
               final HashSet<String> recentLiveBlockHashes = new HashSet<>();
               final ArrayDeque<String> recentLiveBlockHashOrder = new ArrayDeque<>();
               String pendingManualText = "";
@@ -437,7 +439,7 @@ jobs:
                   vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "xhigh");
                   micGateMode = sp.getString("micGateMode", "sensitive");
-                  vadEngineMode = sp.getString("vadEngineMode", "server");
+                  vadEngineMode = sp.getString("vadEngineMode", "silero");
                   audioSourceMode = sp.getString("audioSourceMode", "recognition");
                   androidEffectsMode = sp.getString("androidEffectsMode", "recommended");
                   openAiNoiseMode = sp.getString("openAiNoiseMode", "off");
@@ -461,20 +463,19 @@ jobs:
               }
 
               void applyV240StableDefaultsOnce() {
-                  // V240: menü-átszervezés. A V240 beállításokat nem írjuk felül frissítéskor.
-                  // Új telepítésnél a korábbi stabil alapok maradnak, a háttér mód továbbra is minden induláskor kikapcsolt.
+                  // V281: telepítés/frissítés után egyszer visszaállítjuk az élő hanglánc ajánlott alapját.
+                  // API kulcsot, kiválasztott nyelvpárt és korábbi beszélgetést nem törlünk.
                   int last = sp.getInt("stableDefaultsVersion", 0);
-                  if(last < 239) {
+                  if(last < 281) {
                       profile = "general";
                       soundProfile = "general";
                       mode = "natural";
+                      vadEngineMode = "silero";
                       applyInputProfileValues();
                       interpreterMode = false;
                       interpreterAudioMode = "off";
-                  }
-                  if(last < 239) {
-                      if(soundProfile == null || soundProfile.length() == 0) soundProfile = "general";
-                      sp.edit().putInt("stableDefaultsVersion", 239).apply();
+                      mirrorBottomMode = false;
+                      sp.edit().putInt("stableDefaultsVersion", 281).apply();
                       save();
                   }
               }
@@ -513,7 +514,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V279");
+                  TextView title = label("Fordito_V281");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -827,11 +828,6 @@ jobs:
                       TextBlock b = textBlocks.get(i);
                       String bt = b.topText == null ? "" : b.topText;
                       String bb = b.bottomText == null ? "" : b.bottomText;
-                      if(b.liveSeq > 0) {
-                          String pref = String.format(Locale.ROOT, "%03d | ", b.liveSeq);
-                          if(bt.trim().length() > 0) bt = pref + bt;
-                          if(bb.trim().length() > 0) bb = pref + bb;
-                      }
                       if(bt.trim().length() == 0 && bb.trim().length() == 0) continue;
 
                       if(visibleIndex > 0) {
@@ -1126,6 +1122,16 @@ jobs:
                     "Only ignore the block when it is clearly not human speech or has no translatable content. ";
               }
 
+              String mildPreviousLiveContext() {
+                  String lang = lastSureLiveSourceLang == null ? "" : lastSureLiveSourceLang.trim().toUpperCase(Locale.ROOT);
+                  String prev = lastSureLiveOriginal == null ? "" : lastSureLiveOriginal.trim();
+                  if(lang.length() == 0 || prev.length() == 0) return "";
+                  if(prev.length() > 160) prev = prev.substring(prev.length() - 160);
+                  prev = prev.replace("\n", " ").replace("\r", " ").replaceAll("\\s+", " ").trim();
+                  return "Previous confirmed live block, weak context only: SOURCE_LANG=" + lang + "; ORIGINAL=" + prev + ". " +
+                         "Use this only as a light continuity hint for very short or noisy blocks. The current block may freely switch to the other selected language. ";
+              }
+
               String instructions() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
@@ -1162,12 +1168,14 @@ jobs:
                     "You are a live two-language interpreter. Translate exactly ONE completed speech block. " +
                     pairRules() +
                     "The user message contains TEXT with a rough live speech transcript. " +
+                    mildPreviousLiveContext() +
                     "Choose SOURCE_LANG as exactly " + top + " or " + bottom + "; no other source language is valid. " +
                     "Translate into the other selected language. " +
                     "Do not reject short speech: one-word answers, two-word answers, short questions and fragments are valid when meaningful. " +
+                    "Before translating, restore ORIGINAL in the chosen source language. The input may contain phonetic STT mistakes, wrong accents, fragments or words written as if they belonged to another language. " +
+                    "Use the whole current block and the two selected languages to repair only obvious speech-recognition mistakes. If the intended word is clear from context, restore it in SOURCE_LANG. If uncertain, preserve the spoken wording. " +
                     "Return exactly three lines and nothing else: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <cleaned source-language speech> then TRANSLATION: <natural translation into the other selected language>. " +
                     "ORIGINAL must stay in SOURCE_LANG. It is never an explanation, language label, commentary, or paraphrase. " +
-                    "Correct only obvious recognition mistakes when strongly supported; otherwise preserve the spoken wording. " +
                     "Do not invent missing facts. Do not output markdown, quotes, explanations, or labels beyond the required three labels. " +
                     "If the input is clearly only noise and not human speech, return SOURCE_LANG: " + top + " then ORIGINAL: then TRANSLATION: with empty ORIGINAL and TRANSLATION. " +
                     "Conversation profile: " + profilePrompt() + " Translation mode: " + modePrompt();
@@ -1927,7 +1935,7 @@ jobs:
                       // Alapelv: ha bizonytalan, átengedjük, nem nyeljük el a beszédet.
                       b = normalizeAndDeduplicateLiveBlock(b);
                       if(b.length() == 0) continue;
-                      // V279: valódi tolmács mód. A nyers STT blokkot nem zárjuk magyarra és
+                      // V281: valódi tolmács mód. A nyers STT blokkot nem zárjuk magyarra és
                       // nem dobjuk el helyi nyelvi kapuval. A TOP/BOTTOM forrásnyelvet a meglévő
                       // AI osztályozó + eredeti nyelvű helyreállító + fordító lépés dönti el.
                       // A helyi oldalbecslés csak ideiglenes kijelzési hely, az AI válasz után
@@ -1944,7 +1952,7 @@ jobs:
                       // V240: sikeres kiírás után a régi idle flush már nem zárhat ugyanarra.
                       liveIdleFlushToken++;
                   }
-                  // V279: a blokkok sorrendben kerülnek a meglévő egyetlen live fordítási sorba.
+                  // V281: a blokkok sorrendben kerülnek a meglévő egyetlen live fordítási sorba.
                   // Egyszerre csak egy blokk fordul; a kézi FORDÍT lehetőség változatlanul megmarad.
                   if(releasedCount > 0) processNextLiveTranslation();
                   return releasedCount;
@@ -2684,10 +2692,11 @@ jobs:
                           translation = trp[2] == null ? "" : trp[2];
                           sourceIsTop = sourceIsTopFromAi(sourceLang, b.sourceTop);
                       } else {
-                          // V240: túl szigorú AI-válasz szűrés kivéve.
-                          // Ha a modell nem címkézett hármas blokkot ad, de használható fordított szöveg jött,
-                          // azt a meglévő forrásblokk fordításaként fogadjuk el. Nem indítunk új blokkot, nem újrapróbálunk végtelenül.
-                          translation = out;
+                          // V281: nincs nyers AI-válasz fallback.
+                          // Ha a live fordító nem ad szabályos SOURCE_LANG / ORIGINAL / TRANSLATION hármast,
+                          // a blokk hibásként újrapróbálható vagy kiesik, de prompt/meta szöveg nem kerülhet ablakba.
+                          retryLiveBlockOrRender(id);
+                          return;
                       }
 
                       original = cleanTranscriptForSelectedPair(original);
@@ -2720,6 +2729,8 @@ jobs:
                       }
                       b.translatedOk = true;
                       b.retryCount = 0;
+                      lastSureLiveSourceLang = sourceIsTop ? code(topLang) : code(bottomLang);
+                      lastSureLiveOriginal = original;
                       setDetectedSourceSide(sourceIsTop);
                       renderBlocksKeepView();
                       if(speakText != null && speakLang != null) {
@@ -4278,7 +4289,7 @@ jobs:
                         soundProfile = "general";
                         mode = "natural";
                         applyInputProfileValues();
-                        vadEngineMode = "server";
+                        vadEngineMode = "silero";
                         interpreterMode = false;
                         interpreterAudioMode = "off";
                         ttsMuteUntilMs = 0L;
@@ -4809,8 +4820,8 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V279.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V279.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V281.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V281.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
