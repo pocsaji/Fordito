@@ -1,4 +1,4 @@
-name: Build Android APK V281
+name: Build Android APK V282
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 281; versionName = "28.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 282; versionName = "28.2" }
 
               signingConfigs {
                   create("release") {
@@ -86,7 +86,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V281" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V282" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -231,7 +231,7 @@ jobs:
               volatile boolean pendingAudioStartAfterSessionUpdate = false;
               final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
               int preRollAudioBytes = 0;
-              String vadEngineMode = "silero"; // server / webrtc / silero / raw
+              String vadEngineMode = "silero"; // server / webrtc / silero
               Object liveVadInstance = null;
               String liveVadInstanceMode = "";
               ByteArrayOutputStream vadFrameBuffer = new ByteArrayOutputStream();
@@ -382,8 +382,7 @@ jobs:
               final String[][] vadEngineModes = {
                   {"Realtime saját VAD", "server"},
                   {"WebRTC VAD", "webrtc"},
-                  {"Silero VAD", "silero"},
-                  {"VAD nélkül / nyers teszt", "raw"}
+                  {"Silero VAD", "silero"}
               };
 
               final String[][] audioSourceModes = {
@@ -440,6 +439,7 @@ jobs:
                   delayMode = sp.getString("delayMode", "xhigh");
                   micGateMode = sp.getString("micGateMode", "sensitive");
                   vadEngineMode = sp.getString("vadEngineMode", "silero");
+                  if(!"server".equals(vadEngineMode) && !"webrtc".equals(vadEngineMode) && !"silero".equals(vadEngineMode)) vadEngineMode = "silero";
                   audioSourceMode = sp.getString("audioSourceMode", "recognition");
                   androidEffectsMode = sp.getString("androidEffectsMode", "recommended");
                   openAiNoiseMode = sp.getString("openAiNoiseMode", "off");
@@ -463,10 +463,10 @@ jobs:
               }
 
               void applyV240StableDefaultsOnce() {
-                  // V281: telepítés/frissítés után egyszer visszaállítjuk az élő hanglánc ajánlott alapját.
+                  // V282: telepítés/frissítés után egyszer visszaállítjuk az élő hanglánc ajánlott alapját.
                   // API kulcsot, kiválasztott nyelvpárt és korábbi beszélgetést nem törlünk.
                   int last = sp.getInt("stableDefaultsVersion", 0);
-                  if(last < 281) {
+                  if(last < 282) {
                       profile = "general";
                       soundProfile = "general";
                       mode = "natural";
@@ -475,7 +475,7 @@ jobs:
                       interpreterMode = false;
                       interpreterAudioMode = "off";
                       mirrorBottomMode = false;
-                      sp.edit().putInt("stableDefaultsVersion", 281).apply();
+                      sp.edit().putInt("stableDefaultsVersion", 282).apply();
                       save();
                   }
               }
@@ -514,7 +514,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V281");
+                  TextView title = label("Fordito_V282");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1935,7 +1935,7 @@ jobs:
                       // Alapelv: ha bizonytalan, átengedjük, nem nyeljük el a beszédet.
                       b = normalizeAndDeduplicateLiveBlock(b);
                       if(b.length() == 0) continue;
-                      // V281: valódi tolmács mód. A nyers STT blokkot nem zárjuk magyarra és
+                      // V282: valódi tolmács mód. A nyers STT blokkot nem zárjuk magyarra és
                       // nem dobjuk el helyi nyelvi kapuval. A TOP/BOTTOM forrásnyelvet a meglévő
                       // AI osztályozó + eredeti nyelvű helyreállító + fordító lépés dönti el.
                       // A helyi oldalbecslés csak ideiglenes kijelzési hely, az AI válasz után
@@ -1952,7 +1952,7 @@ jobs:
                       // V240: sikeres kiírás után a régi idle flush már nem zárhat ugyanarra.
                       liveIdleFlushToken++;
                   }
-                  // V281: a blokkok sorrendben kerülnek a meglévő egyetlen live fordítási sorba.
+                  // V282: a blokkok sorrendben kerülnek a meglévő egyetlen live fordítási sorba.
                   // Egyszerre csak egy blokk fordul; a kézi FORDÍT lehetőség változatlanul megmarad.
                   if(releasedCount > 0) processNextLiveTranslation();
                   return releasedCount;
@@ -2692,7 +2692,7 @@ jobs:
                           translation = trp[2] == null ? "" : trp[2];
                           sourceIsTop = sourceIsTopFromAi(sourceLang, b.sourceTop);
                       } else {
-                          // V281: nincs nyers AI-válasz fallback.
+                          // V282: nincs nyers AI-válasz fallback.
                           // Ha a live fordító nem ad szabályos SOURCE_LANG / ORIGINAL / TRANSLATION hármast,
                           // a blokk hibásként újrapróbálható vagy kiesik, de prompt/meta szöveg nem kerülhet ablakba.
                           retryLiveBlockOrRender(id);
@@ -2955,7 +2955,7 @@ jobs:
                       updateButtons();
                   });
                   addMenuButton(box, "Fordítási beállítások", translationMenuLabel(), false, v -> translationMenu());
-                  addMenuButton(box, "Szakértői beállítások", "beszédfelismerés, hang / zajszűrés", false, v -> advancedMenu());
+                  addMenuButton(box, "Zajszűrési módok", vadEngineLabel(), false, v -> chooseVadEngine());
                   addMenuButton(box, "Ablakkezelés", "másolás, teljes törlés", false, v -> windowMenu());
                   addMenuButton(box, "OpenAI API kulcs", hasKey() ? "kulcs mentve – megnyitáskor kijelölve" : "nincs megadva", false, v -> showApi());
                   addMenuButton(box, "Alapbeállítások", "nyelvpár marad, fordítás/bevitel visszaáll", false, v -> { resetCoreSettings(); updateButtons(); });
@@ -3945,16 +3945,7 @@ jobs:
 
               void advancedMenu() {
                   if(uiLockedForLive || finalizingStop) return;
-                  CharSequence[] items = {
-                      menuItem("Beszédfelismerés", speechMenuLabel(), false),
-                      menuItem("Hang / zajszűrés", noiseMenuLabel(), false)
-                  };
-
-                  showCenteredMenu("Szakértői beállítások", items, (d,w) -> {
-                      if(w==0) speechMenu();
-                      if(w==1) noiseMenu();
-                      updateButtons();
-                  });
+                  chooseVadEngine();
               }
 
               String speechMenuLabel() {
@@ -3962,7 +3953,7 @@ jobs:
               }
 
               String noiseMenuLabel() {
-                  return "aktív hanglánc";
+                  return vadEngineLabel();
               }
 
               String backgroundScreenLabel() {
@@ -3971,32 +3962,12 @@ jobs:
 
               void speechMenu() {
                   if(uiLockedForLive || finalizingStop) return;
-                  CharSequence[] items = {
-                      menuItem("Hangprofil váltása", soundProfileLabel(), false),
-                      menuItem("Aktív hanglánc", activeInputChainLabel(), false)
-                  };
-
-                  showCenteredMenu("Beszédfelismerés", items, (d,w) -> {
-                      if(w==0) chooseSoundProfile();
-                      if(w==1) Toast.makeText(this, activeInputChainLabel(), Toast.LENGTH_LONG).show();
-                      updateButtons();
-                  });
+                  chooseSoundProfile();
               }
 
               void noiseMenu() {
                   if(uiLockedForLive || finalizingStop) return;
-                  CharSequence[] items = {
-                      menuItem("VAD motor", vadEngineLabel(), false),
-                      menuItem("Hangprofil váltása", soundProfileLabel(), false),
-                      menuItem("Aktív hanglánc", activeInputChainLabel(), false)
-                  };
-
-                  showCenteredMenu("Hang / zajszűrés", items, (d,w) -> {
-                      if(w==0) chooseVadEngine();
-                      if(w==1) chooseSoundProfile();
-                      if(w==2) Toast.makeText(this, activeInputChainLabel(), Toast.LENGTH_LONG).show();
-                      updateButtons();
-                  });
+                  chooseVadEngine();
               }
 
               void chooseBackgroundScreenMode() {
@@ -4272,7 +4243,7 @@ jobs:
                   return "Általános";
               }
 
-              void chooseVadEngine() { chooseFrom("VAD motor", vadEngineModes, vadEngineMode, v -> { vadEngineMode = v; save(); closeExternalVad(); restartIfNeeded(); }); }
+              void chooseVadEngine() { chooseFrom("Zajszűrési módok", vadEngineModes, vadEngineMode, v -> { vadEngineMode = v; save(); closeExternalVad(); restartIfNeeded(); }); }
               void chooseVad() { chooseFrom("Két mondat közötti szünet", vadModes, vadMode, v -> { vadMode = v; save(); applyRecognitionTimingChange(); }); }
               void chooseMicGate() { chooseFrom("Mikrofon küldési kapu", micGateModes, micGateMode, v -> { micGateMode = v; save(); }); }
               void chooseAudioSource() { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }); }
@@ -4305,7 +4276,7 @@ jobs:
               }
 
               String interpreterLabel() {
-                  if("headset".equals(interpreterAudioMode)) return "Bluetooth/headset mód – gyors, visszahallásvédelem nélkül";
+                  if("headset".equals(interpreterAudioMode)) return "Bluetooth/headset mód – folyamatos mikrofon, TTS nem némít";
                   if("speaker".equals(interpreterAudioMode)) return "kihangosított telefon mód – visszahallásvédelemmel";
                   return "kikapcsolva – csak szöveges fordítás";
               }
@@ -4313,7 +4284,7 @@ jobs:
               void chooseInterpreterMode() {
                   String[][] data = {
                       {"Kikapcsolva", "off", "csak szöveges fordítás, nincs felolvasás"},
-                      {"Bluetooth/headset mód", "headset", "folyamatos beszélgetés headsettel, szüneteltetés nélkül"},
+                      {"Bluetooth/headset mód", "headset", "folyamatos mikrofon, TTS közben sem áll le"},
                       {"Kihangosított telefon mód", "speaker", "telefon hangszóróhoz: TTS közben mikrofon tiltás + 500 ms védelem"}
                   };
                   CharSequence[] labels = new CharSequence[data.length];
@@ -4820,8 +4791,8 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V281.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V281.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V282.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V282.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
