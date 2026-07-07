@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 270; versionName = "27.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 271; versionName = "27.1" }
 
               signingConfigs {
                   create("release") {
@@ -546,40 +546,49 @@ jobs:
               void ui() {
                   LinearLayout root = new LinearLayout(this);
                   root.setOrientation(LinearLayout.VERTICAL);
-                  root.setPadding(8,62,8,190);
+                  // V271: a felső diagnosztikai mezők ne csússzanak a státuszsáv alá.
+                  root.setPadding(dp(3), dp(30), dp(3), dp(63));
                   root.setBackgroundColor(Color.rgb(16,19,24));
                   setContentView(root);
           
                   // V270: nincs külön, egy teljes sort foglaló build-fejléc.
                   // Az állapot és a halvány verzió a nyelvsor fölött egy keskeny sorban marad.
                   LinearLayout bar = row();
-                  TextView title = label("V270");
+                  TextView title = label("V271");
                   title.setAlpha(0.35f);
                   title.setTextSize(10);
                   state = label("készenlét");
                   state.setTextSize(10);
                   state.setGravity(Gravity.RIGHT);
-                  bar.addView(title, new LinearLayout.LayoutParams(0,18,1));
-                  bar.addView(state, new LinearLayout.LayoutParams(0,18,1));
+                  bar.addView(title, new LinearLayout.LayoutParams(0,dp(16),1));
+                  bar.addView(state, new LinearLayout.LayoutParams(0,dp(16),1));
                   root.addView(bar);
           
                   LinearLayout langRow = row();
                   topLangBtn = btn("FELSŐ");
                   
                                     bottomLangBtn = btn("ALSÓ");
-                  langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,85,1));
+                  langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,dp(48),1));
                   
-                  langRow.addView(bottomLangBtn, new LinearLayout.LayoutParams(0,85,1));
+                  langRow.addView(bottomLangBtn, new LinearLayout.LayoutParams(0,dp(48),1));
                   root.addView(langRow);
           
                   rawLiveBox = box("");
                   preparedLiveBox = box("");
                   rawLiveBox.setEnabled(false);
                   preparedLiveBox.setEnabled(false);
-                  rawLiveBox.setTextSize(14);
-                  preparedLiveBox.setTextSize(14);
-                  root.addView(rawLiveBox, new LinearLayout.LayoutParams(-1,58));
-                  root.addView(preparedLiveBox, new LinearLayout.LayoutParams(-1,58));
+                  // V271: kizárólag kijelző-elrendezés. A hang/STT adatút változatlan.
+                  // Nyers: legfeljebb 3 jól látható sor. Feldolgozott: 3 sor, kissé kisebb betűvel.
+                  rawLiveBox.setTextSize(18);
+                  rawLiveBox.setMinLines(1);
+                  rawLiveBox.setMaxLines(3);
+                  rawLiveBox.setPadding(dp(5), dp(2), dp(5), dp(2));
+                  preparedLiveBox.setTextSize(16);
+                  preparedLiveBox.setMinLines(1);
+                  preparedLiveBox.setMaxLines(3);
+                  preparedLiveBox.setPadding(dp(5), dp(2), dp(5), dp(2));
+                  root.addView(rawLiveBox, new LinearLayout.LayoutParams(-1,dp(76)));
+                  root.addView(preparedLiveBox, new LinearLayout.LayoutParams(-1,dp(68)));
 
                   topBox = box("FELSŐ ABLAK — átirat / fordítás");
                   bottomBox = box("ALSÓ ABLAK — átirat / fordítás");
@@ -587,16 +596,16 @@ jobs:
                   root.addView(topBox, new LinearLayout.LayoutParams(-1,0,1));
                   android.view.View divider = new android.view.View(this);
                   divider.setBackgroundColor(Color.rgb(95,100,108));
-                  root.addView(divider, new LinearLayout.LayoutParams(-1,8));
+                  root.addView(divider, new LinearLayout.LayoutParams(-1,dp(2)));
                   root.addView(bottomBox, new LinearLayout.LayoutParams(-1,0,1));
           
                   LinearLayout controls = row();
                   micBtn = btn("MIKROFON");
                   translateBtn = btn("FORDÍT");
                   menuBtn = btn("MENÜ");
-                  controls.addView(micBtn, new LinearLayout.LayoutParams(0,85,1));
-                  controls.addView(translateBtn, new LinearLayout.LayoutParams(0,85,1));
-                  controls.addView(menuBtn, new LinearLayout.LayoutParams(0,85,1));
+                  controls.addView(micBtn, new LinearLayout.LayoutParams(0,dp(48),1));
+                  controls.addView(translateBtn, new LinearLayout.LayoutParams(0,dp(48),1));
+                  controls.addView(menuBtn, new LinearLayout.LayoutParams(0,dp(48),1));
                   root.addView(controls);
           
                   // V268: sima kattintás / fókuszváltás ne állítsa le a mikrofont.
@@ -624,6 +633,10 @@ jobs:
                   updateButtons();
               }
           
+              int dp(int value) {
+                  return Math.round(value * getResources().getDisplayMetrics().density);
+              }
+
               LinearLayout row() {
                   LinearLayout l = new LinearLayout(this);
                   l.setOrientation(LinearLayout.HORIZONTAL);
@@ -5166,8 +5179,8 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V270.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V270.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V271.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V271.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
