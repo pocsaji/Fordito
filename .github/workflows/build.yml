@@ -225,12 +225,20 @@ jobs:
               volatile long ttsMuteUntilMs = 0L;
               static final int MAX_TRAILING_SILENCE_SEND_MS = 600;
               static final int PRE_ROLL_AUDIO_MS = 500;
+              // Élő tolmács blokkzárás - egy központi időlogika:
+              // 150 ms valódi beszéd alatt zajnak tekintjük, 1.5 s csendnél zárunk,
+              // 8 s folyamatos beszédnél vágunk blokkot akkor is, ha nincs csend.
+              static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
+              static final int MAX_LIVE_SILENCE_MS = 1500;
+              static final int MAX_CONTINUOUS_LIVE_BLOCK_MS = 8000;
               volatile long lastVoiceChunkSentAtMs = 0L;
               volatile boolean trailingSilenceOpen = false;
               volatile boolean voiceSendActive = false;
               volatile boolean pendingAudioStartAfterSessionUpdate = false;
               final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
               int preRollAudioBytes = 0;
+              final ArrayDeque<byte[]> pendingSpeechAudioChunks = new ArrayDeque<>();
+              int pendingSpeechAudioMs = 0;
               String vadEngineMode = "webrtc"; // server / webrtc / silero
               Object liveVadInstance = null;
               String liveVadInstanceMode = "";
@@ -291,13 +299,6 @@ jobs:
 
               static final int MAX_BLOCK_SENTENCES = 3;
               static final int MAX_BLOCK_CHARS = 260;
-              // V285: központi élő tolmács blokkzárási időzítés.
-              // Egy helyen fut: a transcript puffer lezárását csak a findLiveBlockCut()/liveIdleDelayMsForBuffer() döntse el.
-              static final int MIN_REAL_SPEECH_MS = 150;          // ennél rövidebb kezdő pöccenést nem tekintünk stabil beszédnek
-              static final int MAX_LIVE_SILENCE_MS = 1500;        // csend abszolút maximuma
-              static final int MAX_LIVE_BLOCK_MS = 8000;          // folyamatos beszéd abszolút blokkhatára
-              static final int SHORT_REPLY_SILENCE_MS = 650;      // igen/nem/oké jellegű válaszok gyors zárása
-              static final int SENTENCE_END_SILENCE_MS = 900;     // kész mondat gyors, de nem ideges zárása
 
               static class TextBlock {
                   String topText = "";
@@ -1309,6 +1310,42 @@ jobs:
                   return out;
               }
 
+              int pcm16Mono24kMs(int bytes) {
+                  if(bytes <= 0) return 0;
+                  return Math.max(1, (int)Math.round(bytes * 1000.0 / (24000.0 * 2.0)));
+              }
+
+              void clearPendingSpeechAudio() {
+                  synchronized(pendingSpeechAudioChunks) {
+                      pendingSpeechAudioChunks.clear();
+                      pendingSpeechAudioMs = 0;
+                  }
+              }
+
+              void rememberPendingSpeechAudio(byte[] data, int len) {
+                  if(data == null || len <= 0) return;
+                  synchronized(pendingSpeechAudioChunks) {
+                      pendingSpeechAudioChunks.add(Arrays.copyOf(data, len));
+                      pendingSpeechAudioMs += pcm16Mono24kMs(len);
+                  }
+              }
+
+              int pendingSpeechAudioDurationMs() {
+                  synchronized(pendingSpeechAudioChunks) { return pendingSpeechAudioMs; }
+              }
+
+              ArrayList<byte[]> takePendingSpeechAudio() {
+                  ArrayList<byte[]> out = new ArrayList<>();
+                  synchronized(pendingSpeechAudioChunks) {
+                      while(!pendingSpeechAudioChunks.isEmpty()) {
+                          byte[] b = pendingSpeechAudioChunks.poll();
+                          if(b != null) out.add(b);
+                      }
+                      pendingSpeechAudioMs = 0;
+                  }
+                  return out;
+              }
+
               void closeExternalVad() {
                   try {
                       if(liveVadInstance instanceof AutoCloseable) ((AutoCloseable)liveVadInstance).close();
@@ -1583,24 +1620,21 @@ jobs:
                                   }
 
                                   long now = System.currentTimeMillis();
-                                  if("raw".equals(vadEngineMode)) {
-                                      clearPreRollAudio();
-                                      voiceSendActive = true;
-                                      trailingSilenceOpen = true;
-                                      lastVoiceChunkSentAtMs = now;
-                                      sendAudioChunk(Arrays.copyOf(buf, read));
-                                      continue;
-                                  }
-
                                   boolean overGate = externalVadOverGate(buf, read);
                                   if(overGate) {
                                       if(!voiceSendActive) {
+                                          rememberPendingSpeechAudio(buf, read);
+                                          if(pendingSpeechAudioDurationMs() < MIN_TRUE_SPEECH_AUDIO_MS) {
+                                              continue;
+                                          }
                                           for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr);
+                                          for(byte[] ps : takePendingSpeechAudio()) sendAudioChunk(ps);
+                                      } else {
+                                          sendAudioChunk(Arrays.copyOf(buf, read));
                                       }
                                       voiceSendActive = true;
                                       trailingSilenceOpen = true;
                                       lastVoiceChunkSentAtMs = now;
-                                      sendAudioChunk(Arrays.copyOf(buf, read));
                                       continue;
                                   }
 
@@ -1612,6 +1646,7 @@ jobs:
                                       }
                                   }
 
+                                  clearPendingSpeechAudio();
                                   rememberPreRollAudio(buf, read);
                               } catch(Exception ignored) {}
                           }
@@ -1654,6 +1689,7 @@ jobs:
                   voiceSendActive = false;
                   pendingAudioStartAfterSessionUpdate = false;
                   clearPreRollAudio();
+                  clearPendingSpeechAudio();
                   releaseAndroidAudioEffects();
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception ignored) {}
                   rec = null;
@@ -1866,17 +1902,15 @@ jobs:
                       liveIdleFlushToken++;
                   }
 
-                  // V285: egyetlen központi utóflush-időzítő.
-                  // Nem több helyen szétszórt késleltetés: a puffer tartalma alapján választ gyors rövid-válasz,
-                  // kész-mondat vagy max. 1,5 mp csendzárást. Minden új delta érvényteleníti az előző időzítőt.
+                  // V240: csak akkor ütemezünk utóflush-t, ha tényleg maradt pufferben szöveg.
+                  // Ez nem lassítás: nincs plusz várakozás, csak a régi tokenek érvénytelenítése.
                   if(liveTranscriptBuffer.trim().length() > 0) {
                       final int token = ++liveIdleFlushToken;
-                      final int delayMs = liveIdleDelayMsForBuffer(liveTranscriptBuffer);
                       topBox.postDelayed(() -> {
                           if(token == liveIdleFlushToken && streaming && liveTranscriptBuffer.trim().length() > 0) {
                               flushReadyTranscriptBlocks(true);
                           }
-                      }, delayMs);
+                      }, MAX_LIVE_SILENCE_MS);
                   }
               }
 
@@ -1969,9 +2003,9 @@ jobs:
                   int words = s.split("\\s+").length;
                   long age = firstSpeechHeardAt > 0L ? System.currentTimeMillis() - firstSpeechHeardAt : 0L;
 
-                  // V285: nincs minimális blokkhossz. A 150 ms csak technikai stabilizáló küszöb,
-                  // hogy egy induló zajpöccenés vagy fél karakter ne menjen ki fordításra.
-                  if(age >= MIN_REAL_SPEECH_MS && s.length() >= 2 && words >= 1) return true;
+                  // V240: nincs külön szótáras nyelvkapu az első blokknál.
+                  // Rövid válasz is beszéd. Csak minimális stabilizálást várunk, hogy ne fél karakter menjen fordításra.
+                  if(age >= MIN_TRUE_SPEECH_AUDIO_MS && s.length() >= 2 && words >= 1) return true;
                   if(firstHardSentenceEnd(s) >= 0 && words >= 1) return true;
                   if(s.length() >= 18 && words >= 2) return true;
                   return false;
@@ -2309,77 +2343,26 @@ jobs:
                   String t = s.trim();
                   if(t.length() == 0) return -1;
 
-                  // V285: központi blokkzáró motor.
-                  // Minden élő transcript lezárási döntés itt fut át egyszer: nincs külön szétszórt időzítőlogika.
-                  // 1) biztos mondatvég azonnal mehet,
-                  // 2) hosszú szövegnél természetes vágás,
-                  // 3) csend/completed esetén max. 1,5 mp után a maradék is megy,
-                  // 4) folyamatos beszédnél 8 mp után kötelező blokkzárás.
+                  // V240: egyszerűsített, egyirányú blokkhatár-döntés.
+                  // Delta közben csak biztos mondatvégnél vagy természetes hosszú vágásnál adunk ki.
+                  // Completed/idle esetén viszont nincs nyelvtani várakoztatás: ami bent maradt,
+                  // azt kiadjuk. A rövid puffer nem ragadhat bent és nem kell szótár hozzá.
                   int cut = firstHardSentenceEnd(s);
                   if(cut >= 0) return cut;
 
                   cut = smartLinguisticCut(s);
                   if(cut >= 0) return cut;
 
-                  if(isLiveBlockOverAbsoluteLimit()) return forceTimedLiveBlockCut(s);
+                  long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
+                  long age = started > 0L ? System.currentTimeMillis() - started : 0L;
+                  if(age >= MAX_CONTINUOUS_LIVE_BLOCK_MS) {
+                      int forced = safeWholeBufferFlushCut(s);
+                      return forced >= 0 ? forced : s.length();
+                  }
 
                   if(flushAll) return safeWholeBufferFlushCut(s);
 
                   return -1;
-              }
-
-              boolean isLiveBlockOverAbsoluteLimit() {
-                  long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
-                  if(started <= 0L) return false;
-                  return System.currentTimeMillis() - started >= MAX_LIVE_BLOCK_MS;
-              }
-
-              int liveIdleDelayMsForBuffer(String s) {
-                  if(s == null) return MAX_LIVE_SILENCE_MS;
-                  String t = s.trim();
-                  if(t.length() == 0) return MAX_LIVE_SILENCE_MS;
-                  if(isShortLiveReply(t)) return SHORT_REPLY_SILENCE_MS;
-                  if(firstHardSentenceEnd(t) >= 0) return SENTENCE_END_SILENCE_MS;
-                  return MAX_LIVE_SILENCE_MS;
-              }
-
-              boolean isShortLiveReply(String text) {
-                  if(text == null) return false;
-                  String t = text.trim().toLowerCase(Locale.ROOT).replaceAll("[\p{Punct}]+$", "").replaceAll("\s+", " ");
-                  if(t.length() == 0) return false;
-                  int words = t.split("\s+").length;
-                  if(words > 3) return false;
-                  String[] shortReplies = {
-                      "igen", "nem", "ok", "oké", "oke", "rendben", "jó", "jo", "lehet", "talán", "talan", "holnap", "ma", "most", "persze", "köszönöm", "koszonom",
-                      "oui", "non", "ok", "d accord", "peut être", "peut-etre", "demain", "merci", "bien",
-                      "yes", "no", "okay", "maybe", "tomorrow", "thanks"
-                  };
-                  for(String r: shortReplies) if(t.equals(r)) return true;
-                  return words <= 2 && t.length() <= 14;
-              }
-
-              int forceTimedLiveBlockCut(String s) {
-                  if(s == null) return -1;
-                  String t = s.trim();
-                  if(t.length() == 0) return -1;
-
-                  int cut = smartLinguisticCut(s);
-                  if(cut > 0) return cut;
-
-                  int end = s.length();
-                  while(end > 0 && Character.isWhitespace(s.charAt(end - 1))) end--;
-                  if(end <= 0) return -1;
-
-                  // 8 mp-nél nincs további várakozás. Legfeljebb az utolsó nagyon friss, rövid token marad bent,
-                  // de csak akkor, ha előtte már van értelmes prefix. Így nem vágunk fél szót, de nem áll meg a tolmács.
-                  if(hasPossiblyUnstableTrailingToken(t)) {
-                      int cut2 = lastWhitespaceBeforeLastToken(s);
-                      if(cut2 > 0) {
-                          String prefix = s.substring(0, cut2).trim();
-                          if(prefix.length() >= 2) return cut2;
-                      }
-                  }
-                  return end;
               }
 
               int safeWholeBufferFlushCut(String s) {
@@ -2445,7 +2428,7 @@ jobs:
                   int words = t.split("\\s+").length;
                   long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
                   long age = started > 0L ? System.currentTimeMillis() - started : 0L;
-                  return age >= MIN_REAL_SPEECH_MS && words <= 5;
+                  return age >= 1000 && words <= 5;
               }
 
               boolean shouldForceFlushWholeBuffer(String s) {
@@ -2629,11 +2612,37 @@ jobs:
                   b.sourceTop = sourceIsTop;
                   b.translatedOk = false;
                   b.pendingSourceText = original == null ? "" : original.trim();
-                  if(sourceIsTop) b.topText = b.pendingSourceText;
-                  else b.bottomText = b.pendingSourceText;
+                  String visible = userVisibleSpeechTextOrEmpty(b.pendingSourceText);
+                  if(sourceIsTop) b.topText = visible;
+                  else b.bottomText = visible;
                   textBlocks.add(b);
+                  // Csak valódi felhasználói beszédet mutatunk azonnal. Ha a szöveg technikai/prompt/meta
+                  // gyanús, pendingSourceText-ben marad fordításra/újrapróbálásra, de nem szivárog a két ablakba.
                   renderBlocksKeepView();
                   return textBlocks.size() - 1;
+              }
+
+              String userVisibleSpeechTextOrEmpty(String text) {
+                  if(text == null) return "";
+                  String cleaned = cleanTranscriptForSelectedPair(text).trim();
+                  if(cleaned.length() == 0) return "";
+                  if(looksLikeInternalLeak(cleaned)) return "";
+                  return cleaned;
+              }
+
+              boolean looksLikeInternalLeak(String text) {
+                  if(text == null) return false;
+                  String l = text.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
+                  if(l.length() == 0) return false;
+                  String[] bad = {
+                      "live_pair_classify_and_translate", "selected_top_lang", "selected_bottom_lang", "source_lang:",
+                      "original:", "translation:", "instructions", "system prompt", "developer message", "context profile:",
+                      "domain glossary", "input_audio_buffer", "response.create", "conversation.item.create", "api request",
+                      "api response", "metadata", "metaadat", "prompt", "cannot translate", "can't translate",
+                      "nem tudom lefordítani", "nem fordíthatom", "tartalom miatt", "abusive content", "policy"
+                  };
+                  for(String b: bad) if(l.contains(b)) return true;
+                  return false;
               }
 
               boolean isRecentlyDisplayedSourceDuplicate(boolean sourceIsTop, String original) {
@@ -2762,6 +2771,11 @@ jobs:
 
                       original = cleanTranscriptForSelectedPair(original);
                       translation = cleanTranscriptForSelectedPair(cleanOneBlockTranslation(translation));
+
+                      if(looksLikeInternalLeak(original) || looksLikeInternalLeak(translation)) {
+                          retryLiveBlockOrRender(id);
+                          return;
+                      }
 
                       if(original.length() == 0 || translation.length() == 0) {
                           retryLiveBlockOrRender(id);
