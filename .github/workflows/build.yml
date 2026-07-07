@@ -1,4 +1,4 @@
-name: Build Android APK V263
+name: Build Android APK V268
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 263; versionName = "26.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 268; versionName = "26.8" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V263" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V268" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -154,7 +154,7 @@ jobs:
 
           cat > app/src/main/java/com/attila/forditokonzol/MainActivity.java <<'EOF'
           package com.attila.forditokonzol;
-
+          
           import android.Manifest;
           import android.app.*;
           import android.content.*;
@@ -183,7 +183,7 @@ jobs:
           import java.util.*;
           import java.util.concurrent.*;
           import okhttp3.*;
-
+          
           public class MainActivity extends Activity {
               static final int CLIPBOARD_SPEECH_REQUEST = 7301;
               TextView state;
@@ -225,13 +225,13 @@ jobs:
               static final int MAX_STT_OUTSTANDING_BLOCKS = 5;
               static final int MAX_CONSECUTIVE_STT_FAILURES = 3;
               int consecutiveSttFailures = 0;
-
+          
               TextToSpeech tts;
               boolean ttsReady = false;
               boolean ttsSpeaking = false;
               int ttsSeq = 0;
               String currentTtsUtteranceId = "";
-
+          
               boolean connected = false;
               boolean streaming = false;
               boolean topActive = true;
@@ -292,7 +292,7 @@ jobs:
               long liveBufferStartedAt = 0L;
               long liveLastTranscriptDeltaAt = 0L;
               int liveIdleFlushToken = 0;
-              // V263: eseménysorrend-védelem. Nem várakoztat, csak megjegyzi,
+              // V268: eseménysorrend-védelem. Nem várakoztat, csak megjegyzi,
               // hogy a delta útvonal már adott ki blokkot, ezért a közvetlen completed/idle
               // nem zárhatja le ugyanazt még egyszer.
               long lastLiveBlockReleasedAt = 0L;
@@ -307,10 +307,10 @@ jobs:
               boolean programmaticChange = false;
               int topManualStart = -1;
               int bottomManualStart = -1;
-
+          
               static final int MAX_BLOCK_SENTENCES = 3;
               static final int MAX_BLOCK_CHARS = 260;
-
+          
               static class TextBlock {
                   String topText = "";
                   String bottomText = "";
@@ -322,8 +322,8 @@ jobs:
                   String pairTopCode = "";
                   String pairBottomCode = "";
               }
-
-
+          
+          
               static class OrderedSttResult {
                   SttCandidate candidate;
                   String topCode;
@@ -331,11 +331,11 @@ jobs:
                   long blockSeq;
                   long blockTimestampMs;
               }
-
+          
               final ArrayList<TextBlock> textBlocks = new ArrayList<>();
               final ArrayList<int[]> topRanges = new ArrayList<>();
               final ArrayList<int[]> bottomRanges = new ArrayList<>();
-
+          
               String apiKey = "";
               String model = "gpt-realtime-2";
               String transcriptionModel = "gpt-4o-transcribe";
@@ -350,7 +350,7 @@ jobs:
               String openAiNoiseMode = "off";
               String topLang = "hu";
               String bottomLang = "fr";
-
+          
               final String[][] langs = {
                   {"Automatikus","AUTO",""},
                   {"Magyar","HU","hu"},
@@ -364,12 +364,12 @@ jobs:
                   {"Szlovák","SK","sk"},
                   {"Szlovén","SL","sl"}
               };
-
+          
               final String[][] models = {
                   {"GPT-4o Transcribe / pontosabb","gpt-4o-transcribe"},
                   {"GPT-4o Mini Transcribe / olcsóbb","gpt-4o-mini-transcribe"}
               };
-
+          
               final String[][] profiles = {
                   {"Általános beszélgetés","general"},
                   {"Turizmus / utazás","tourism"},
@@ -389,52 +389,52 @@ jobs:
                   {"Közösségi média / chat","social_media"},
                   {"Autószerviz / gépjavítás","service"}
               };
-
+          
               final String[][] modes = {
                   {"Pontos","precise"},
                   {"Természetes","natural"},
                   {"Tolmács","interpreter"}
               };
-
+          
               final String[][] vadModes = {
                   {"Gyors élő tolmács – 0,7 mp csend / 8 mp max","high"},
                   {"Kiegyensúlyozott – 1,0 mp csend / 12 mp max","medium"},
                   {"Nyugodtabb beszéd – 1,4 mp csend / 16 mp max","low"},
                   {"Automatikus – kiegyensúlyozott","auto"}
               };
-
+          
               final String[][] micGateModes = {
                   {"Kikapcsolva – minden hang megy","sensitive"},
                   {"Enyhe – kevés üresjárat szűrés","gate_low"},
                   {"Normál – ajánlott","normal"},
                   {"Erős – zajos környezet","gate_high"}
               };
-
+          
               final String[][] audioSourceModes = {
                   {"Beszédfelismerés / ajánlott","recognition"},
                   {"Kommunikáció / régi","communication"},
                   {"Nyers mikrofon / próba","unprocessed"},
                   {"Alap mikrofon","mic"}
               };
-
+          
               final String[][] androidEffectsModes = {
                   {"KI / nyers – nincs Android feldolgozás","off"},
                   {"Csak Android zajszűrés / NS","ns_only"},
                   {"Android NS + AGC","recommended"},
                   {"Teljes Android: NS + AGC + AEC","full"}
               };
-
+          
               final String[][] openAiNoiseModes = {
                   {"OpenAI zajszűrés ki","off"},
                   {"OpenAI near_field / telefon közeli","near_field"},
                   {"OpenAI far_field / távolabbi mikrofon","far_field"}
               };
-
+          
               final String[][] soundProfiles = {
                   {"Általános – ajánlott","general"},
                   {"Kamion / zajos környezet","truck_noisy"}
               };
-
+          
               @Override public void onCreate(Bundle b) {
                   super.onCreate(b);
                   sp = getSharedPreferences("settings", MODE_PRIVATE);
@@ -443,20 +443,20 @@ jobs:
                   interpreterMode = false;
                   interpreterAudioMode = "off";
                   openAiNoiseMode = sp.getString("openAiNoiseMode", "off");
-                  applyV263StableDefaultsOnce();
+                  applyV268StableDefaultsOnce();
                   ui();
                   reqMic();
                   reqNotifications();
                   initTts();
                   new Handler().postDelayed(() -> { if(floatingTranslatorEnabled) ensureFloatingTranslator(); }, 600);
               }
-
+          
               void load() {
                   apiKey = sp.getString("apiKey", "");
                   model = "gpt-realtime-2";
                   transcriptionModel = sp.getString("transcriptionModel", "gpt-4o-transcribe");
                   if(!"gpt-4o-transcribe".equals(transcriptionModel) && !"gpt-4o-mini-transcribe".equals(transcriptionModel)) transcriptionModel = "gpt-4o-transcribe";
-                  // V263: a fordítási Realtime kapcsolat fixen gpt-realtime-2; a menü csak a beszédfelismerő modellt váltja.
+                  // V268: a fordítási Realtime kapcsolat fixen gpt-realtime-2; a menü csak a beszédfelismerő modellt váltja.
                   // A gpt-realtime-translate külön /v1/realtime/translations végpontot és egyirányú target output nyelvet várna,
                   // ezért itt nem engedjük visszatölteni régi mentésből sem.
                   if(!"gpt-realtime-2".equals(model)) model = "gpt-realtime-2";
@@ -487,9 +487,9 @@ jobs:
                   if("normal".equals(vadMode)) vadMode = "medium";
                   applyInputProfileValues();
               }
-
-              void applyV263StableDefaultsOnce() {
-                  // V263: menü-átszervezés. A V254 beállításokat nem írjuk felül frissítéskor.
+          
+              void applyV268StableDefaultsOnce() {
+                  // V268: menü-átszervezés. A V254 beállításokat nem írjuk felül frissítéskor.
                   // Új telepítésnél a korábbi stabil alapok maradnak, a háttér mód továbbra is minden induláskor kikapcsolt.
                   int last = sp.getInt("stableDefaultsVersion", 0);
                   if(last < 245) {
@@ -511,7 +511,7 @@ jobs:
                       save();
                   }
               }
-
+          
               void save() {
                   sp.edit()
                     .putString("apiKey", apiKey)
@@ -537,22 +537,22 @@ jobs:
                     .putString("bottomLang", bottomLang)
                     .apply();
               }
-
+          
               void ui() {
                   LinearLayout root = new LinearLayout(this);
                   root.setOrientation(LinearLayout.VERTICAL);
                   root.setPadding(8,62,8,190);
                   root.setBackgroundColor(Color.rgb(16,19,24));
                   setContentView(root);
-
+          
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V263");
+                  TextView title = label("Fordito_V268");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
                   bar.addView(state, new LinearLayout.LayoutParams(0,42,1));
                   root.addView(bar);
-
+          
                   LinearLayout langRow = row();
                   topLangBtn = btn("FELSŐ");
                   
@@ -561,7 +561,7 @@ jobs:
                   
                   langRow.addView(bottomLangBtn, new LinearLayout.LayoutParams(0,85,1));
                   root.addView(langRow);
-
+          
                   topBox = box("FELSŐ ABLAK — átirat / fordítás");
                   bottomBox = box("ALSÓ ABLAK — átirat / fordítás");
                   manualEditMode=true; setManualEditMode(true);
@@ -570,7 +570,7 @@ jobs:
                   divider.setBackgroundColor(Color.rgb(95,100,108));
                   root.addView(divider, new LinearLayout.LayoutParams(-1,8));
                   root.addView(bottomBox, new LinearLayout.LayoutParams(-1,0,1));
-
+          
                   LinearLayout controls = row();
                   micBtn = btn("MIKROFON");
                   translateBtn = btn("FORDÍT");
@@ -579,8 +579,8 @@ jobs:
                   controls.addView(translateBtn, new LinearLayout.LayoutParams(0,85,1));
                   controls.addView(menuBtn, new LinearLayout.LayoutParams(0,85,1));
                   root.addView(controls);
-
-                  // V263: sima kattintás / fókuszváltás ne állítsa le a mikrofont.
+          
+                  // V268: sima kattintás / fókuszváltás ne állítsa le a mikrofont.
                   // Az aktív oldalt továbbra is átállítjuk, de live munkát nem törlünk.
                   topBox.setOnClickListener(v -> selectActiveBox(true));
                   bottomBox.setOnClickListener(v -> selectActiveBox(false));
@@ -601,16 +601,16 @@ jobs:
                   translateBtn.setOnClickListener(v -> manualTranslate());
                   menuBtn.setOnClickListener(v -> menu());
                   menuBtn.setOnLongClickListener(v -> { clearBothBoxes(); return true; });
-
+          
                   updateButtons();
               }
-
+          
               LinearLayout row() {
                   LinearLayout l = new LinearLayout(this);
                   l.setOrientation(LinearLayout.HORIZONTAL);
                   return l;
               }
-
+          
               TextView label(String s) {
                   TextView t = new TextView(this);
                   t.setText(s);
@@ -618,7 +618,7 @@ jobs:
                   t.setTextSize(12);
                   return t;
               }
-
+          
               Button btn(String s) {
                   Button b = new Button(this);
                   b.setText(s);
@@ -629,7 +629,7 @@ jobs:
                   b.setPadding(4,2,4,2);
                   return b;
               }
-
+          
               EditText box(String hint) {
                   EditText e = new EditText(this);
                   e.setHint(hint);
@@ -651,7 +651,7 @@ jobs:
                   e.setTextIsSelectable(false);
                   return e;
               }
-
+          
               void setManualEditMode(boolean enabled) {
                   manualEditMode = enabled;
                   try {
@@ -676,7 +676,7 @@ jobs:
                       }
                                         } catch(Exception ignored) {}
               }
-
+          
               void toggleManualEditMode() {
                   setManualEditMode(!manualEditMode);
                   if(manualEditMode) {
@@ -686,7 +686,7 @@ jobs:
                       Toast.makeText(this, "Ablakok lezárva", Toast.LENGTH_SHORT).show();
                   }
               }
-
+          
               void hideKeyboard() {
                   try {
                       InputMethodManager imm = (InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
@@ -694,7 +694,7 @@ jobs:
                       if(imm != null && v != null) imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
                   } catch(Exception ignored) {}
               }
-
+          
               TextWatcher manualWatcher(final boolean top) {
                   return new TextWatcher() {
                       public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
@@ -704,27 +704,27 @@ jobs:
                       }
                       public void afterTextChanged(Editable e) {
                           if(programmaticChange) return;
-                                  // V263: nincs kézi blokkállapot.
+                                  // V268: nincs kézi blokkállapot.
                           // Gépelés közben nem bontjuk újra a blokkokat.
                           // FORDÍT gombnál a teljes aktív ablak fordul újra a másik ablakba.
                           updateButtons();
                       }
                   };
               }
-
+          
               void selectActiveBox(boolean top) {
                   if(!manualEditMode || uiLockedForLive || finalizingStop) return;
                   manualTopSource = top;
                   topActive = top;
                   updateButtons();
               }
-
+          
               void enterManualEditMode(boolean top) {
                   if(!manualEditMode || uiLockedForLive || finalizingStop) return;
                   manualTopSource = top;
                   topActive = top;
-
-                  // V263: kattintás, fókusz és gépelés miatt nem állítjuk le a mikrofont.
+          
+                  // V268: kattintás, fókusz és gépelés miatt nem állítjuk le a mikrofont.
                   // Kézi FORDÍT gombnál külön útvonal dolgozik, ezért nem kell itt élő
                   // mikrofon-stop. Csak a régi kézi válasz maradékát takarítjuk, ha volt.
                   if(!streaming) {
@@ -735,7 +735,7 @@ jobs:
                               ws.send(cancel.toString());
                           }
                       } catch(Exception ignored) {}
-
+          
                       responseInProgress = false;
                       liveTranslateMode = false;
                       pendingLiveBlockId = -1;
@@ -744,7 +744,7 @@ jobs:
                   }
                   updateButtons();
               }
-
+          
               ArrayList<String> splitTextToBlocks(String text) {
                   ArrayList<String> out = new ArrayList<>();
                   if(text == null) return out;
@@ -771,13 +771,13 @@ jobs:
                   }
                   return out;
               }
-
+          
               void addCleanBlock(ArrayList<String> out, String s) {
                   if(s == null) return;
                   String clean = s.trim();
                   if(clean.length() > 0) out.add(clean);
               }
-
+          
               void renderPeerWindow(boolean editedTop) {
                   // A szerkesztett ablakban a felhasználó éppen gépel: ahhoz nem nyúlunk,
                   // hogy ne ugorjon a kurzor. A másik ablakot viszont azonnal a blokklistából
@@ -786,7 +786,7 @@ jobs:
                   int peerScroll = peer.getScrollY();
                   int peerSel = Math.max(0, peer.getSelectionStart());
                   boolean peerHadFocus = peer.hasFocus();
-
+          
                   StringBuilder sb = new StringBuilder();
                   for(int i=0;i<textBlocks.size();i++) {
                       TextBlock b = textBlocks.get(i);
@@ -794,7 +794,7 @@ jobs:
                       sb.append(part == null ? "" : part);
                       if(i < textBlocks.size()-1) sb.append("\n\n");
                   }
-
+          
                   programmaticChange = true;
                   try {
                       peer.setText(sb.toString());
@@ -805,7 +805,7 @@ jobs:
                       programmaticChange = false;
                   }
               }
-
+          
               void addBlock(boolean sourceIsTop, String original, String translation) {
                   ArrayList<String> originals = splitTextToBlocks(original);
                   ArrayList<String> translations = splitTextToBlocks(translation);
@@ -830,18 +830,18 @@ jobs:
                   }
                   renderBlocks();
               }
-
+          
               void renderBlocks() {
                   renderBlocks(false);
               }
-
+          
               void renderBlocksKeepView() {
-                  // V263: élő fordítás alatt ne őrizze meg a régi scroll pozíciót,
+                  // V268: élő fordítás alatt ne őrizze meg a régi scroll pozíciót,
                   // mert ettől nem megy le az ablak az új sorokra.
                   // Kézi/készenléti módban marad a régi nézetmegőrzés.
                   renderBlocks(!(streaming || uiLockedForLive || finalizingStop));
               }
-
+          
               void renderBlocks(boolean keepView) {
                   int topScroll = topBox.getScrollY();
                   int bottomScroll = bottomBox.getScrollY();
@@ -849,36 +849,36 @@ jobs:
                   int bottomSel = Math.max(0, bottomBox.getSelectionStart());
                   boolean topHadFocus = topBox.hasFocus();
                   boolean bottomHadFocus = bottomBox.hasFocus();
-
+          
                   StringBuilder top = new StringBuilder();
                   StringBuilder bottom = new StringBuilder();
                   topRanges.clear();
                   bottomRanges.clear();
-
+          
                   int visibleIndex = 0;
                   for(int i=0;i<textBlocks.size();i++) {
                       TextBlock b = textBlocks.get(i);
                       String bt = b.topText == null ? "" : b.topText;
                       String bb = b.bottomText == null ? "" : b.bottomText;
                       if(bt.trim().length() == 0 && bb.trim().length() == 0) continue;
-
+          
                       if(visibleIndex > 0) {
                           top.append("\n");
                           bottom.append("\n");
                       }
-
+          
                       int ts = top.length();
                       top.append(bt);
                       int te = top.length();
                       topRanges.add(new int[]{ts, te});
-
+          
                       int bs = bottom.length();
                       bottom.append(bb);
                       int be = bottom.length();
                       bottomRanges.add(new int[]{bs, be});
                       visibleIndex++;
                   }
-
+          
                   programmaticChange = true;
                   try {
                       topBox.setText(top.toString());
@@ -898,7 +898,7 @@ jobs:
                       programmaticChange = false;
                   }
               }
-
+          
               void initTts() {
                   try {
                       tts = new TextToSpeech(this, status -> {
@@ -922,7 +922,7 @@ jobs:
                       });
                   } catch(Exception ignored) {}
               }
-
+          
               void finishTtsUtterance(String utteranceId) {
                   try {
                       if(utteranceId == null || !utteranceId.equals(currentTtsUtteranceId)) return;
@@ -931,7 +931,7 @@ jobs:
                       ttsSpeaking = false;
                   } catch(Exception ignored) {}
               }
-
+          
               Locale localeForTts(String lang) {
                   String l = lang == null ? "" : lang.toLowerCase(Locale.ROOT);
                   if(l.equals("hu")) return new Locale("hu", "HU");
@@ -946,7 +946,7 @@ jobs:
                   if(l.equals("sl")) return new Locale("sl", "SI");
                   return Locale.getDefault();
               }
-
+          
               synchronized void speakFinalBlockOnce(TextBlock b, String translatedText, String targetLang) {
                   try {
                       if(b == null || b.ttsSpoken) return;
@@ -954,12 +954,12 @@ jobs:
                       if(translatedText == null) return;
                       String s = translatedText.trim();
                       if(s.isEmpty()) return;
-
+          
                       b.ttsSpoken = true;
                       try { tts.stop(); } catch(Exception ignored) {}
                       try { tts.setLanguage(localeForTts(targetLang)); } catch(Exception ignored) {}
                       try { tts.setSpeechRate(("hu".equals(targetLang) || "fr".equals(targetLang)) ? 1.17f : 1.10f); } catch(Exception ignored) {}
-
+          
                       currentTtsUtteranceId = "fordito_tts_" + (++ttsSeq);
                       ttsSpeaking = true;
                       Bundle params = new Bundle();
@@ -973,27 +973,27 @@ jobs:
                       currentTtsUtteranceId = "";
                   }
               }
-
+          
               synchronized void speakManualOnce(String translatedText, String targetLang) {
                   TextBlock b = new TextBlock();
                   speakFinalBlockOnce(b, translatedText, targetLang);
               }
-
+          
               void clearSpeakState() {
                   currentTtsUtteranceId = "";
                   ttsSpeaking = false;
               }
-
+          
               void reqMic() {
                   if(Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
                       requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1001);
               }
-
+          
               void reqNotifications() {
                   if(Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
                       requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1002);
               }
-
+          
               void startBackgroundForegroundServiceIfAllowed() {
                   if(!backgroundScreenAllowed) return;
                   try {
@@ -1005,15 +1005,15 @@ jobs:
                       backgroundScreenAllowed = false;
                   }
               }
-
+          
               void stopBackgroundForegroundService() {
                   try { stopService(new Intent(this, VoiceForegroundService.class)); } catch(Exception ignored) {}
               }
-
+          
               boolean hasKey() {
                   return apiKey != null && apiKey.trim().startsWith("sk-");
               }
-
+          
               void start(boolean withAudio) {
                   if(finalizingStop) {
                       state.setText("várj – az előző fordítás lezárása folyamatban");
@@ -1042,14 +1042,14 @@ jobs:
                   if(withAudio && sessionStart == 0L) sessionStart = System.currentTimeMillis();
                   if(withAudio && System.currentTimeMillis() - sessionStart > 20L*60L*1000L) { confirm(); return; }
                   if(withAudio) startBackgroundForegroundServiceIfAllowed();
-
+          
                   state.setText("kapcsolódás");
                   client = new OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build();
                   Request req = new Request.Builder()
                     .url("wss://api.openai.com/v1/realtime?model=" + model)
                     .addHeader("Authorization", "Bearer " + apiKey.trim())
                     .build();
-
+          
                   ws = client.newWebSocket(req, new WebSocketListener() {
                       @Override public void onOpen(WebSocket w, Response r) {
                           connected = true;
@@ -1075,15 +1075,15 @@ jobs:
                               }
                           });
                       }
-
+          
                       @Override public void onMessage(WebSocket w, String s) {
                           event(s);
                       }
-
+          
                       @Override public void onFailure(WebSocket w, Throwable t, Response r) {
                           runOnUiThread(() -> handleConnectionFailure(t));
                       }
-
+          
                       @Override public void onClosed(WebSocket w, int c, String reason) {
                           connected = false;
                           runOnUiThread(() -> {
@@ -1093,11 +1093,11 @@ jobs:
                       }
                   });
               }
-
+          
               String liveTranscriptionPrompt() {
                   return "";
               }
-
+          
               void sessionUpdate() {
                   try {
                       JSONObject session = new JSONObject();
@@ -1105,8 +1105,8 @@ jobs:
                       session.put("model", model);
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
-
-                      // V263: hanglánc-próba: Android hangforrás + Android effektek + OpenAI zajszűrés menüből állítható.
+          
+                      // V268: hanglánc-próba: Android hangforrás + Android effektek + OpenAI zajszűrés menüből állítható.
                       // Tapasztalat: kamionfülkében a túl szigorú helyi kapu levágta a beszéd elejét.
                       // Ezért az alapérték érzékenyebb: a beszéd sértetlenül menjen át, az OpenAI VAD dönt.
                       JSONObject input = new JSONObject();
@@ -1114,29 +1114,29 @@ jobs:
                       format.put("type", "audio/pcm");
                       format.put("rate", 24000);
                       input.put("format", format);
-
-                      // V263: egyetlen blokk-gazda van. A szerver automatikus VAD/commit ki van kapcsolva,
+          
+                      // V268: egyetlen blokk-gazda van. A szerver automatikus VAD/commit ki van kapcsolva,
                       // mert a helyi hibrid zárás kezeli a 0,7/1,0/1,4 mp csendet és a 8/12/16 mp max időt.
                       // Így nem tud ugyanarra vagy üres bufferre második commit érkezni.
                       input.put("turn_detection", JSONObject.NULL);
-
-                      // V263: OpenAI Realtime oldali zajszűrés menüből.
+          
+                      // V268: OpenAI Realtime oldali zajszűrés menüből.
                       // near_field: telefon/headset közeli beszéd. far_field: távolabb lévő mikrofon.
                       if(!"off".equals(openAiNoiseMode)) {
                           JSONObject nr = new JSONObject();
                           nr.put("type", openAiNoiseMode);
                           input.put("noise_reduction", nr);
                       }
-
-                      // V263: a Realtime kapcsolat csak fordít. A beszédfelismerés nem fut itt,
+          
+                      // V268: a Realtime kapcsolat csak fordít. A beszédfelismerés nem fut itt,
                       // mert ugyanazt a lezárt helyi hangblokkot két párhuzamos, nyelvre kényszerített
                       // Transcription API kérés dolgozza fel a főablak aktuális két nyelvével.
-
+          
                       JSONObject audio = new JSONObject();
                       audio.put("input", input);
-
+          
                       session.put("audio", audio);
-
+          
                       JSONObject evt = new JSONObject();
                       evt.put("type", "session.update");
                       evt.put("session", session);
@@ -1145,7 +1145,7 @@ jobs:
                       android.util.Log.e("Fordito", "session hiba", e);
                   }
               }
-
+          
               String pairRules() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
@@ -1154,7 +1154,7 @@ jobs:
                     "Short answers, questions and fragments are valid speech. " +
                     "Never rewrite, repair, extend or reinterpret the source transcript. ";
               }
-
+          
               String instructions() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
@@ -1169,7 +1169,7 @@ jobs:
                     "Conversation profile: " + profilePrompt() + " " +
                     "Translation mode: " + modePrompt();
               }
-
+          
               String manualBlockInstructions() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
@@ -1183,7 +1183,7 @@ jobs:
                     "No markdown, no quotes, no explanation. " +
                     "Keep meaning, context and tone. " + modePrompt();
               }
-
+          
               String liveBlockInstructions(boolean ignoredSourceIsTop, String frozenTop, String frozenBottom) {
                   String top = frozenTop;
                   String bottom = frozenBottom;
@@ -1199,13 +1199,13 @@ jobs:
                     "Return exactly three lines and nothing else: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <copy TEXT exactly> then TRANSLATION: <direct natural translation into the other selected language>. " +
                     "Do not output markdown, quotes or explanation. " + modePrompt();
               }
-
+          
               String modePrompt() {
                   if(mode.equals("precise")) return "Precise mode: stay close to the meaning, do not expand, but always use correct natural grammar. Do not censor or mask words.";
                   if(mode.equals("interpreter")) return "Interpreter mode: use context strongly, make the translation sound like a human interpreter, but do not invent facts. Do not censor or mask words.";
                   return "Natural mode: translate meaning naturally and fluently, with light correction only. Do not censor or mask words.";
               }
-
+          
               String clipboardContextPrompt() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
@@ -1242,20 +1242,20 @@ jobs:
                   }
                   return ctx;
               }
-
-
+          
+          
               String micGateLabel() { return labelOf(micGateModes, micGateMode); }
               String audioSourceLabel() { return labelOf(audioSourceModes, audioSourceMode); }
               String androidEffectsLabel() { return labelOf(androidEffectsModes, androidEffectsMode); }
               String openAiNoiseLabel() { return labelOf(openAiNoiseModes, openAiNoiseMode); }
-
+          
               double vadThreshold() {
                   if("high".equals(vadMode)) return 0.50;     // gyors/érzékeny: halk beszédnél könnyebben indul
                   if("medium".equals(vadMode)) return 0.58;   // V254 alap: kamionban is ne kelljen ordítani
                   if("auto".equals(vadMode)) return 0.58;
                   return 0.64;                                // várakozó: hosszabb, óvatosabb blokkzárás
               }
-
+          
               int vadSilenceMs() {
                   // V254 hibrid blokkzárás: természetes csend VAGY kemény max. blokkidő.
                   // A gyors mód az alap élő tolmácsoláshoz: rövid válaszoknál nem vár tapsra,
@@ -1265,9 +1265,9 @@ jobs:
                   if("auto".equals(vadMode)) return 1000;
                   return 1400;
               }
-
+          
               int micGateThreshold() {
-                  // V263: a kapu már nem csak nulláz, hanem üresjáratban a küldést is megfogja.
+                  // V268: a kapu már nem csak nulláz, hanem üresjáratban a küldést is megfogja.
                   // sensitive = kikapcsolva: minden hangcsomag megy, a régi folyamatos stream viselkedéshez.
                   if("sensitive".equals(micGateMode)) return 0;
                   if("gate_low".equals(micGateMode)) return 100;
@@ -1275,7 +1275,7 @@ jobs:
                   if("gate_high".equals(micGateMode)) return 220;
                   return 100;
               }
-
+          
               int avgAbsPcm16(byte[] data, int len) {
                   if(data == null || len < 2) return 0;
                   long sum = 0;
@@ -1290,14 +1290,14 @@ jobs:
                   if(samples == 0) return 0;
                   return (int)(sum / samples);
               }
-
+          
               void clearPreRollAudio() {
                   synchronized(preRollAudioChunks) {
                       preRollAudioChunks.clear();
                       preRollAudioBytes = 0;
                   }
               }
-
+          
               void rememberPreRollAudio(byte[] data, int len) {
                   if(data == null || len <= 0) return;
                   byte[] copy = Arrays.copyOf(data, len);
@@ -1311,7 +1311,7 @@ jobs:
                       }
                   }
               }
-
+          
               ArrayList<byte[]> takePreRollAudio() {
                   ArrayList<byte[]> out = new ArrayList<>();
                   synchronized(preRollAudioChunks) {
@@ -1323,8 +1323,8 @@ jobs:
                   }
                   return out;
               }
-
-              // V263: az audio egyetlen helyi blokkba gyűlik. A lezárt blokk ugyanazzal a
+          
+              // V268: az audio egyetlen helyi blokkba gyűlik. A lezárt blokk ugyanazzal a
               // hanganyaggal, párhuzamosan fut a főablak két kiválasztott nyelvén.
               // Nincs HU/FR fix kötés: mindig topLang és bottomLang aktuális ISO-kódja dolgozik.
               void sendAudioChunk(byte[] chunk) throws Exception {
@@ -1332,7 +1332,7 @@ jobs:
                   synchronized(dualSttLock) { dualSttPcm.write(chunk, 0, chunk.length); }
                   forcedAudioSegmentBufferedBytes += chunk.length;
               }
-
+          
               byte[] takeDualSttSegment() {
                   synchronized(dualSttLock) {
                       byte[] out = dualSttPcm.toByteArray();
@@ -1340,7 +1340,7 @@ jobs:
                       return out;
                   }
               }
-
+          
               void commitInputAudioBufferForHybridBlockClosing(String reason) throws Exception {
                   if(!connected || !streaming) return;
                   if(forcedAudioSegmentBufferedBytes < minHybridCommitBytes()) return;
@@ -1350,19 +1350,19 @@ jobs:
                   resetForcedAudioSegmentState(false);
                   transcribeSelectedPairInParallel(pcm);
               }
-
+          
               void clearInputAudioBufferForHybridBlockClosing(String reason) throws Exception {
                   takeDualSttSegment();
                   resetForcedAudioSegmentState(false);
               }
-
+          
               static class SttCandidate {
                   String text = "";
                   double score = -999999.0;
                   boolean sourceTop = true;
                   boolean ok = false;
               }
-
+          
               void transcribeSelectedPairInParallel(byte[] pcm) {
                   final String topCode = apiCode(topLang);
                   final String bottomCode = apiCode(bottomLang);
@@ -1370,17 +1370,17 @@ jobs:
                   synchronized(dualSttStateLock) { generation = sttRunGeneration; }
                   transcribeSelectedPairInParallel(pcm, topCode, bottomCode, generation);
               }
-
+          
               void transcribeSelectedPairInParallel(byte[] pcm, String topCode, String bottomCode, long runGeneration) {
                   if(pcm == null || pcm.length < minHybridCommitBytes()) return;
                   if(topCode.length() == 0 || bottomCode.length() == 0 || topCode.equals(bottomCode)) return;
-
+          
                   final long blockSeq;
                   final long blockTimestampMs = System.currentTimeMillis();
                   synchronized(dualSttStateLock) {
                       if(runGeneration != sttRunGeneration || !streaming) return;
                       long outstanding = nextSttBlockSeq - nextSttEmitSeq;
-                      // V263: az érkező blokkot is beleszámoljuk. Így az 5. elmaradó blokk már hiba,
+                      // V268: az érkező blokkot is beleszámoljuk. Így az 5. elmaradó blokk már hiba,
                       // nem csak a 6. próbálkozásnál vesszük észre.
                       if(outstanding + 1 >= MAX_STT_OUTSTANDING_BLOCKS) {
                           runOnUiThread(() -> failSttPipeline("Rendszerhiba: a beszédfelismerés 5 blokkal lemaradt."));
@@ -1389,14 +1389,14 @@ jobs:
                       dualSttBlocksInFlight++;
                       blockSeq = nextSttBlockSeq++;
                   }
-
+          
                   final byte[] wav = pcmToWav24kMono(pcm);
                   try {
                       CompletableFuture<SttCandidate> topFuture = CompletableFuture.supplyAsync(
                           () -> transcribeForcedLanguage(wav, topCode, true), dualSttExec);
                       CompletableFuture<SttCandidate> bottomFuture = CompletableFuture.supplyAsync(
                           () -> transcribeForcedLanguage(wav, bottomCode, false), dualSttExec);
-
+          
                       topFuture.thenCombine(bottomFuture, (ca, cb) -> {
                           if(ca.ok && cb.ok) return ca.score >= cb.score ? ca : cb;
                           if(ca.ok) return ca;
@@ -1408,7 +1408,7 @@ jobs:
                       finishParallelSttBlock(blockSeq, blockTimestampMs, null, e, runGeneration, topCode, bottomCode);
                   }
               }
-
+          
               void finishParallelSttBlock(long blockSeq, long blockTimestampMs, SttCandidate chosen, Throwable error,
                                           long runGeneration, String topCode, String bottomCode) {
                   ArrayList<OrderedSttResult> ready = new ArrayList<>();
@@ -1451,7 +1451,7 @@ jobs:
                   });
                   runOnUiThread(() -> tryFinishGracefulStop());
               }
-
+          
               void failSttPipeline(String message) {
                   if(!streaming && !finalizingStop) return;
                   state.setText(message);
@@ -1459,13 +1459,13 @@ jobs:
                   stop();
                   runOnUiThread(() -> { state.setText(message); updateButtons(); });
               }
-
+          
               boolean isCurrentSttRun(long runGeneration, String topCode, String bottomCode) {
                   synchronized(dualSttStateLock) {
                       return streaming && runGeneration == sttRunGeneration;
                   }
               }
-
+          
               SttCandidate transcribeForcedLanguage(byte[] wav, String lang, boolean sourceTop) {
                   SttCandidate out = new SttCandidate();
                   out.sourceTop = sourceTop;
@@ -1498,7 +1498,7 @@ jobs:
                       }
                   } catch(Exception ignored) { return out; }
               }
-
+          
               void acceptParallelSttWinner(SttCandidate c, String pairTopCode, String pairBottomCode) {
                   if(c == null || !c.ok) return;
                   String text = cleanTranscriptForSelectedPair(c.text).trim();
@@ -1510,7 +1510,7 @@ jobs:
                   liveTranslateQueue.add(id);
                   processNextLiveTranslation();
               }
-
+          
               byte[] pcmToWav24kMono(byte[] pcm) {
                   int dataLen = pcm == null ? 0 : pcm.length;
                   ByteArrayOutputStream out = new ByteArrayOutputStream(dataLen + 44);
@@ -1526,44 +1526,44 @@ jobs:
               void writeAscii(ByteArrayOutputStream o, String x) throws Exception { o.write(x.getBytes("US-ASCII")); }
               void writeLe16(ByteArrayOutputStream o, int v) { o.write(v & 255); o.write((v >> 8) & 255); }
               void writeLe32(ByteArrayOutputStream o, int v) { o.write(v & 255); o.write((v >> 8) & 255); o.write((v >> 16) & 255); o.write((v >> 24) & 255); }
-
+          
               void resetForcedAudioSegmentState() {
                   synchronized(dualSttLock) { dualSttPcm.reset(); }
                   resetForcedAudioSegmentState(true);
               }
-
+          
               void resetForcedAudioSegmentState(boolean resetLastCommitTime) {
                   forcedAudioSegmentStartedAtMs = 0L;
                   forcedAudioSegmentLastSpeechAtMs = 0L;
                   forcedAudioSegmentBufferedBytes = 0;
                   if(resetLastCommitTime) lastForcedAudioCommitAtMs = 0L;
               }
-
+          
               int minHybridCommitBytes() {
                   // API technikai minimum: kb. 100 ms audio.
                   // Ez nem beszédszűrő: rövid válaszok (igen/nem/oui/non) is menjenek tovább.
                   // Csak az üres vagy azonnal újracommitolt buffer ellen véd.
                   return 24000 * 2 * 100 / 1000;
               }
-
+          
               int hybridSpeechEnergyThreshold() {
-                  // V263: a 100 ms szabály előtt ne legyen túl kemény helyi hangerőkapu.
+                  // V268: a 100 ms szabály előtt ne legyen túl kemény helyi hangerőkapu.
                   // A rövid, halk válaszok (igen/nem/oui/non) is indulhassanak, de a kapu menüből továbbra is emelhető.
                   return Math.max(30, micGateThreshold());
               }
-
+          
               void noteSpeechForHybridBlockClosing(long now) {
                   if(forcedAudioSegmentStartedAtMs == 0L) forcedAudioSegmentStartedAtMs = now;
                   forcedAudioSegmentLastSpeechAtMs = now;
               }
-
+          
               int hybridMaxSpeechSegmentMs() {
                   if("high".equals(vadMode)) return 3000;
                   if("medium".equals(vadMode)) return 5000;
                   if("auto".equals(vadMode)) return 5000;
                   return 8000;
               }
-
+          
               void maybeCloseHybridSpeechSegment(long now, boolean speechNow) {
                   if(forcedAudioSegmentStartedAtMs <= 0L || forcedAudioSegmentBufferedBytes <= 0) return;
                   if(lastForcedAudioCommitAtMs > 0L && now - lastForcedAudioCommitAtMs < 300) return;
@@ -1580,13 +1580,13 @@ jobs:
                       }
                   } catch(Exception ignored) {}
               }
-
+          
               String reasonSuffix(boolean maxReached, boolean silenceReached) {
                   if(maxReached && silenceReached) return "max_silence";
                   if(maxReached) return "max";
                   return "silence";
               }
-
+          
               byte[] prepareTrailingSilenceChunk(byte[] data, int len) {
                   long now = System.currentTimeMillis();
                   if(trailingSilenceOpen && lastVoiceChunkSentAtMs > 0L && now - lastVoiceChunkSentAtMs <= MAX_TRAILING_SILENCE_SEND_MS) {
@@ -1596,7 +1596,7 @@ jobs:
                   voiceSendActive = false;
                   return null;
               }
-
+          
               String delayLabel() {
                   if("low".equals(delayMode)) return "Gyors – rövidebb bevitel";
                   if("medium".equals(delayMode)) return "Átlagos – ajánlott";
@@ -1604,7 +1604,7 @@ jobs:
                   if("xhigh".equals(delayMode)) return "Nagyon pontos – leghosszabb bevitel";
                   return "Nagyon pontos – leghosszabb bevitel";
               }
-
+          
               void showDelayDialog() {
                   final String[] names = {"Gyors – rövidebb bevitel", "Átlagos – ajánlott", "Pontos – hosszabb bevitel", "Nagyon pontos – leghosszabb bevitel"};
                   final String[] vals = {"low", "medium", "high", "xhigh"};
@@ -1612,7 +1612,7 @@ jobs:
                   if("low".equals(delayMode)) checked = 0;
                   else if("medium".equals(delayMode)) checked = 1;
                   else if("high".equals(delayMode)) checked = 2;
-
+          
                   new AlertDialog.Builder(this)
                       .setTitle("Bevitel gyorsasága / pontossága")
                       .setSingleChoiceItems(names, checked, (d, which) -> {
@@ -1625,33 +1625,33 @@ jobs:
                       .setNegativeButton("Mégse", null)
                       .show();
               }
-
+          
               void enableAndroidAudioEffects() {
                   try {
                       if(rec == null || "off".equals(androidEffectsMode)) return;
                       int sid = rec.getAudioSessionId();
-
+          
                       boolean useNs = "recommended".equals(androidEffectsMode) || "full".equals(androidEffectsMode) || "ns_only".equals(androidEffectsMode);
                       boolean useAgc = "recommended".equals(androidEffectsMode) || "full".equals(androidEffectsMode);
                       boolean useAec = "full".equals(androidEffectsMode);
-
+          
                       if(useNs && NoiseSuppressor.isAvailable()) {
                           noiseSuppressor = NoiseSuppressor.create(sid);
                           if(noiseSuppressor != null) noiseSuppressor.setEnabled(true);
                       }
-
+          
                       if(useAgc && AutomaticGainControl.isAvailable()) {
                           automaticGainControl = AutomaticGainControl.create(sid);
                           if(automaticGainControl != null) automaticGainControl.setEnabled(true);
                       }
-
+          
                       if(useAec && AcousticEchoCanceler.isAvailable()) {
                           acousticEchoCanceler = AcousticEchoCanceler.create(sid);
                           if(acousticEchoCanceler != null) acousticEchoCanceler.setEnabled(true);
                       }
                   } catch(Exception ignored) {}
               }
-
+          
               void releaseAndroidAudioEffects() {
                   try {
                       if(noiseSuppressor != null) noiseSuppressor.release();
@@ -1662,19 +1662,19 @@ jobs:
                   try {
                       if(acousticEchoCanceler != null) acousticEchoCanceler.release();
                   } catch(Exception ignored) {}
-
+          
                   noiseSuppressor = null;
                   automaticGainControl = null;
                   acousticEchoCanceler = null;
               }
-
+          
               int selectedAudioSource() {
                   if("recognition".equals(audioSourceMode)) return MediaRecorder.AudioSource.VOICE_RECOGNITION;
                   if("communication".equals(audioSourceMode)) return MediaRecorder.AudioSource.VOICE_COMMUNICATION;
                   if("unprocessed".equals(audioSourceMode)) return MediaRecorder.AudioSource.UNPROCESSED;
                   return MediaRecorder.AudioSource.MIC;
               }
-
+          
               AudioRecord makeAudioRecord(int source, int sr, int bs) {
                   try {
                       AudioRecord r = new AudioRecord(source, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bs);
@@ -1683,7 +1683,7 @@ jobs:
                   } catch(Exception ignored) {}
                   return null;
               }
-
+          
               AudioRecord makeBestAudioRecord(int sr, int bs) {
                   AudioRecord r = makeAudioRecord(selectedAudioSource(), sr, bs);
                   if(r != null) return r;
@@ -1693,19 +1693,19 @@ jobs:
                   if(r != null) return r;
                   return makeAudioRecord(MediaRecorder.AudioSource.MIC, sr, bs);
               }
-
+          
               boolean shouldMuteMicForSpeakerTts() {
                   return interpreterMode
                       && "speaker".equals(interpreterAudioMode)
                       && (ttsSpeaking || System.currentTimeMillis() < ttsMuteUntilMs);
               }
-
+          
               void audioLoop() {
                   int sr = 24000;
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4800);
-
-                  // V263: 24 kHz PCM16 mono marad. Buffer cél kb. 100 ms.
+          
+                  // V268: 24 kHz PCM16 mono marad. Buffer cél kb. 100 ms.
                   // Hangforrás és Android/OpenAI zajszűrés menüből tesztelhető.
                   rec = makeBestAudioRecord(sr, bs);
                   if(rec == null) { runOnUiThread(() -> state.setText("mikrofon hiba")); return; }
@@ -1715,7 +1715,7 @@ jobs:
                   rec.startRecording();
                   runOnUiThread(() -> state.setText("mikrofon aktív"));
                   updateButtons();
-
+          
                   audioExec.submit(() -> {
                       byte[] buf = new byte[bs];
                       clearPreRollAudio();
@@ -1737,11 +1737,11 @@ jobs:
                                       voiceSendActive = false;
                                       continue;
                                   }
-
+          
                                   long now = System.currentTimeMillis();
                                   int avg = avgAbsPcm16(buf, read);
                                   boolean speechNow = avg >= hybridSpeechEnergyThreshold();
-
+          
                                   if(speechNow) {
                                       if(!voiceSendActive) {
                                           for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr);
@@ -1754,7 +1754,7 @@ jobs:
                                       maybeCloseHybridSpeechSegment(now, true);
                                       continue;
                                   }
-
+          
                                   if(voiceSendActive) {
                                       byte[] tail = prepareTrailingSilenceChunk(buf, read);
                                       if(tail != null) {
@@ -1767,7 +1767,7 @@ jobs:
                                       maybeCloseHybridSpeechSegment(now, false);
                                       continue;
                                   }
-
+          
                                   rememberPreRollAudio(buf, read);
                                   maybeCloseHybridSpeechSegment(now, false);
                               } catch(Exception ignored) {}
@@ -1775,11 +1775,11 @@ jobs:
                       }
                   });
               }
-
+          
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
-
-                  // V263: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+          
+                  // V268: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
                   if(clipboardResponseMode) {
                       clipboardResponseMode = false;
                       pendingClipboardText = "";
@@ -1787,8 +1787,8 @@ jobs:
                       stop();
                       return;
                   }
-
-                  // V263: kézi fordításnál nincs blokkállapot. Hiba esetén nem írunk semmit az ablakokba.
+          
+                  // V268: kézi fordításnál nincs blokkállapot. Hiba esetén nem írunk semmit az ablakokba.
                   if(manualResponseMode) {
                       manualResponseMode = false;
                       pendingManualText = "";
@@ -1796,12 +1796,12 @@ jobs:
                       stop();
                       return;
                   }
-
+          
                   // Normál beszéd/élő fordításnál se írjunk hibaüzenetet a fordítási ablakba.
                   Toast.makeText(this, "Kapcsolat hiba: " + msg, Toast.LENGTH_LONG).show();
                   stop();
               }
-
+          
               void gracefulUserStop() {
                   if(!streaming) return;
                   finalizingStop = true;
@@ -1841,7 +1841,7 @@ jobs:
                       }
                   }, GRACEFUL_STOP_MAX_WAIT_MS);
               }
-
+          
               void tryFinishGracefulStop() {
                   if(!finalizingStop) return;
                   boolean sttDone;
@@ -1854,7 +1854,7 @@ jobs:
                       && !responseInProgress
                       && !liveAwaitingResponseDone;
                   if(!sttDone || !translationDone) return;
-
+          
                   finalizingStop = false;
                   gracefulStopToken++;
                   try { if(ws != null) ws.close(1000, "graceful stop complete"); } catch(Exception ignored) {}
@@ -1863,7 +1863,7 @@ jobs:
                   state.setText("készenlét");
                   updateButtons();
               }
-
+          
               void stop() {
                   gracefulStopToken++;
                   finalizingStop = false;
@@ -1916,27 +1916,27 @@ jobs:
                       updateButtons();
                   });
               }
-
+          
               void event(String s) {
                   try {
                       JSONObject o = new JSONObject(s);
                       String type = o.optString("type", "");
-
+          
                       if(type.equals("session.updated")) {
                           if(pendingAudioStartAfterSessionUpdate && connected && ws != null && !streaming) {
                               pendingAudioStartAfterSessionUpdate = false;
                               runOnUiThread(() -> audioLoop());
                           }
                       }
-
+          
                       if(type.equals("response.created")) {
                           responseInProgress = true;
                       }
-
+          
                       if(type.equals("response.done")) {
                           responseInProgress = false;
                           liveAwaitingResponseDone = false;
-                          // V263: ha egy live fordítás válasz nélkül zárult, a blokk nem veszhet el.
+                          // V268: ha egy live fordítás válasz nélkül zárult, a blokk nem veszhet el.
                           // Korlátozottan újrapróbáljuk, különben marad újrafordíthatóként.
                           if(liveTranslateMode && pendingLiveBlockId >= 0 && pendingOutput.trim().length() == 0) {
                               int missId = pendingLiveBlockId;
@@ -1944,7 +1944,7 @@ jobs:
                               liveTranslateMode = false;
                               runOnUiThread(() -> retryLiveBlockOrRender(missId));
                           }
-                          // V263: élő fordítási sor csak akkor induljon tovább,
+                          // V268: élő fordítási sor csak akkor induljon tovább,
                           // amikor az előző response ténylegesen lezárult a szerver szerint.
                           // Különben a következő response.create könnyen "response in progress" hibára fut,
                           // és a fordítás az első blokk után megáll.
@@ -1953,40 +1953,32 @@ jobs:
                           }
                           runOnUiThread(() -> tryFinishGracefulStop());
                       }
-
-                      // V263: a részleges STT delta nem kerül a programablakba és nem indít fordítást.
+          
+                      // V268: a részleges STT delta nem kerül a programablakba és nem indít fordítást.
                       // Csak a GPT-4o Transcribe által lezárt beszédszakasz válik végleges blokkká.
                       if(type.equals("conversation.item.input_audio_transcription.completed")) {
                           String tr = o.optString("transcript", "");
                           if(!tr.isEmpty()) runOnUiThread(() -> acceptFinalTranscriptionSegment(tr));
                       }
-
+          
                       if(type.equals("response.text.delta") || type.equals("response.output_text.delta")) {
                           String d = o.optString("delta", "");
                           if(!d.isEmpty()) pendingOutput += d;
                       }
-
+          
                       if(type.equals("response.output_text.done") || type.equals("response.text.done")) {
                           String out = pendingOutput.trim();
                           pendingOutput = "";
                           if(!out.isEmpty()) runOnUiThread(() -> routeAiOutput(out));
                       }
-
+          
                       if(type.equals("error")) {
                           JSONObject er = o.optJSONObject("error");
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
                           if(msg.contains("response in progress")) {
+                              // V268: normál működésben ezt a response.done vezérlés megakadályozza.
+                              // Ha mégis megjelenik, nem teszünk újra a sorba és nem indítunk 700 ms-os retry-kört.
                               responseInProgress = true;
-                              // V263: ha live fordítás közben túl korán próbáltunk új választ indítani,
-                              // ne nyeljük le végleg a sort: röviden visszarakjuk a blokkot és újrapróbáljuk.
-                              if(liveTranslateMode && pendingLiveBlockId >= 0) {
-                                  int retryId = pendingLiveBlockId;
-                                  pendingLiveBlockId = -1;
-                                  liveTranslateMode = false;
-                                  liveAwaitingResponseDone = false;
-                                  liveTranslateQueue.add(retryId);
-                                  new Handler().postDelayed(() -> processNextLiveTranslation(), 700);
-                              }
                           }
                           if(manualResponseMode) {
                               runOnUiThread(() -> handleConnectionFailure(new RuntimeException(msg)));
@@ -2004,7 +1996,7 @@ jobs:
                       android.util.Log.e("Fordito", "event hiba", e);
                   }
               }
-
+          
               void manualTranslate() {
                   if(uiLockedForLive || finalizingStop) return;
                   EditText source = manualTopSource ? topBox : bottomBox;
@@ -2013,21 +2005,21 @@ jobs:
                       InputMethodManager imm = (InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
                       imm.hideSoftInputFromWindow(source.getWindowToken(), 0);
                   } catch(Exception ignored) {}
-
+          
                   String sourceText = source.getText().toString().trim();
                   if(sourceText.length() == 0) {
                       Toast.makeText(this, manualTopSource ? "A felső ablak üres." : "Az alsó ablak üres.", Toast.LENGTH_LONG).show();
                       return;
                   }
-
+          
                   if(!hasKey()) { showApi(); return; }
-
+          
                   String srcCode = manualTopSource ? code(topLang) : code(bottomLang);
                   String tgtCode = manualTopSource ? code(bottomLang) : code(topLang);
                   String payload = "SOURCE_LANG: " + srcCode + "\n"
                        + "TARGET_LANG: " + tgtCode + "\n"
                        + "TEXT:\n" + sourceText;
-
+          
                   if(ws == null || !connected) {
                       pendingManualText = payload;
                       start(false);
@@ -2035,7 +2027,7 @@ jobs:
                       sendManualText(payload);
                   }
               }
-
+          
               void sendManualText(String text) {
                   clipboardResponseMode = false;
                   topActive = manualTopSource;
@@ -2067,7 +2059,7 @@ jobs:
                       item.put("content", content);
                       msg.put("item", item);
                       ws.send(msg.toString());
-
+          
                       JSONObject resp = new JSONObject();
                       resp.put("type", "response.create");
                       JSONObject response = new JSONObject();
@@ -2080,22 +2072,22 @@ jobs:
                       Toast.makeText(this, "Kézi fordítás hiba. Próbáld újra.", Toast.LENGTH_LONG).show();
                   }
               }
-
+          
               void acceptFinalTranscriptionSegment(String transcript) {
                   String text = cleanTranscriptForSelectedPair(transcript == null ? "" : transcript).trim();
                   if(text.length() == 0) return;
-
+          
                   // Egy completed esemény = egy végleges forrásblokk.
                   // A blokk később nem olvad össze, nem íródik át és nem fordul vissza korábbi szövegre.
                   text = normalizeAndDeduplicateLiveBlock(text);
                   if(text.length() == 0) return;
-
+          
                   int id = addSourceOnlyBlock(topActive, text);
                   if(id < 0) return;
                   liveTranslateQueue.add(id);
                   processNextLiveTranslation();
               }
-
+          
               void handleTranscriptDelta(String delta) {
                   if(delta == null || delta.length() == 0) return;
                   liveHadTranscriptDelta = true;
@@ -2107,11 +2099,11 @@ jobs:
                   int released = flushReadyTranscriptBlocks(false);
                   if(released > 0) {
                       liveDeltaReleasedSinceLastCompleted = true;
-                      // V263: a már kiadott delta-blokkhoz tartozó korábbi idle flush ne futhasson rá később.
+                      // V268: a már kiadott delta-blokkhoz tartozó korábbi idle flush ne futhasson rá később.
                       liveIdleFlushToken++;
                   }
-
-                  // V263: csak akkor ütemezünk utóflush-t, ha tényleg maradt pufferben szöveg.
+          
+                  // V268: csak akkor ütemezünk utóflush-t, ha tényleg maradt pufferben szöveg.
                   // Ez nem lassítás: nincs plusz várakozás, csak a régi tokenek érvénytelenítése.
                   if(liveTranscriptBuffer.trim().length() > 0) {
                       final int token = ++liveIdleFlushToken;
@@ -2122,7 +2114,7 @@ jobs:
                       }, 1400);
                   }
               }
-
+          
               void handleTranscriptCompleted(String transcript) {
                   // V254 duplázás-javítás:
                   // A completed esemény sokszor ugyanazt a teljes mondatot küldi újra,
@@ -2137,7 +2129,7 @@ jobs:
                           liveTranscriptBuffer = transcript;
                       }
                   }
-                  // V263: completed nem írhatja ki újra azt, amit a delta útvonal már kiadott.
+                  // V268: completed nem írhatja ki újra azt, amit a delta útvonal már kiadott.
                   // Ha viszont valódi maradék van a pufferben, azonnal kiengedjük; nincs lassítás.
                   int released = completedIsOnlyAlreadyReleased ? 0 : flushReadyTranscriptBlocks(true);
                   if(released > 0) lastLiveBlockReleasedAt = System.currentTimeMillis();
@@ -2145,9 +2137,9 @@ jobs:
                   liveHadTranscriptDelta = false;
                   liveDeltaReleasedSinceLastCompleted = false;
               }
-
+          
               void resetLiveRecognitionTimingState() {
-                  // V263: beszédfelismerési időzítés váltásakor nem várunk és nem építünk új kaput.
+                  // V268: beszédfelismerési időzítés váltásakor nem várunk és nem építünk új kaput.
                   // Csak az élő, még le nem zárt transcript állapotot nullázzuk, hogy a régi mód
                   // puffer/időzítője ne zárhasson rá az új mód szabályaira. A már kiadott blokkok
                   // dedupe-cache-e szándékosan megmarad, így egy későn érkező régi completed esemény
@@ -2161,32 +2153,32 @@ jobs:
                   lastLiveBlockReleasedAt = 0L;
                   liveDeltaReleasedSinceLastCompleted = false;
               }
-
+          
               void applyRecognitionTimingChange() {
                   resetLiveRecognitionTimingState();
                   sessionUpdateIfConnected();
               }
-
+          
               int flushReadyTranscriptBlocks(boolean flushAll) {
                   int releasedCount = 0;
-                  // V263: az első élő blokkot nem engedjük ki azonnal 1-2 bizonytalan szóból.
+                  // V268: az első élő blokkot nem engedjük ki azonnal 1-2 bizonytalan szóból.
                   // Ez szűri a kezdő "Microfoonprobe / Kazakhstan / UFO" jellegű félrehallást,
                   // de nem nyúl az audiohoz és nem épít új nyelvfelismerőt.
                   if(!firstSpeechBlockReleased && !initialSpeechGateOpen()) return 0;
                   while(true) {
                       String b = popReadySpeechBlock(flushAll);
                       if(b == null || b.trim().length() == 0) break;
-
-                      // V263: egyetlen beviteli normalizáló blokk.
+          
+                      // V268: egyetlen beviteli normalizáló blokk.
                       // Itt történik a tisztítás, a közvetlen ismétlés összehúzása,
                       // az előző blokk végével való átfedés levágása és a biztos duplázás kiszűrése.
                       // Alapelv: ha bizonytalan, átengedjük, nem nyeljük el a beszédet.
                       b = normalizeAndDeduplicateLiveBlock(b);
                       if(b.length() == 0) continue;
-                      // V263: nyelvpár-zárás a BEVITELI oldalon.
+                      // V268: nyelvpár-zárás a BEVITELI oldalon.
                       // A fordító csak akkor kap blokkot, ha az átirat nem tűnik harmadik nyelvű zajnak.
                       if(!passesSelectedPairInputGate(b)) continue;
-                      // V263: a forrásoldalt először helyben, kizárólag a kiválasztott TOP/BOTTOM
+                      // V268: a forrásoldalt először helyben, kizárólag a kiválasztott TOP/BOTTOM
                       // nyelvpárból döntjük el. Harmadik nyelv nem létezik az élő mikrofonos ágban.
                       boolean sourceGuessTop = sourceIsTopBySelectedPair(b, topActive);
                       int id = addSourceOnlyBlock(sourceGuessTop, b);
@@ -2197,27 +2189,27 @@ jobs:
                       lastLiveBlockReleasedAt = System.currentTimeMillis();
                   }
                   if(releasedCount > 0) {
-                      // V263: sikeres kiírás után a régi idle flush már nem zárhat ugyanarra.
+                      // V268: sikeres kiírás után a régi idle flush már nem zárhat ugyanarra.
                       liveIdleFlushToken++;
                   }
                   processNextLiveTranslation();
                   return releasedCount;
               }
-
+          
               boolean initialSpeechGateOpen() {
                   String s = liveTranscriptBuffer == null ? "" : liveTranscriptBuffer.trim();
                   if(s.length() == 0) return false;
                   int words = s.split("\\s+").length;
                   long age = firstSpeechHeardAt > 0L ? System.currentTimeMillis() - firstSpeechHeardAt : 0L;
-
-                  // V263: nincs külön szótáras nyelvkapu az első blokknál.
+          
+                  // V268: nincs külön szótáras nyelvkapu az első blokknál.
                   // Rövid válasz is beszéd. Csak minimális stabilizálást várunk, hogy ne fél karakter menjen fordításra.
                   if(age >= 650 && s.length() >= 2 && words >= 1) return true;
                   if(firstHardSentenceEnd(s) >= 0 && words >= 1) return true;
                   if(s.length() >= 18 && words >= 2) return true;
                   return false;
               }
-
+          
               boolean isAlreadyReleasedTranscript(String transcript) {
                   if(transcript == null) return false;
                   String b = cleanTranscriptForSelectedPair(transcript);
@@ -2230,7 +2222,7 @@ jobs:
                   if(h.length() < 8) return false;
                   return matchesVeryRecentReleasedBlock(h);
               }
-
+          
               boolean matchesVeryRecentReleasedBlock(String h) {
                   if(h == null || h.length() < 8) return false;
                   if(recentLiveBlockHashes.contains(h)) return true;
@@ -2246,45 +2238,45 @@ jobs:
                   }
                   return false;
               }
-
+          
               String normalizeAndDeduplicateLiveBlock(String raw) {
                   if(raw == null) return "";
                   String b = cleanTranscriptForSelectedPair(raw);
-
-                  // V263: egyetlen beviteli normalizáló lánc, nem új kapu.
+          
+                  // V268: egyetlen beviteli normalizáló lánc, nem új kapu.
                   // Előbb a blokkon belüli közvetlen ismétlést húzzuk össze bárhol,
                   // nem csak a blokk elején. Ez fogja meg a mondat közepén jelentkező
                   // közvetlen ismétlést is.
                   b = collapseAdjacentRepeatedPhrase(b);
                   b = finalizeSpeechBlockText(b);
                   b = applyTinyHungarianTermFixes(b);
-
+          
                   // Utána csak az előző kész blokk végéből az új blokk elejére átcsúszó
                   // biztos átfedést vágjuk le. Ha bizonytalan, átengedjük.
                   b = trimRecentLiveBlockOverlap(b);
                   if(b == null) return "";
                   b = b.trim().replaceAll("\\s+", " ");
                   if(b.length() == 0) return "";
-
+          
                   String h = normalizeLiveBlockHash(b);
                   if(h.length() < 3) return "";
-
-                  // V263: legutolsó lépésként, minden tisztítás után hasonlítunk a közvetlenül
+          
+                  // V268: legutolsó lépésként, minden tisztítás után hasonlítunk a közvetlenül
                   // frissen kiadott blokkokhoz. Nem új kapu: ugyanennek a normalizáló blokknak
                   // a vége. Csak teljes vagy majdnem teljes ismétlést dobunk el.
                   if(matchesVeryRecentReleasedBlock(h)) return "";
-
+          
                   rememberLiveBlockHash(h);
                   return b;
               }
-
+          
               String collapseAdjacentRepeatedPhrase(String raw) {
                   if(raw == null) return "";
                   String t = raw.trim().replaceAll("\\s+", " ");
                   if(t.length() == 0) return t;
                   String[] w = t.split("\\s+");
                   if(w.length < 6) return t;
-
+          
                   ArrayList<String> out = new ArrayList<>();
                   int i = 0;
                   while(i < w.length) {
@@ -2309,7 +2301,7 @@ jobs:
                           i++;
                       }
                   }
-
+          
                   StringBuilder sb = new StringBuilder();
                   for(String x : out) {
                       if(sb.length() > 0) sb.append(' ');
@@ -2317,7 +2309,7 @@ jobs:
                   }
                   return sb.toString().trim();
               }
-
+          
               void rememberLiveBlockHash(String h) {
                   if(h == null || h.length() < 3) return;
                   recentLiveBlockHashes.add(h);
@@ -2327,18 +2319,18 @@ jobs:
                       if(old != null) recentLiveBlockHashes.remove(old);
                   }
               }
-
+          
               String finalizeSpeechBlockText(String raw) {
                   if(raw == null) return "";
                   String t = raw.trim().replaceAll("\\s+", " ");
                   while(t.startsWith(",") || t.startsWith(";") || t.startsWith(":")) t = t.substring(1).trim();
                   if(t.length() == 0) return "";
-                  // V263: vesszőből / pontosvesszőből / kettőspontból nem gyártunk pontot.
+                  // V268: vesszőből / pontosvesszőből / kettőspontból nem gyártunk pontot.
                   // Ezek sokszor folytatást jelölnek, a hamis pont pedig rossz blokk- és
                   // nagybetűs mondatkezdést okozott.
                   return t;
               }
-
+          
               boolean isAllowedShortReply(String text) {
                   if(text == null) return false;
                   String x = text.toLowerCase(Locale.ROOT)
@@ -2346,7 +2338,7 @@ jobs:
                       .replaceAll("\\s+", " ").trim();
                   if(x.length() == 0) return false;
                   if(isClipboardSystemMessage(x)) return false;
-
+          
                   String[] one = {
                       "igen","nem","jó","jo","ok","oké","oke","rendben","persze","talán","talan",
                       "ma","holnap","tegnap","reggel","este","itt","ott","köszönöm","koszonom",
@@ -2354,7 +2346,7 @@ jobs:
                       "yes","no","okay","thanks","tomorrow","yesterday"
                   };
                   for(String w: one) if(x.equals(w)) return true;
-
+          
                   String[] two = {
                       "nem tudom","jó lesz","jo lesz","ma este","holnap reggel","holnap este",
                       "igen köszönöm","igen koszonom","nem köszönöm","nem koszonom",
@@ -2363,63 +2355,63 @@ jobs:
                   for(String w: two) if(x.equals(w)) return true;
                   return false;
               }
-
+          
               String applyTinyHungarianTermFixes(String raw) {
                   if(raw == null) return "";
                   String x = raw.trim().replaceAll("\\s+", " ");
                   if(x.length() == 0) return x;
-
-                  // V263: NEM általános szótár. Csak pár, tesztben sokszor félrehallott fix kifejezés.
+          
+                  // V268: NEM általános szótár. Csak pár, tesztben sokszor félrehallott fix kifejezés.
                   x = x.replaceAll("(?iu)\\bblu\\s*t[uú]+t[h]?\\b", "Bluetooth");
                   x = x.replaceAll("(?iu)\\bbluetooth[- ]?ot\\b", "Bluetoothot");
                   x = x.replaceAll("(?iu)\\bbluetooth[- ]?on\\b", "Bluetoothon");
                   x = x.replaceAll("(?iu)\\bblutus\\b", "Bluetooth");
                   x = x.replaceAll("(?iu)\\bblut[uú]sz\\b", "Bluetooth");
                   x = x.replaceAll("(?iu)\\bblue\\s*tooth\\b", "Bluetooth");
-
+          
                   x = x.replaceAll("(?iu)\\bs[íi]r[íi]\\s+csend\\b", "síri csend");
                   x = x.replaceAll("(?iu)\\bs[íi]li\\s+csend\\b", "síri csend");
                   x = x.replaceAll("(?iu)\\bs[íi]r[íi]ts?en\\b", "síri csend");
                   x = x.replaceAll("(?iu)\\bs[íi]ri\\s+csendes\\b", "síri csendes");
-
+          
                   return x.trim().replaceAll("\\s+", " ");
               }
-
+          
               boolean passesSelectedPairInputGate(String block) {
                   if(block == null) return false;
                   String t = cleanTranscriptForSelectedPair(block).trim();
                   if(t.length() == 0) return false;
                   if(isClipboardSystemMessage(t.toLowerCase(Locale.ROOT))) return false;
-
-                  // V263: a korábbi szótáras TOP/BOTTOM nyelvdetektor és harmadiknyelv-tiltó kapuk kikerültek
+          
+                  // V268: a korábbi szótáras TOP/BOTTOM nyelvdetektor és harmadiknyelv-tiltó kapuk kikerültek
                   // az élő mikrofonos útból. Ezek rövid FR/HU válaszokat dobtak el.
                   // Itt csak azt döntjük el, hogy van-e emberi szövegnek látszó beviteli blokk.
                   // A két kiválasztott nyelv közötti döntést a fordítómodell végzi a pairRules() alapján.
                   return t.length() >= 1;
               }
-
+          
               boolean sourceIsTopBySelectedPair(String text, boolean fallback) {
-                  // V263: előzetes szótáras nyelvdöntés nincs.
+                  // V268: előzetes szótáras nyelvdöntés nincs.
                   // A nyers blokk ideiglenesen az aktuális oldalra kerül, majd az AI SOURCE_LANG alapján átkerülhet.
                   return fallback;
               }
-
+          
               String selectedPairLanguageCode(String text) {
                   return "";
               }
-
+          
               int scoreShortReplyForSelectedLang(String text, String lang) { return 0; }
               int scoreTextForSelectedLang(String text, String lang) { return 0; }
               boolean looksLikeNonFrHuNoise(String text) { return false; }
-
+          
               boolean isLikelyNoisyTranscriptBlock(String block) {
                   if(block == null) return true;
                   String t = cleanTranscriptForSelectedPair(block).trim();
                   if(t.length() == 0) return true;
-                  // V263: nincs idegen nyelves tiltólista az élő útban.
+                  // V268: nincs idegen nyelves tiltólista az élő útban.
                   return false;
               }
-
+          
               String trimRecentLiveBlockOverlap(String block) {
                   if(block == null) return "";
                   String raw = block.trim().replaceAll("\\s+", " ");
@@ -2427,12 +2419,12 @@ jobs:
                   if(h.length() < 8) return raw;
                   String[] nw = h.split("\\s+");
                   String[] rawWords = raw.split("\\s+");
-
+          
                   for(String old : recentLiveBlockHashOrder) {
                       if(old == null || old.length() < 8) continue;
                       String[] ow = old.split("\\s+");
                       if(ow.length < 2 || nw.length < 2) continue;
-
+          
                       // Ha a régi blokk teljes egészében az új blokk elején ismétlődik,
                       // csak ezt az eleji ismétlést vágjuk le, az új folytatást megtartjuk.
                       int fullOld = Math.min(ow.length, nw.length);
@@ -2450,7 +2442,7 @@ jobs:
                               return sb.toString().trim();
                           }
                       }
-
+          
                       int maxN = Math.min(10, Math.min(ow.length, nw.length));
                       for(int n=maxN; n>=2; n--) {
                           boolean suffixPrefix = true;
@@ -2470,7 +2462,7 @@ jobs:
                   }
                   return raw;
               }
-
+          
               boolean markLiveBlockQueued(String block) {
                   String h = normalizeLiveBlockHash(block);
                   if(h.length() < 3) return false;
@@ -2478,22 +2470,22 @@ jobs:
                   rememberLiveBlockHash(h);
                   return true;
               }
-
+          
               boolean isRecentlySimilarLiveBlock(String h) {
                   if(h == null || h.length() < 8) return false;
                   String[] a = h.split("\\s+");
-
+          
                   for(String old : recentLiveBlockHashOrder) {
                       if(old == null || old.length() < 8) continue;
                       int min = Math.min(h.length(), old.length());
                       int max = Math.max(h.length(), old.length());
-
-                      // V263: gyors mondatzárásnál a delta és a completed/flush sokszor átfedő blokkot ad.
+          
+                      // V268: gyors mondatzárásnál a delta és a completed/flush sokszor átfedő blokkot ad.
                       // Nem hanghoz nyúlunk, csak az utolsó blokkokkal való szöveg-átfedést fogjuk meg.
                       if(min >= 10 && (h.contains(old) || old.contains(h)) && (min * 100 / Math.max(1, max)) >= 58) return true;
-
+          
                       String[] b = old.split("\\s+");
-
+          
                       // Az új blokk eleje sokszor az előző blokk vége. Ez tipikus duplázási minta.
                       if(a.length >= 2 && b.length >= 2) {
                           int maxN = Math.min(5, Math.min(a.length, b.length));
@@ -2503,7 +2495,7 @@ jobs:
                                   if(!b[b.length-n+i].equals(a[i])) { suffixPrefix = false; break; }
                               }
                               if(suffixPrefix) continue;
-
+          
                               boolean prefixSuffix = true;
                               for(int i=0; i<n; i++) {
                                   if(!a[a.length-n+i].equals(b[i])) { prefixSuffix = false; break; }
@@ -2511,7 +2503,7 @@ jobs:
                               if(prefixSuffix) return true;
                           }
                       }
-
+          
                       if(a.length >= 3 && b.length >= 3) {
                           HashSet<String> sa = new HashSet<>(Arrays.asList(a));
                           HashSet<String> sb = new HashSet<>(Arrays.asList(b));
@@ -2524,60 +2516,60 @@ jobs:
                   }
                   return false;
               }
-
+          
               String normalizeLiveBlockHash(String block) {
                   if(block == null) return "";
                   return block.toLowerCase(Locale.ROOT)
                           .replaceAll("[\\p{Punct}\\s]+", " ")
                           .trim();
               }
-
+          
               String popReadySpeechBlock(boolean flushAll) {
                   String s = liveTranscriptBuffer == null ? "" : liveTranscriptBuffer;
                   if(s.trim().length() == 0) { liveTranscriptBuffer = ""; return null; }
-
+          
                   int cut = findLiveBlockCut(s, flushAll);
                   if(cut < 0) return null;
-
+          
                   String out = s.substring(0, cut).trim();
                   liveTranscriptBuffer = s.substring(cut).trim();
                   liveBufferStartedAt = liveTranscriptBuffer.length() > 0 ? System.currentTimeMillis() : 0L;
                   return out;
               }
-
+          
               int findLiveBlockCut(String s, boolean flushAll) {
                   if(s == null) return -1;
                   String t = s.trim();
                   if(t.length() == 0) return -1;
-
-                  // V263: egyszerűsített, egyirányú blokkhatár-döntés.
+          
+                  // V268: egyszerűsített, egyirányú blokkhatár-döntés.
                   // Delta közben csak biztos mondatvégnél vagy természetes hosszú vágásnál adunk ki.
                   // Completed/idle esetén viszont nincs nyelvtani várakoztatás: ami bent maradt,
                   // azt kiadjuk. A rövid puffer nem ragadhat bent és nem kell szótár hozzá.
                   int cut = firstHardSentenceEnd(s);
                   if(cut >= 0) return cut;
-
+          
                   cut = smartLinguisticCut(s);
                   if(cut >= 0) return cut;
-
+          
                   if(flushAll) return safeWholeBufferFlushCut(s);
-
+          
                   return -1;
               }
-
+          
               int safeWholeBufferFlushCut(String s) {
                   if(s == null) return -1;
                   String t = s.trim();
                   if(t.length() == 0) return -1;
-
+          
                   int words = t.split("\\s+").length;
                   long sinceDelta = liveLastTranscriptDeltaAt > 0L ? System.currentTimeMillis() - liveLastTranscriptDeltaAt : 99999L;
-
-                  // V263: 1-5 szavas puffer esetén nincs szótár, nincs nyelvtani kapu,
+          
+                  // V268: 1-5 szavas puffer esetén nincs szótár, nincs nyelvtani kapu,
                   // nincs "hátha majd mondat lesz" várakozás. A meglévő completed/idle esemény
                   // kiadja, ami bent van. Ez javítja az igen/nem/működik jellegű beragadást.
                   if(words <= 5) return s.length();
-
+          
                   // Hosszabb blokknál maradhat az utolsó friss token védelme, de csak itt.
                   // Így a fél szó elleni védelem nem fogja meg a rövid válaszokat.
                   if(sinceDelta <= 700 && hasPossiblyUnstableTrailingToken(t)) {
@@ -2591,7 +2583,7 @@ jobs:
                   }
                   return s.length();
               }
-
+          
               int lastWhitespaceBeforeLastToken(String s) {
                   if(s == null) return -1;
                   int end = s.length() - 1;
@@ -2601,7 +2593,7 @@ jobs:
                   while(i >= 0 && !Character.isWhitespace(s.charAt(i))) i--;
                   return i >= 0 ? i + 1 : -1;
               }
-
+          
               boolean hasPossiblyUnstableTrailingToken(String text) {
                   if(text == null) return false;
                   String t = text.trim();
@@ -2617,9 +2609,9 @@ jobs:
                   // érkeznek. Nem nyelvi szótár, csak az utolsó, friss token védelme.
                   return last.length() <= 8;
               }
-
+          
               boolean shouldFlushShortIdleBlock(String s) {
-                  // V263: kompatibilitási segédfüggvény. A blokkzárás fő döntése már a
+                  // V268: kompatibilitási segédfüggvény. A blokkzárás fő döntése már a
                   // findLiveBlockCut(flushAll) ágban történik, ezért itt nincs szótár és nincs
                   // nyelvtani visszatartás. Rövid puffer idle esetén kiadható.
                   if(s == null) return false;
@@ -2630,13 +2622,13 @@ jobs:
                   long age = started > 0L ? System.currentTimeMillis() - started : 0L;
                   return age >= 1000 && words <= 5;
               }
-
+          
               boolean shouldForceFlushWholeBuffer(String s) {
-                  // V263: nincs külön nyelvtani kapu. Completed/idle esetén a központi
+                  // V268: nincs külön nyelvtani kapu. Completed/idle esetén a központi
                   // safeWholeBufferFlushCut dönt, ezért ez csak régi hívásokhoz marad egyszerűen.
                   return s != null && s.trim().length() > 0;
               }
-
+          
               boolean looksLikeDanglingSpeechFragment(String text) {
                   if(text == null) return true;
                   String x = text.trim();
@@ -2655,7 +2647,7 @@ jobs:
                   if(last.length() <= 2) return true;
                   return false;
               }
-
+          
               int firstHardSentenceEnd(String s) {
                   for(int i=0;i<s.length();i++) {
                       char ch = s.charAt(i);
@@ -2663,26 +2655,26 @@ jobs:
                   }
                   return -1;
               }
-
+          
               int smartLinguisticCut(String s) {
                   int len = s.length();
                   if(len < 85) return -1;
-
+          
                   String lower = s.toLowerCase(Locale.ROOT);
                   int preferredEnd = Math.min(len, 185);
                   int preferredStart = Math.min(len, 75);
-
-                  // V263: V254 alap, de kevésbé engedékeny hosszú blokkoknál.
+          
+                  // V268: V254 alap, de kevésbé engedékeny hosszú blokkoknál.
                   // Nem audio, nem VAD, nem időzítő. Csak a már beérkezett szöveg stabil elejét vágjuk le,
                   // hogy hosszú folyamatos beszédnél se legyen egyetlen óriás blokk.
-
+          
                   // 1) Erős gondolatváltók. Itt az előző rész általában önállóan is érthető.
                   int cut = lastConnectorCut(lower, preferredStart, preferredEnd, new String[]{
                           ", de ", ", viszont ", ", hanem ", ", tehát ", ", ezért ",
                           ", aztán ", ", majd ", ", utána ", "; ", ": ", " - "
                   });
                   if(cut > 0) return cut;
-
+          
                   // 2) Feltételes / következő gondolat kezdete. V254-höz képest kicsit bátrabb,
                   // mert a beszélt nyelvben sokszor nincs pont, csak új gondolat kezdődik.
                   cut = lastConnectorCut(lower, 90, preferredEnd, new String[]{
@@ -2690,12 +2682,12 @@ jobs:
                           ", ahol ", ", amíg ", ", miközben ", ", vagy ", ", illetve "
                   });
                   if(cut > 0) return cut;
-
+          
                   // 3) Felsorolás vagy hosszú mellékmondat. Vágás vessző után, de csak akkor,
                   // ha már van érdemi hosszúságú, önmagában is olvasható blokk.
                   cut = lastCommaCut(s, 90, Math.min(len, 175));
                   if(cut > 0) return cut;
-
+          
                   // 4) Ha nincs vessző, de már hosszú a blokk, természetes kötőszavaknál is vágunk.
                   // Ez javítja a hosszú folyamatos monológokat, de továbbra sem időalapú.
                   cut = lastSoftWordCut(lower, 110, Math.min(len, 185), new String[]{
@@ -2704,7 +2696,7 @@ jobs:
                           " mindenhol ", " szinte ", " na most ", " pedig "
                   });
                   if(cut > 0) return cut;
-
+          
                   // 5) Stabil prefix vágás: ha a beszéd hosszúra nő és nincs biztos írásjel,
                   // a puffer elejét lezárjuk szóhatáron. A maradék a pufferben marad tovább épülni.
                   // Ez szöveg-alapú biztonsági szelep, nem másodperc- vagy szünetalapú döntés.
@@ -2712,10 +2704,10 @@ jobs:
                       int spc = s.lastIndexOf(' ', Math.min(len, 170));
                       if(spc >= 115) return spc + 1;
                   }
-
+          
                   return -1;
               }
-
+          
               int lastConnectorCut(String lower, int minPos, int maxPos, String[] connectors) {
                   int best = -1;
                   int end = Math.min(lower.length(), maxPos);
@@ -2726,14 +2718,14 @@ jobs:
                   if(best < 0) return -1;
                   return best + 1; // a vessző/írásjel az előző blokk végén marad
               }
-
+          
               int lastCommaCut(String s, int minPos, int maxPos) {
                   int end = Math.min(s.length(), maxPos);
                   int pos = s.lastIndexOf(',', end);
                   if(pos >= minPos) return pos + 1;
                   return -1;
               }
-
+          
               int lastSoftWordCut(String lower, int minPos, int maxPos, String[] words) {
                   int best = -1;
                   int end = Math.min(lower.length(), maxPos);
@@ -2744,51 +2736,57 @@ jobs:
                   if(best < 0) return -1;
                   return best + 1;
               }
-
+          
               void setDetectedSourceSide(boolean sourceIsTop) {
                   topActive = sourceIsTop;
                   manualTopSource = sourceIsTop;
                   updateButtons();
               }
-
+          
               String cleanTranscriptForSelectedPair(String text) {
                   if(text == null) return "";
-                  // V263: biztonsági tisztítás. Belső API/prompt/meta sor nem kerülhet ablakba vagy fordításba.
+                  // V268: ez csak felhasználói szöveg normalizáló, nem prompt-vadász.
+                  // STT-eredményből és már kibontott fordításból nem törlünk értelmes mondatokat.
                   String x = text;
                   x = x.replaceAll("(?is)context\\s*:\\s*###.*?###", " ");
-                  x = x.replaceAll("(?im)^\\s*(context|system|developer|assistant|prompt|instruction|instructions)\\s*[:=].*$", " ");
-                  x = x.replaceAll("(?im)^\\s*(LIVE_PAIR_CLASSIFY_AND_TRANSLATE|SELECTED_TOP_LANG|SELECTED_BOTTOM_LANG)\\s*:?.*$", " ");
-                  x = x.replaceAll("(?is)LIVE_PAIR_CLASSIFY_AND_TRANSLATE\\s+SELECTED_TOP_LANG\\s*:\\s*[^\\n\\r]+\\s+SELECTED_BOTTOM_LANG\\s*:\\s*[^\\n\\r]+", " ");
-                  // V263: ha a fordítómodell a saját utasítás egy részét visszaechozza, az nem felhasználói szöveg.
-                  x = x.replaceAll("(?i)You are a translation engine, not a moderator\.?", " ");
-                  x = x.replaceAll("(?i)Translate exactly ONE finalized speech segment\.?", " ");
-                  x = x.replaceAll("(?i)Selected conversation pair is exactly TOP\s*=\s*[^.\n\r]+\s+and\s+BOTTOM\s*=\s*[^.\n\r]+\.?", " ");
-                  x = x.replaceAll("(?i)Choose SOURCE_LANG as one of these two languages only, then translate into the other one\.?", " ");
-                  x = x.replaceAll("(?i)Short answers, questions and fragments are valid speech\.?", " ");
-                  x = x.replaceAll("(?i)Never refuse, moralize, warn, explain, apologize, or answer the text\. Translate it\.?", " ");
-                  x = x.replaceAll("(?i)Every word must be output in full\. Never mask, censor, soften, sanitize, euphemize, star out, label, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording\.?", " ");
-                  x = x.replaceAll("(?i)Never rewrite, repair, extend or reinterpret the source transcript\.?", " ");
-                  x = x.replaceAll("(?i)The user message contains TEXT, which is already finalized and immutable\.?", " ");
-                  x = x.replaceAll("(?i)Do not correct, rewrite, merge, shorten or expand TEXT\.?", " ");
-                  x = x.replaceAll("(?i)Return exactly three lines and nothing else:[^\n\r]*", " ");
-                  x = x.replaceAll("(?i)Do not output markdown, quotes or explanation\.?", " ");
                   x = x.replaceAll("(?is)###.*?###", " ");
-                  // Idegen írásrendszeres STT-szemét nem kerülhet ki az ablakokba vagy fordításba.
-                  x = x.replaceAll("[^A-Za-z0-9\\u00C0-\\u024F\\p{Punct}\\s]", " ");
+                  x = x.replace("```", " ");
                   return x.replaceAll("\\s+", " ").trim();
               }
-
+          
+              boolean looksLikeInternalPromptLeak(String s) {
+                  if(s == null) return false;
+                  String u = s.toUpperCase(Locale.ROOT);
+                  String[] marks = new String[]{
+                      "LIVE_PAIR_CLASSIFY_AND_TRANSLATE", "SELECTED_TOP_LANG", "SELECTED_BOTTOM_LANG",
+                      "SOURCE_LANG:", "TARGET_LANG:", "ORIGINAL:", "TRANSLATION:",
+                      "YOU ARE A TRANSLATION ENGINE", "YOU ARE A LIVE TWO-LANGUAGE INTERPRETER",
+                      "TRANSLATE EXACTLY ONE FINALIZED SPEECH SEGMENT", "SELECTED CONVERSATION PAIR",
+                      "CHOOSE SOURCE_LANG", "SHORT ANSWERS, QUESTIONS AND FRAGMENTS",
+                      "NEVER REFUSE", "MORALIZE", "EVERY WORD MUST BE OUTPUT",
+                      "NEVER MASK", "NEVER REPLACE LETTERS", "ASTERISKS", "DO NOT CENSOR",
+                      "NO EXPLANATIONS", "OUTPUT TEXT ONLY", "RETURN EXACTLY THREE LINES",
+                      "RETURN ONLY", "DO NOT OUTPUT MARKDOWN", "NO MARKDOWN", "PRESERVE PARAGRAPHS",
+                      "NEVER INCLUDE LABELS", "CONVERSATION PROFILE", "TRANSLATION MODE",
+                      "NATURAL MODE", "PRECISE MODE", "INTERPRETER MODE", "CONTEXT PROFILE",
+                      "DOMAIN GLOSSARY HINTS", "TRANSCRIBE VERBATIM", "DO NOT TRANSLATE",
+                      "TEXT:", "THE USER MESSAGE CONTAINS", "DO NOT CORRECT", "REWRITE, MERGE"
+                  };
+                  for(String m: marks) if(u.contains(m)) return true;
+                  return false;
+              }
+          
               boolean selectedContains(String langCode) {
                   String lc = langCode == null ? "" : langCode.toLowerCase(Locale.ROOT);
                   return code(topLang).equalsIgnoreCase(lc) || code(bottomLang).equalsIgnoreCase(lc);
               }
-
+          
               boolean looksLikeObviousThirdLanguageNoise(String text) {
-                  // V263: harmadik nyelv szótáras tiltólista kikapcsolva az élő fordításban.
+                  // V268: harmadik nyelv szótáras tiltólista kikapcsolva az élő fordításban.
                   // A két nyelvre zárást a liveBlockInstructions/pairRules és a SOURCE_LANG feldolgozás végzi.
                   return false;
               }
-
+          
               boolean isSelectedSourceLang(String sourceLang) {
                   if(sourceLang == null) return false;
                   String s = sourceLang.trim().toLowerCase(Locale.ROOT);
@@ -2796,10 +2794,10 @@ jobs:
                   String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
                   return s.equals(top) || s.equals(bottom);
               }
-
+          
               boolean isUsableLiveTriple(String[] trp) {
                   if(trp == null || trp.length < 3) return false;
-                  // V263: SOURCE_LANG hiánya vagy pontatlan címkéje nem dobhatja el a fordítást.
+                  // V268: SOURCE_LANG hiánya vagy pontatlan címkéje nem dobhatja el a fordítást.
                   // A forrásoldal ilyenkor a meglévő blokk oldala marad.
                   String original = trp[1] == null ? "" : cleanTranscriptForSelectedPair(trp[1]).trim();
                   String translation = trp[2] == null ? "" : cleanTranscriptForSelectedPair(cleanOneBlockTranslation(trp[2])).trim();
@@ -2809,7 +2807,7 @@ jobs:
                   if(no.length() >= 12 && no.equals(nt)) return false;
                   return true;
               }
-
+          
               boolean sourceIsTopFromAi(String sourceLang, boolean fallback) {
                   if(sourceLang == null) return fallback;
                   String s = sourceLang.trim().toUpperCase(Locale.ROOT);
@@ -2819,17 +2817,17 @@ jobs:
                   if(s.equals(bottom) || s.contains("SOURCE_LANG: " + bottom) || s.contains("LANG: " + bottom)) return false;
                   return fallback;
               }
-
+          
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
                   return addSourceOnlyBlock(sourceIsTop, original, apiCode(topLang), apiCode(bottomLang));
               }
-
+          
               int addSourceOnlyBlock(boolean sourceIsTop, String original, String pairTopCode, String pairBottomCode) {
-                  // V263: gyors visszajelzés. A nyers STT azonnal látható az aktuális oldalon,
+                  // V268: gyors visszajelzés. A nyers STT azonnal látható az aktuális oldalon,
                   // ugyanakkor pendingSourceText-ben is megmarad, hogy a valid AI-válasz után
                   // a blokk átkerülhessen a valódi SOURCE_LANG szerinti oldalra.
                   if(isRecentlyDisplayedSourceDuplicate(sourceIsTop, original)) return -1;
-
+          
                   TextBlock b = new TextBlock();
                   b.sourceTop = sourceIsTop;
                   b.translatedOk = false;
@@ -2842,12 +2840,12 @@ jobs:
                   renderBlocksKeepView();
                   return textBlocks.size() - 1;
               }
-
+          
               boolean isRecentlyDisplayedSourceDuplicate(boolean sourceIsTop, String original) {
                   if(original == null) return true;
                   String h = normalizeLiveBlockHash(original);
                   if(h.length() < 8) return false;
-
+          
                   int checked = 0;
                   for(int i=textBlocks.size()-1; i>=0 && checked<5; i--) {
                       TextBlock b = textBlocks.get(i);
@@ -2859,24 +2857,22 @@ jobs:
                       String oh = normalizeLiveBlockHash(oldText);
                       if(oh.length() < 8) continue;
                       if(h.equals(oh)) return true;
-
+          
                       int min = Math.min(h.length(), oh.length());
                       int max = Math.max(h.length(), oh.length());
-                      // V263: csak majdnem teljes azonosságot fogunk meg.
+                      // V268: csak majdnem teljes azonosságot fogunk meg.
                       // A hasonló, de eltérő blokk ne essen ki, mert az beszédvesztéshez vezetett.
                       if(min >= 24 && (h.contains(oh) || oh.contains(h)) && (min * 100 / Math.max(1, max)) >= 92) return true;
                   }
                   return false;
               }
-
+          
               void processNextLiveTranslation() {
                   clipboardResponseMode = false;
-                  // V263: a live fordítást nem szabad a globális responseInProgress flag miatt megállítani.
-                  // A Realtime transcription közben nem fordítási válasz, ezért ez a flag itt könnyen beragadhat.
-                  // Élő beszédnél csak a saját liveTranslateMode zárja ki a párhuzamos blokkfordítást.
-                  if(liveTranslateMode) return;
+                  // V268: egyetlen gazda: új response csak az előző response.done után indulhat.
+                  // Nincs 700 ms-os response-in-progress újrapróbálási torlódás.
+                  if(liveTranslateMode || responseInProgress || liveAwaitingResponseDone) return;
                   if(ws == null || !connected) return;
-                  responseInProgress = false;
                   Integer idObj = liveTranslateQueue.poll();
                   if(idObj == null) return;
                   int id = idObj.intValue();
@@ -2887,11 +2883,11 @@ jobs:
                       ? b.pendingSourceText
                       : (sourceIsTop ? b.topText : b.bottomText);
                   if(src == null || src.trim().length() == 0) { processNextLiveTranslation(); return; }
-
+          
                   try {
                       pendingLiveBlockId = id;
                       liveTranslateMode = true;
-
+          
                       JSONObject msg = new JSONObject();
                       msg.put("type", "conversation.item.create");
                       JSONObject item = new JSONObject();
@@ -2907,7 +2903,7 @@ jobs:
                       item.put("content", content);
                       msg.put("item", item);
                       ws.send(msg.toString());
-
+          
                       JSONObject resp = new JSONObject();
                       resp.put("type", "response.create");
                       JSONObject response = new JSONObject();
@@ -2922,7 +2918,7 @@ jobs:
                       pendingLiveBlockId = -1;
                   }
               }
-
+          
               void retryLiveBlockOrRender(int id) {
                   if(id >= 0 && id < textBlocks.size()) {
                       TextBlock b = textBlocks.get(id);
@@ -2938,7 +2934,7 @@ jobs:
                   // de a pendingSourceText megmarad, hogy a blokk később még újrafordítható legyen.
                   renderBlocksKeepView();
               }
-
+          
               void applyLiveTranslation(String out) {
                   int id = pendingLiveBlockId;
                   String speakText = null;
@@ -2950,44 +2946,44 @@ jobs:
                       for(String[] cand: triples) {
                           if(isUsableLiveTriple(cand)) { trp = cand; break; }
                       }
-
+          
                       String sourceLang = "";
                       String original = b.pendingSourceText != null && b.pendingSourceText.trim().length() > 0
                           ? b.pendingSourceText.trim()
                           : (b.sourceTop ? b.topText : b.bottomText);
                       String translation = "";
                       boolean sourceIsTop = b.sourceTop;
-
+          
                       if(trp != null) {
                           sourceLang = trp[0] == null ? "" : trp[0].trim().toUpperCase(Locale.ROOT);
-                          // V263: a már megjelenített forrásszöveg megváltoztathatatlan.
+                          // V268: a már megjelenített forrásszöveg megváltoztathatatlan.
                           // A modell ORIGINAL mezője nem írhatja vissza és nem javíthatja át.
                           translation = trp[2] == null ? "" : trp[2];
                           String srcUpper = sourceLang == null ? "" : sourceLang.trim().toUpperCase(Locale.ROOT);
                           if(srcUpper.equals(b.pairTopCode.toUpperCase(Locale.ROOT))) sourceIsTop = true;
                           else if(srcUpper.equals(b.pairBottomCode.toUpperCase(Locale.ROOT))) sourceIsTop = false;
                       } else {
-                          // V263: túl szigorú AI-válasz szűrés kivéve.
+                          // V268: túl szigorú AI-válasz szűrés kivéve.
                           // Ha a modell nem címkézett hármas blokkot ad, de használható fordított szöveg jött,
                           // azt a meglévő forrásblokk fordításaként fogadjuk el. Nem indítunk új blokkot, nem újrapróbálunk végtelenül.
                           translation = out;
                       }
-
-                      original = original == null ? "" : original.trim();
-                      translation = cleanTranscriptForSelectedPair(cleanOneBlockTranslation(translation));
-
+          
+                      original = original == null ? "" : cleanTranscriptForSelectedPair(original).trim();
+                      translation = cleanOneBlockTranslation(translation);
+          
                       if(original.length() == 0 || translation.length() == 0) {
                           retryLiveBlockOrRender(id);
                           return;
                       }
-
+          
                       String no = normalizeLiveBlockHash(original);
                       String nt = normalizeLiveBlockHash(translation);
                       if(no.length() >= 12 && no.equals(nt)) {
                           retryLiveBlockOrRender(id);
                           return;
                       }
-
+          
                       b.sourceTop = sourceIsTop;
                       b.pendingSourceText = "";
                       if(sourceIsTop) {
@@ -3011,12 +3007,10 @@ jobs:
                   }
                   pendingLiveBlockId = -1;
                   liveTranslateMode = false;
-                  // V263: a response.done várás csak a STOP-kifutás állapotellenőrzéséhez kell.
-                  // Normál élő fordításnál a következő blokkot nem foghatja vissza;
-                  // ha a szerver még válaszban van, a meglévő response-in-progress ág röviden visszateszi a blokkot.
-                  new Handler().postDelayed(() -> processNextLiveTranslation(), 80);
+                  // V268: a következő live blokkot a response.done esemény indítja.
+                  // Itt nincs újraindítás, nincs retry-torlódás.
               }
-
+          
               void routeAiOutput(String out) {
                   if(clipboardResponseMode && clipboardDialog != null && clipboardDialog.isShowing()) {
                       clipboardResponseMode = false;
@@ -3025,24 +3019,24 @@ jobs:
                   } else {
                       clipboardResponseMode = false;
                   }
-
+          
                   if(manualResponseMode) {
                       manualResponseMode = false;
                       applyManualFullWindowTranslation(out);
                       return;
                   }
-
+          
                   if(liveTranslateMode || pendingLiveBlockId >= 0) {
                       applyLiveTranslation(out);
                       return;
                   }
-
-                  // V263: állapot nélküli / késve érkező AI-válasz nem hibaüzenet a felhasználónak.
+          
+                  // V268: állapot nélküli / késve érkező AI-válasz nem hibaüzenet a felhasználónak.
                   // Nem hozunk létre belőle új blokkot, de nem is zavarjuk meg az aktív mikrofonos munkát toasttal.
                   android.util.Log.w("Fordito", "Állapot nélküli AI-válasz figyelmen kívül hagyva: " + out);
                   if(streaming) state.setText("mikrofon aktív");
               }
-
+          
               boolean isCleanManualTranslation(String tr) {
                   if(tr == null) return false;
                   String t = tr.trim();
@@ -3053,7 +3047,7 @@ jobs:
                   // Ha az UFO-szűrés mindent kiszedett, ne számítson kész fordításnak.
                   return cleanTranscriptForSelectedPair(t).trim().length() > 0;
               }
-
+          
               void applyManualFullWindowTranslation(String out) {
                   try {
                       String tr = cleanOneBlockTranslation(out);
@@ -3061,7 +3055,7 @@ jobs:
                           Toast.makeText(this, "Nem tiszta fordítás érkezett. Nyomd meg újra a FORDÍT gombot.", Toast.LENGTH_LONG).show();
                           return;
                       }
-
+          
                       programmaticChange = true;
                       try {
                           if(manualTopSource) bottomBox.setText(tr);
@@ -3069,7 +3063,7 @@ jobs:
                       } finally {
                           programmaticChange = false;
                       }
-
+          
                       rebuildBlocksFromCurrentBoxes();
                       renderBlocksKeepView();
                       speakManualOnce(tr, manualTopSource ? bottomLang : topLang);
@@ -3078,7 +3072,7 @@ jobs:
                       Toast.makeText(this, "Kézi fordítás feldolgozási hiba. Próbáld újra.", Toast.LENGTH_LONG).show();
                   }
               }
-
+          
               void rebuildBlocksFromCurrentBoxes() {
                   TextBlock b = new TextBlock();
                   b.topText = topBox.getText().toString().trim();
@@ -3090,50 +3084,26 @@ jobs:
                   textBlocks.clear();
                   textBlocks.add(b);
               }
-
+          
               String cleanOneBlockTranslation(String out) {
                   if(out == null) return "";
                   String s = out.trim();
                   if(s.startsWith("```")) s = s.replace("```", "").trim();
-
+          
                   String upper = s.toUpperCase(Locale.ROOT);
                   int trPos = upper.lastIndexOf("TRANSLATION:");
                   if(trPos >= 0) {
                       s = s.substring(trPos + "TRANSLATION:".length()).trim();
+                  } else if(looksLikeInternalPromptLeak(s)) {
+                      // V268: ha a modell nem adott TRANSLATION mezőt, hanem a promptot echozta,
+                      // az egész válasz hibás. Nem vagdosunk belőle találomra; retry/hiba ág kezeli.
+                      return "";
                   }
                   if(s.toUpperCase(Locale.ROOT).startsWith("FORDÍTÁS:")) s = s.substring("FORDÍTÁS:".length()).trim();
-
-                  // Biztonsági tisztítás: ha a modell mégis címkéket adott vissza,
-                  // ne írjuk be őket a fordítási ablakba.
-                  StringBuilder clean = new StringBuilder();
-                  String[] lines = s.split("\n");
-                  for(String line: lines) {
-                      String t = line.trim();
-                      String u = t.toUpperCase(Locale.ROOT);
-                      if(u.startsWith("SOURCE_LANG:") || u.startsWith("TARGET_LANG:") ||
-                         u.startsWith("ORIGINAL:") || u.equals("TEXT:") || u.startsWith("TEXT:") ||
-                         u.startsWith("LIVE_PAIR_CLASSIFY_AND_TRANSLATE") || u.startsWith("SELECTED_TOP_LANG:") ||
-                         u.startsWith("SELECTED_BOTTOM_LANG:") ||
-                         u.startsWith("YOU ARE A TRANSLATION ENGINE, NOT A MODERATOR") ||
-                         u.startsWith("TRANSLATE EXACTLY ONE FINALIZED SPEECH SEGMENT") ||
-                         u.startsWith("SELECTED CONVERSATION PAIR IS EXACTLY") ||
-                         u.startsWith("CHOOSE SOURCE_LANG AS ONE OF THESE TWO LANGUAGES ONLY") ||
-                         u.startsWith("SHORT ANSWERS, QUESTIONS AND FRAGMENTS ARE VALID SPEECH") ||
-                         u.startsWith("NEVER REFUSE, MORALIZE, WARN, EXPLAIN, APOLOGIZE") ||
-                         u.startsWith("EVERY WORD MUST BE OUTPUT IN FULL") ||
-                         u.startsWith("NEVER REWRITE, REPAIR, EXTEND OR REINTERPRET") ||
-                         u.startsWith("THE USER MESSAGE CONTAINS TEXT") ||
-                         u.startsWith("DO NOT CORRECT, REWRITE, MERGE") ||
-                         u.startsWith("RETURN EXACTLY THREE LINES") ||
-                         u.startsWith("DO NOT OUTPUT MARKDOWN")) {
-                          continue;
-                      }
-                      if(clean.length() > 0) clean.append("\n");
-                      clean.append(line);
-                  }
-                  return cleanTranscriptForSelectedPair(clean.toString().trim());
+                  if(looksLikeInternalPromptLeak(s)) return "";
+                  return cleanTranscriptForSelectedPair(s);
               }
-
+          
               ArrayList<String[]> parseTriples(String out) {
                   ArrayList<String[]> list = new ArrayList<>();
                   if(out == null) return list;
@@ -3156,7 +3126,7 @@ jobs:
                   }
                   return list;
               }
-
+          
               String extractAfter(String out, String key) {
                   if(out == null || key == null) return "";
                   String upper = out.toUpperCase(Locale.ROOT);
@@ -3172,7 +3142,7 @@ jobs:
                   }
                   return out.substring(start, end).trim();
               }
-
+          
               void appendTo(EditText target, String s) {
                   if(s == null || s.length() == 0) return;
                   programmaticChange = true;
@@ -3185,17 +3155,17 @@ jobs:
                       programmaticChange = false;
                   }
               }
-
+          
               void appendDelta(String s) {
                   EditText target = topActive ? bottomBox : topBox;
                   appendTo(target, s);
               }
-
+          
               void append(String s) {
                   EditText target = topActive ? bottomBox : topBox;
                   appendTo(target, s);
               }
-
+          
               void confirm() {
                   new AlertDialog.Builder(this)
                     .setTitle("Folyik még a beszélgetés?")
@@ -3204,15 +3174,15 @@ jobs:
                     .setNegativeButton("Leállítás", (d,w) -> { sessionStart = 0L; stop(); })
                     .show();
               }
-
+          
               void menu() {
                   if(uiLockedForLive || finalizingStop) return;
-
+          
                   LinearLayout box = new LinearLayout(this);
                   box.setOrientation(LinearLayout.VERTICAL);
                   box.setPadding(10, 10, 10, 10);
                   box.setBackgroundColor(Color.rgb(35,38,44));
-
+          
                   addMenuButton(box, "Háttér / lezárt kijelző", backgroundScreenLabel(), backgroundScreenAllowed, v -> {
                       toggleBackgroundScreenMode();
                       refreshMenuButton((Button)v, "Háttér / lezárt kijelző", backgroundScreenLabel(), backgroundScreenAllowed);
@@ -3245,7 +3215,7 @@ jobs:
                   addMenuButton(box, "Ablakkezelés", "másolás, teljes törlés", false, v -> windowMenu());
                   addMenuButton(box, "OpenAI API kulcs", hasKey() ? "kulcs mentve – megnyitáskor kijelölve" : "nincs megadva", false, v -> showApi());
                   addMenuButton(box, "Alapbeállítások", "nyelvpár marad, fordítás/bevitel visszaáll", false, v -> { resetCoreSettings(); updateButtons(); });
-
+          
                   AlertDialog dlg = new AlertDialog.Builder(this).setView(box).create();
                   dlg.setOnShowListener(di -> {
                       try {
@@ -3262,7 +3232,7 @@ jobs:
                   });
                   dlg.show();
               }
-
+          
               Button addMenuButton(LinearLayout parent, String title, String subtitle, boolean active, View.OnClickListener listener) {
                   Button b = new Button(this);
                   b.setAllCaps(false);
@@ -3284,7 +3254,7 @@ jobs:
                   parent.addView(b, lp);
                   return b;
               }
-
+          
               void refreshMenuButton(Button b, String title, String subtitle, boolean active) {
                   String sub = subtitle == null ? "" : subtitle.trim();
                   String text = title + (sub.length() == 0 ? "" : "\n" + sub);
@@ -3299,21 +3269,21 @@ jobs:
                   b.setText(ss);
                   b.setBackgroundColor(active ? Color.rgb(30,140,70) : Color.rgb(95,95,95));
               }
-
+          
               void refreshInterpreterMenuButton(Button b) {
                   String title = "Tolmács";
                   String sub = interpreterQuickLabel();
                   String text = title + "\n" + sub;
                   SpannableString ss = new SpannableString(text);
-
-                  // V263: olvashatóbb tolmács mód gomb.
+          
+                  // V268: olvashatóbb tolmács mód gomb.
                   // A felső sor kisebb, az állapot nagyobb és félkövér.
                   ss.setSpan(new AbsoluteSizeSpan(13, true), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   ss.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   int st = title.length() + 1;
                   ss.setSpan(new AbsoluteSizeSpan(14, true), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   ss.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-
+          
                   if(!interpreterMode) {
                       ss.setSpan(new ForegroundColorSpan(Color.rgb(245,245,245)), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                       b.setBackgroundColor(Color.rgb(85,85,85));
@@ -3324,19 +3294,19 @@ jobs:
                       ss.setSpan(new ForegroundColorSpan(Color.WHITE), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                       b.setBackgroundColor(Color.rgb(15,75,145));
                   }
-
+          
                   b.setText(ss);
               }
-
-
+          
+          
               String floatingTranslatorLabel() {
                   return floatingTranslatorEnabled ? "vágólap fordítása mini ablakban" : "kikapcsolva – csak menüből indítható";
               }
-
+          
               boolean canDrawOverlayNow() {
                   return Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this);
               }
-
+          
               void requestOverlayPermission() {
                   try {
                       Intent i = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
@@ -3346,7 +3316,7 @@ jobs:
                       Toast.makeText(this, "Overlay engedély nem nyitható meg.", Toast.LENGTH_LONG).show();
                   }
               }
-
+          
               void toggleFloatingTranslator() {
                   floatingTranslatorEnabled = !floatingTranslatorEnabled;
                   if(floatingTranslatorEnabled && backgroundScreenAllowed) {
@@ -3360,7 +3330,7 @@ jobs:
                       hideFloatingTranslator();
                   }
               }
-
+          
               void ensureFloatingTranslator() {
                   if(!floatingTranslatorEnabled) return;
                   if(!canDrawOverlayNow()) { requestOverlayPermission(); return; }
@@ -3444,7 +3414,7 @@ jobs:
                       Toast.makeText(this, "Lebegő gomb hiba: " + e.getMessage(), Toast.LENGTH_LONG).show();
                   }
               }
-
+          
               android.view.WindowManager.LayoutParams floatingParams(int w, int h, int gravity) {
                   int type = Build.VERSION.SDK_INT >= 26 ? android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : android.view.WindowManager.LayoutParams.TYPE_PHONE;
                   android.view.WindowManager.LayoutParams lp = new android.view.WindowManager.LayoutParams(w, h, type,
@@ -3455,13 +3425,13 @@ jobs:
                   lp.y = 0;
                   return lp;
               }
-
+          
               void hideFloatingTranslator() {
                   try { if(floatingWindowManager != null && floatingButtonView != null) floatingWindowManager.removeView(floatingButtonView); } catch(Exception ignored) {}
                   floatingButtonView = null;
                   hideFloatingResultWindow();
               }
-
+          
               void floatingTranslatorButtonAction() {
                   try {
                       if(clipboardDialog != null && clipboardDialog.isShowing()) {
@@ -3473,7 +3443,7 @@ jobs:
                   } catch(Exception ignored) {}
                   translateClipboardFromFloatingButton();
               }
-
+          
               void openClipboardReplyMode() {
                   try {
                       setClipboardText(" ");
@@ -3497,7 +3467,7 @@ jobs:
                       Toast.makeText(this, "Új válasz mód hiba: " + e.getMessage(), Toast.LENGTH_LONG).show();
                   }
               }
-
+          
               void translateClipboardFromFloatingButton() {
                   if(!hasKey()) { bringAppToFrontForClipboardRead(); new Handler().postDelayed(() -> showApi(), 250); return; }
                   hideFloatingResultWindow();
@@ -3505,7 +3475,7 @@ jobs:
                   if(clipboardDialog != null && clipboardDialog.isShowing()) return;
                   new Handler().postDelayed(() -> translateClipboardNow(false), 480);
               }
-
+          
               void translateClipboardNow(boolean allowForegroundRetry) {
                   String text = getClipboardText().trim();
                   if(isClipboardSystemMessage(text)) text = "";
@@ -3520,7 +3490,7 @@ jobs:
                   showClipboardTranslatorPanel(text, "Értelmezés folyamatban…", "");
                   prepareClipboardOnlyHttp(text);
               }
-
+          
               void runClipboardPanelTranslate() {
                   String raw = clipboardRawEdit == null ? "" : clipboardRawEdit.getText().toString().trim();
                   String prep = clipboardPreparedEdit == null ? "" : clipboardPreparedEdit.getText().toString().trim();
@@ -3555,7 +3525,7 @@ jobs:
                   showClipboardTranslatorPanel(source, mid, "Fordítás folyamatban…");
                   translateClipboardFullHttp(source, clipboardCurrentTarget);
               }
-
+          
               void translateClipboardFullHttp(String sourceText, String targetCode) {
                   final int requestToken = ++clipboardFullRequestToken;
                   try {
@@ -3564,7 +3534,7 @@ jobs:
                           .readTimeout(70, TimeUnit.SECONDS)
                           .writeTimeout(30, TimeUnit.SECONDS)
                           .build();
-
+          
                       JSONObject root = new JSONObject();
                       root.put("model", "gpt-4o-mini");
                       root.put("temperature", 0.1);
@@ -3573,7 +3543,7 @@ jobs:
                       messages.put(new JSONObject().put("role", "user").put("content",
                           "SOURCE_LANG: AUTO\nTARGET_LANG: " + targetCode + "\nTEXT:\n" + sourceText));
                       root.put("messages", messages);
-
+          
                       MediaType mt = MediaType.parse("application/json; charset=utf-8");
                       RequestBody body = RequestBody.create(root.toString(), mt);
                       Request req = new Request.Builder()
@@ -3582,7 +3552,7 @@ jobs:
                           .addHeader("Content-Type", "application/json")
                           .post(body)
                           .build();
-
+          
                       http.newCall(req).enqueue(new Callback() {
                           @Override public void onFailure(Call call, java.io.IOException e) {
                               runOnUiThread(() -> showClipboardTranslatorPanel(sourceText, "", "Vágólap-fordítási hiba: kapcsolat nem sikerült."));
@@ -3612,7 +3582,7 @@ jobs:
                       showClipboardTranslatorPanel(sourceText, "", "Vágólap-fordítási hiba: " + e.getMessage());
                   }
               }
-
+          
               String clipboardPrepareOnlyInstructions() {
                   return clipboardContextPrompt() + "Every word must be output in full. Never replace letters with asterisks or symbols. Never mask, redact, soften, sanitize, euphemize, hide, or partially replace any profanity, insult, slang, vulgar, sexual, rude, or emotional wording. If such wording appears in the input or is required by the translation, write the complete word exactly in the target language. " + "Never censor, mask, redact, soften, sanitize or replace any word, including profanity, vulgarity, insults, sexual language, slang or rude wording. Preserve every such word in full, with its original spelling and meaning. Never use asterisks, partial masking, euphemisms, square-bracket placeholders or category labels. " + "You repair raw dictated or clipboard text for the middle field of a 3-window translator. Return ONLY the corrected source-language text, no labels, no markdown, no quotes, no explanation. " +
                     "The user may provide text in either one of the selected language pair. You must keep the ORIGINAL input language. In this middle step translation is strictly forbidden. " +
@@ -3623,7 +3593,7 @@ jobs:
                     "You may rewrite awkward wording naturally when this does not change meaning. Do NOT invent facts, explanations, opinions or new content. If an unusual or test word could be intentional, keep it. If genuinely ambiguous, prefer the closest plausible wording rather than guessing a new meaning. " +
                     "Do not add comments or explain the text. Preserve vulgarity, intimacy, friendliness and official or informal register.";
               }
-
+          
               void scheduleClipboardAutoPrepare() {
                   final int token = ++clipboardAutoPrepareToken;
                   new Handler().postDelayed(() -> {
@@ -3632,7 +3602,7 @@ jobs:
                       autoPrepareClipboardRawText();
                   }, 5000);
               }
-
+          
               void autoPrepareClipboardRawText() {
                   try {
                       if(clipboardRawEdit == null || clipboardPreparedEdit == null) return;
@@ -3645,7 +3615,7 @@ jobs:
                       prepareClipboardOnlyHttp(raw);
                   } catch(Exception ignored) {}
               }
-
+          
               void prepareClipboardOnlyHttp(String rawText) {
                   final int requestToken = ++clipboardPrepareRequestToken;
                   try {
@@ -3708,7 +3678,7 @@ jobs:
                       if(clipboardPreparedEdit != null) clipboardPreparedEdit.setText(rawText);
                   }
               }
-
+          
               void translateClipboardOnlyHttp(String preparedText, String targetCode) {
                   final int requestToken = ++clipboardTranslateRequestToken;
                   try {
@@ -3761,7 +3731,7 @@ jobs:
                       showClipboardTranslatorPanel(clipboardCurrentSource, preparedText, "Vágólap-fordítási hiba: " + e.getMessage());
                   }
               }
-
+          
               String cleanClipboardApiText(String out) {
                   String t = out == null ? "" : out.trim();
                   if(t.startsWith("```")) {
@@ -3770,9 +3740,59 @@ jobs:
                   }
                   t = t.trim();
                   if(t.startsWith("\"") && t.endsWith("\"") && t.length() >= 2) t = t.substring(1, t.length() - 1).trim();
+                  if(t.length() == 0) return "";
+
+                  // V268: a háromablakos/vágólapos ág saját kimeneti tisztítása.
+                  // Nem használja az élő mikrofonos ág tisztítóját, de ugyanúgy nem engedhet
+                  // belső promptot, contextet vagy technikai címkét az ablakba.
+                  String[] lines = t.split("\\r?\\n");
+                  StringBuilder keep = new StringBuilder();
+                  for(String line : lines) {
+                      String l = line == null ? "" : line.trim();
+                      if(l.length() == 0) {
+                          if(keep.length() > 0 && keep.charAt(keep.length()-1) != '\n') keep.append('\n');
+                          continue;
+                      }
+                      String u = l.toUpperCase(Locale.ROOT);
+                      if(u.startsWith("PREPARED:") || u.startsWith("TRANSLATION:") || u.startsWith("ORIGINAL:")) {
+                          int cp = l.indexOf(':');
+                          l = cp >= 0 ? l.substring(cp + 1).trim() : "";
+                          if(l.length() == 0) continue;
+                          u = l.toUpperCase(Locale.ROOT);
+                      }
+                      boolean meta =
+                          u.startsWith("CLIPBOARD_FLOATING_TRANSLATION") ||
+                          u.startsWith("MANUAL_FULL_WINDOW_TRANSLATION") ||
+                          u.startsWith("SOURCE_LANG") || u.startsWith("TARGET_LANG") ||
+                          u.startsWith("TEXT:") ||
+                          u.contains("YOU REPAIR RAW DICTATED OR CLIPBOARD TEXT") ||
+                          u.contains("YOU ARE A STANDALONE CLIPBOARD") ||
+                          u.contains("THIS CLIPBOARD BRANCH IS INDEPENDENT") ||
+                          u.contains("THE USER MAY PROVIDE TEXT") ||
+                          u.contains("RETURN ONLY") ||
+                          u.contains("NO LABELS") || u.contains("NO MARKDOWN") ||
+                          u.contains("NO QUOTES") || u.contains("NO EXPLANATION") ||
+                          u.contains("DO NOT ADD COMMENTS") ||
+                          u.contains("DO NOT INVENT") ||
+                          u.contains("DO NOT WRITE SOURCE_LANG") ||
+                          u.contains("DO NOT WRITE LABELS") ||
+                          u.contains("PRESERVE THE SPEAKER") ||
+                          u.contains("PRESERVE EVERY SUCH WORD") ||
+                          u.contains("NEVER CENSOR") || u.contains("NEVER MASK") ||
+                          u.contains("NEVER REPLACE LETTERS") ||
+                          u.contains("EVERY WORD MUST BE OUTPUT") ||
+                          u.contains("ASTERISKS") ||
+                          u.contains("DOMAIN GLOSSARY HINTS") ||
+                          u.contains("CONTEXT PROFILE");
+                      if(meta) continue;
+                      if(keep.length() > 0 && keep.charAt(keep.length()-1) != '\n') keep.append('\n');
+                      keep.append(l);
+                  }
+                  t = keep.toString().trim();
+                  if(t.startsWith("\"") && t.endsWith("\"") && t.length() >= 2) t = t.substring(1, t.length() - 1).trim();
                   return t;
               }
-
+          
               void applyClipboardFullResult(String source, String out) {
                   String prepared = "";
                   String translation = "";
@@ -3798,7 +3818,7 @@ jobs:
                   showClipboardTranslatorPanel(source, prepared, translation);
                   Toast.makeText(this, "Fordítás elkészült.", Toast.LENGTH_SHORT).show();
               }
-
+          
               String stripClipboardTranslationLabels(String s) {
                   String t = cleanClipboardApiText(s);
                   if(t.length() == 0) return "";
@@ -3825,7 +3845,7 @@ jobs:
                   if(translation.length() > 0) return translation.toString().trim();
                   return t;
               }
-
+          
               void applyClipboardTranslationOnly(String prepared, String tr) {
                   String clean = stripClipboardTranslationLabels(tr);
                   if(clean.length() == 0) {
@@ -3835,7 +3855,7 @@ jobs:
                   showClipboardTranslatorPanel(clipboardCurrentSource, prepared, clean);
                   Toast.makeText(this, "Fordítás elkészült.", Toast.LENGTH_SHORT).show();
               }
-
+          
               void bringAppToFrontForClipboardRead() {
                   try {
                       Intent it = new Intent(this, MainActivity.class);
@@ -3843,7 +3863,7 @@ jobs:
                       startActivity(it);
                   } catch(Exception ignored) {}
               }
-
+          
               String getClipboardText() {
                   try {
                       android.content.ClipboardManager cm = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
@@ -3867,7 +3887,7 @@ jobs:
                   }
               }
               String clipboardTargetCode(String text) {
-                  // V263: vágólapos ág saját iránylogikája.
+                  // V268: vágólapos ág saját iránylogikája.
                   // Magyar bemenet: a másik (nem HU) beállított nyelvre fordít.
                   // Idegen bemenet: mindig magyarra fordít, a középső mező üres marad.
                   String bottom = code(bottomLang);
@@ -3880,11 +3900,11 @@ jobs:
                   }
                   return bottom;
               }
-
+          
               boolean isClipboardHungarian(String text) {
                   return "HU".equalsIgnoreCase(guessClipboardLangCode(text));
               }
-
+          
               String guessClipboardLangCode(String text) {
                   String t = (text == null ? "" : text).toLowerCase(Locale.ROOT);
                   if(t.trim().length() == 0) return "";
@@ -3914,8 +3934,8 @@ jobs:
                   if(it > max) { max = it; lang = "IT"; }
                   return max >= 2 ? lang : "";
               }
-
-
+          
+          
               void sendClipboardTextToTranslate(String text) {
                   clipboardResponseMode = true;
                   manualResponseMode = false;
@@ -3946,7 +3966,7 @@ jobs:
                       item.put("content", content);
                       msg.put("item", item);
                       ws.send(msg.toString());
-
+          
                       JSONObject resp = new JSONObject();
                       resp.put("type", "response.create");
                       JSONObject response = new JSONObject();
@@ -3959,7 +3979,7 @@ jobs:
                       showFloatingResultWindow("Vágólap-fordítás hiba. Próbáld újra.");
                   }
               }
-
+          
               String clipboardFullInstructions() {
                   return clipboardContextPrompt() + "Never censor, mask, redact, soften, sanitize or replace any word, including profanity, vulgarity, insults, sexual language, slang or rude wording. Preserve every such word in full, with its original spelling and meaning. Never use asterisks, partial masking, euphemisms, square-bracket placeholders or category labels. " + "You are a standalone clipboard text repair and translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
                     "Return ONLY valid JSON with exactly two string fields: prepared and translation. No markdown, no labels outside JSON. " +
@@ -3969,14 +3989,14 @@ jobs:
                     "Keep the user's practical meaning, tone, register, emotional intensity and context. Friendly stays friendly; official stays official; direct work messages stay direct; intimate or sexual text stays intimate or sexual instead of being made formal. Make the result natural and native-sounding. " +
                     "Every word must be output in full. Never replace letters with asterisks or symbols. Do not mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording.";
               }
-
+          
               String clipboardTranslationInstructions() {
                   return clipboardContextPrompt() + "Never censor, mask, redact, soften, sanitize or replace any word, including profanity, vulgarity, insults, sexual language, slang or rude wording. Preserve every such word in full, with its original spelling and meaning. Never use asterisks, partial masking, euphemisms, square-bracket placeholders or category labels. " + "You are a standalone clipboard translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
                     "If SOURCE_LANG is AUTO, detect the source language from TEXT. Translate the entire TEXT to TARGET_LANG. If TARGET_LANG is HU, the answer must be Hungarian. " +
                     "Return ONLY the translated text. Preserve paragraphs where reasonable. No labels, no markdown, no quotes, no explanation. Preserve the original style, register and emotional tone: friendly stays friendly, official stays official, intimate or sexual stays intimate or sexual, and practical work messages stay natural and direct. " +
                     "Every word must be output in full. Never replace letters with asterisks or symbols. Do not mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Keep meaning, context and tone.";
               }
-
+          
               void applyClipboardTranslation(String out) {
                   String tr = cleanClipboardApiText(out);
                   if(tr.length() == 0) {
@@ -3986,11 +4006,11 @@ jobs:
                   showClipboardTranslatorPanel(clipboardCurrentSource, clipboardCurrentPrepared, tr);
                   Toast.makeText(this, "Fordítás elkészült.", Toast.LENGTH_SHORT).show();
               }
-
+          
               void updateClipboardTranslateButtonLabel() {
                   if(clipboardTranslateButton != null) clipboardTranslateButton.setText(clipboardAutoTranslateEnabled ? "FORDÍT\nAUTO" : "FORDÍT\nMANUÁL");
               }
-
+          
               boolean isClipboardSystemMessage(String s) {
                   if(s == null) return false;
                   String x = s.trim();
@@ -4000,7 +4020,7 @@ jobs:
                   if(x.equalsIgnoreCase("Értelmezés folyamatban…")) return true;
                   return false;
               }
-
+          
               boolean usableClipboardText(String s) {
                   if(s == null) return false;
                   String x = s.trim();
@@ -4014,7 +4034,7 @@ jobs:
                   if(x.startsWith("Vágólap-fordítási hiba")) return false;
                   return true;
               }
-
+          
               String bestClipboardCopyText() {
                   String tr = clipboardTranslationEdit == null ? "" : clipboardTranslationEdit.getText().toString().trim();
                   if(usableClipboardText(tr)) return tr;
@@ -4024,7 +4044,7 @@ jobs:
                   if(usableClipboardText(raw)) return raw;
                   return "";
               }
-
+          
               EditText clipboardEditBox(String hint, int textSize, int maxLines) {
                   EditText e = new EditText(this);
                   e.setHint(hint);
@@ -4040,7 +4060,7 @@ jobs:
                   e.setBackgroundColor(Color.rgb(18,21,27));
                   return e;
               }
-
+          
               void showClipboardTranslatorPanel(String source, String prepared, String translation) {
                   try {
                       if(streaming) stop();
@@ -4050,7 +4070,7 @@ jobs:
                           lay.setOrientation(LinearLayout.VERTICAL);
                           lay.setPadding(18, 14, 18, 14);
                           lay.setBackgroundColor(Color.rgb(28,31,37));
-
+          
                           LinearLayout clipboardTitleRow = row();
                           TextView title = label("Vágólap fordító");
                           title.setTextSize(13);
@@ -4071,7 +4091,7 @@ jobs:
                           clipboardTitleRow.addView(title, new LinearLayout.LayoutParams(0, 96, 1));
                           clipboardTitleRow.addView(clipboardMicButton, new LinearLayout.LayoutParams(96, 96));
                           lay.addView(clipboardTitleRow, new LinearLayout.LayoutParams(-1, -2));
-
+          
                           TextView rawTitle = label("Nyers beolvasott szöveg:");
                           rawTitle.setTextSize(13);
                           rawTitle.setTextColor(Color.rgb(255, 210, 80));
@@ -4086,21 +4106,21 @@ jobs:
                               }
                           });
                           lay.addView(clipboardRawEdit, new LinearLayout.LayoutParams(-1, 0, 0.90f));
-
+          
                           clipboardPreparedTitle = label("Értelmezett / fordítandó szöveg:");
                           clipboardPreparedTitle.setTextSize(13);
                           clipboardPreparedTitle.setTextColor(Color.rgb(255, 210, 80));
                           lay.addView(clipboardPreparedTitle, new LinearLayout.LayoutParams(-1, -2));
                           clipboardPreparedEdit = clipboardEditBox("javított vagy fordítandó szöveg", 15, 5);
                           lay.addView(clipboardPreparedEdit, new LinearLayout.LayoutParams(-1, 0, 1.05f));
-
+          
                           TextView trTitle = label("Fordítás:");
                           trTitle.setTextSize(13);
                           trTitle.setTextColor(Color.rgb(255, 210, 80));
                           lay.addView(trTitle, new LinearLayout.LayoutParams(-1, -2));
                           clipboardTranslationEdit = clipboardEditBox("fordítás", 16, 7);
                           lay.addView(clipboardTranslationEdit, new LinearLayout.LayoutParams(-1, 0, 1.05f));
-
+          
                           LinearLayout buttons = row();
                           Button translate = btn("FORDÍT");
                           clipboardTranslateButton = translate;
@@ -4140,7 +4160,7 @@ jobs:
                           buttons.addView(copy, new LinearLayout.LayoutParams(0,64,1));
                           buttons.addView(hide, new LinearLayout.LayoutParams(0,64,1));
                           lay.addView(buttons);
-
+          
                           clipboardDialog.setContentView(lay);
                       }
                       int prepVisibility = View.VISIBLE;
@@ -4162,14 +4182,14 @@ jobs:
                       Toast.makeText(this, translation == null ? "Vágólap fordító hiba." : translation, Toast.LENGTH_LONG).show();
                   }
               }
-
+          
               void setClipboardText(String text) {
                   try {
                       android.content.ClipboardManager cm = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
                       if(cm != null) cm.setPrimaryClip(ClipData.newPlainText("Fordito fordítás", text));
                   } catch(Exception ignored) {}
               }
-
+          
               void showFloatingResultWindow(String text) {
                   if(!canDrawOverlayNow()) { Toast.makeText(this, text, Toast.LENGTH_LONG).show(); return; }
                   try {
@@ -4200,17 +4220,17 @@ jobs:
                       Toast.makeText(this, text, Toast.LENGTH_LONG).show();
                   }
               }
-
+          
               void hideFloatingResultWindow() {
                   try { if(floatingWindowManager != null && floatingResultView != null) floatingWindowManager.removeView(floatingResultView); } catch(Exception ignored) {}
                   floatingResultView = null;
               }
-
-
+          
+          
               String translationMenuLabel() {
                   return profileLabel() + " / " + modeLabel();
               }
-
+          
               void translationMenu() {
                   if(uiLockedForLive || finalizingStop) return;
                   CharSequence[] items = {
@@ -4219,7 +4239,7 @@ jobs:
                       menuItem("Fordítás stílusa", modeLabel(), false),
                       menuItem("Hangprofil", soundProfileLabel(), false)
                   };
-
+          
                   showCenteredMenu("Fordítási beállítások", items, (d,w) -> {
                       if(w==0) chooseModel();
                       if(w==1) chooseProfile();
@@ -4228,33 +4248,33 @@ jobs:
                       updateButtons();
                   });
               }
-
+          
               void advancedMenu() {
                   if(uiLockedForLive || finalizingStop) return;
                   CharSequence[] items = {
                       menuItem("Beszédfelismerés", speechMenuLabel(), false),
                       menuItem("Hang / zajszűrés", noiseMenuLabel(), false)
                   };
-
+          
                   showCenteredMenu("Szakértői beállítások", items, (d,w) -> {
                       if(w==0) speechMenu();
                       if(w==1) noiseMenu();
                       updateButtons();
                   });
               }
-
+          
               String speechMenuLabel() {
                   return vadLabel() + " – " + hybridMaxSpeechSegmentMs()/1000 + " mp max";
               }
-
+          
               String noiseMenuLabel() {
                   return "aktív hanglánc";
               }
-
+          
               String backgroundScreenLabel() {
                   return backgroundScreenAllowed ? "engedélyezve erre az indításra" : "kikapcsolva – minden indításkor ez az alap";
               }
-
+          
               void speechMenu() {
                   if(uiLockedForLive || finalizingStop) return;
                   CharSequence[] items = {
@@ -4262,7 +4282,7 @@ jobs:
                       menuItem("Hangprofil váltása", soundProfileLabel(), false),
                       menuItem("Aktív hanglánc", activeInputChainLabel(), false)
                   };
-
+          
                   showCenteredMenu("Beszédfelismerés", items, (d,w) -> {
                       if(w==0) chooseVad();
                       if(w==1) chooseSoundProfile();
@@ -4270,21 +4290,21 @@ jobs:
                       updateButtons();
                   });
               }
-
+          
               void noiseMenu() {
                   if(uiLockedForLive || finalizingStop) return;
                   CharSequence[] items = {
                       menuItem("Hangprofil váltása", soundProfileLabel(), false),
                       menuItem("Aktív hanglánc", activeInputChainLabel(), false)
                   };
-
+          
                   showCenteredMenu("Hang / zajszűrés", items, (d,w) -> {
                       if(w==0) chooseSoundProfile();
                       if(w==1) Toast.makeText(this, activeInputChainLabel(), Toast.LENGTH_LONG).show();
                       updateButtons();
                   });
               }
-
+          
               void chooseBackgroundScreenMode() {
                   CharSequence[] items = {
                       menuItem("Kikapcsolva", "alapértelmezett minden appindításkor", !backgroundScreenAllowed),
@@ -4297,8 +4317,8 @@ jobs:
                       updateButtons();
                   });
               }
-
-
+          
+          
               void toggleBackgroundScreenMode() {
                   backgroundScreenAllowed = !backgroundScreenAllowed;
                   if(backgroundScreenAllowed) {
@@ -4315,13 +4335,13 @@ jobs:
                   Toast.makeText(this, backgroundScreenAllowed ? "Háttér mód aktív. Lebegő vágólap mód kikapcsolva." : "Háttér mód kikapcsolva.", Toast.LENGTH_SHORT).show();
                   updateButtons();
               }
-
+          
               String interpreterQuickLabel() {
                   if(!interpreterMode) return "kikapcsolva – csak szöveges fordítás";
                   if("speaker".equals(interpreterAudioMode)) return "KIHANGOSÍTOTT MÓD";
                   return "BLUETOOTH MÓD";
               }
-
+          
               void disableInterpreterQuick() {
                   interpreterMode = false;
                   interpreterAudioMode = "off";
@@ -4332,7 +4352,7 @@ jobs:
                   save();
                   Toast.makeText(this, "Tolmács mód kikapcsolva.", Toast.LENGTH_SHORT).show();
               }
-
+          
               void toggleInterpreterQuick() {
                   if(!interpreterMode) {
                       interpreterMode = true;
@@ -4347,7 +4367,7 @@ jobs:
                   Toast.makeText(this, interpreterQuickLabel(), Toast.LENGTH_SHORT).show();
                   updateButtons();
               }
-
+          
               void toggleDisplayModeQuick() {
                   mirrorBottomMode = !mirrorBottomMode;
                   applyDisplayMode();
@@ -4355,7 +4375,7 @@ jobs:
                   Toast.makeText(this, displayModeLabel(), Toast.LENGTH_SHORT).show();
                   updateButtons();
               }
-
+          
               void windowMenu() {
                   if(uiLockedForLive || finalizingStop) return;
                   CharSequence[] items = {
@@ -4364,7 +4384,7 @@ jobs:
                       menuItem("Teljes törlés", "mindkét ablak törlése", false),
                       menuItem("Kijelző elrendezés", displayModeLabel(), mirrorBottomMode)
                   };
-
+          
                   showCenteredMenu("Ablakkezelés", items, (d,w) -> {
                       if(w==0) copyBox(true);
                       if(w==1) copyBox(false);
@@ -4373,7 +4393,7 @@ jobs:
                       updateButtons();
                   });
               }
-
+          
               void clearTopBox() {
                   programmaticChange=true;
                   topBox.setText("");
@@ -4382,7 +4402,7 @@ jobs:
                   textBlocks.clear();
                   Toast.makeText(this, "Felső ablak törölve.", Toast.LENGTH_SHORT).show();
               }
-
+          
               void clearBottomBox() {
                   programmaticChange=true;
                   bottomBox.setText("");
@@ -4391,7 +4411,7 @@ jobs:
                   textBlocks.clear();
                   Toast.makeText(this, "Alsó ablak törölve.", Toast.LENGTH_SHORT).show();
               }
-
+          
               void clearBothBoxes() {
                   if(uiLockedForLive || finalizingStop) return;
                   programmaticChange=true;
@@ -4403,7 +4423,7 @@ jobs:
                   textBlocks.clear();
                   Toast.makeText(this, "Mindkét ablak törölve.", Toast.LENGTH_SHORT).show();
               }
-
+          
               void copyBox(boolean top) {
                   EditText source = top ? topBox : bottomBox;
                   String text = source.getText().toString();
@@ -4417,7 +4437,7 @@ jobs:
                       Toast.makeText(this, top ? "Felső ablak másolva." : "Alsó ablak másolva.", Toast.LENGTH_SHORT).show();
                   }
               }
-
+          
               CharSequence menuItem(String title, String subtitle, boolean selected) {
                   String main = title == null ? "" : title;
                   String sub = subtitle == null ? "" : subtitle;
@@ -4433,17 +4453,17 @@ jobs:
                   }
                   return spn;
               }
-
+          
               void showCenteredMenu(String title, CharSequence[] items, DialogInterface.OnClickListener listener) {
                   new AlertDialog.Builder(this).setTitle(title).setItems(items, listener).show();
               }
-
+          
               void showApi() {
                   LinearLayout box = new LinearLayout(this);
                   box.setOrientation(LinearLayout.VERTICAL);
                   int pad = (int)(12 * getResources().getDisplayMetrics().density + 0.5f);
                   box.setPadding(pad, pad, pad, pad);
-
+          
                   TextView note = label(
                       "EN: This is not a login, registration, account creation, membership or subscription screen. " +
                       "The app does not request, collect or store usernames, passwords, PINs, OTPs or user login credentials. " +
@@ -4459,7 +4479,7 @@ jobs:
                   note.setGravity(Gravity.START);
                   note.setLineSpacing(0f, 1.05f);
                   box.addView(note, new LinearLayout.LayoutParams(-1, -2));
-
+          
                   EditText input = new EditText(this);
                   input.setSingleLine(true);
                   input.setText(apiKey == null ? "" : apiKey);
@@ -4468,10 +4488,10 @@ jobs:
                   input.setTextSize(14);
                   input.setPadding(8, 8, 8, 8);
                   box.addView(input, new LinearLayout.LayoutParams(-1, -2));
-
+          
                   android.widget.ScrollView scroll = new android.widget.ScrollView(this);
                   scroll.addView(box);
-
+          
                   AlertDialog dlg = new AlertDialog.Builder(this)
                     .setTitle("OpenAI API kulcs")
                     .setView(scroll)
@@ -4494,7 +4514,7 @@ jobs:
                   });
                   dlg.show();
               }
-
+          
               void chooseModel() { chooseFrom("Beszédfelismerő modell", models, transcriptionModel, v -> { transcriptionModel = v; save(); sessionUpdateIfConnected(); }); }
               void chooseProfile() { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save(); sessionUpdateIfConnected(); }); }
               void chooseMode() { chooseFrom("Fordítás stílusa", modes, mode, v -> { mode = v; save(); sessionUpdateIfConnected(); }); }
@@ -4510,9 +4530,9 @@ jobs:
                       updateButtons();
                   });
               }
-
+          
               void applyInputProfileValues() {
-                  // V263: a hangprofil NEM írhatja felül titokban a kézi zajszűrési/kapu beállításokat.
+                  // V268: a hangprofil NEM írhatja felül titokban a kézi zajszűrési/kapu beállításokat.
                   // Az Android effektek, az OpenAI noise reduction és a mikrofonkapu külön menüből vezérelt,
                   // ténylegesen aktív kapcsolók. Itt csak érvényesítjük a stabil alap hangforrást és a régi értékeket.
                   if(!"truck_noisy".equals(soundProfile)) soundProfile = "general";
@@ -4522,7 +4542,7 @@ jobs:
                   if(!"off".equals(openAiNoiseMode) && !"near_field".equals(openAiNoiseMode) && !"far_field".equals(openAiNoiseMode)) openAiNoiseMode = "off";
                   if(!"sensitive".equals(micGateMode) && !"gate_low".equals(micGateMode) && !"normal".equals(micGateMode) && !"gate_high".equals(micGateMode)) micGateMode = "sensitive";
               }
-
+          
               String activeInputChainLabel() {
                   return "profil=" + soundProfileLabel() +
                          " | source=" + audioSourceMode +
@@ -4532,7 +4552,7 @@ jobs:
                          " | delay=" + delayMode +
                          " | OAI-noise(Realtime)=" + openAiNoiseMode;
               }
-
+          
               void applySoundProfile(String v) {
                   soundProfile = v;
                   applyInputProfileValues();
@@ -4541,18 +4561,18 @@ jobs:
                   restartIfNeeded();
                   Toast.makeText(this, activeInputChainLabel(), Toast.LENGTH_LONG).show();
               }
-
+          
               String soundProfileLabel() {
                   if("truck_noisy".equals(soundProfile)) return "Kamion / gyors";
                   return "Általános";
               }
-
+          
               void chooseVad() { chooseFrom("Blokkzárás: csend + maximum idő", vadModes, vadMode, v -> { vadMode = v; save(); applyRecognitionTimingChange(); Toast.makeText(this, "Blokkzárás: " + vadLabel(), Toast.LENGTH_SHORT).show(); }); }
               void chooseMicGate() { chooseFrom("Mikrofon küldési kapu", micGateModes, micGateMode, v -> { micGateMode = v; save(); Toast.makeText(this, activeInputChainLabel(), Toast.LENGTH_LONG).show(); }); }
               void chooseAudioSource() { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }); }
               void chooseAndroidEffects() { chooseFrom("Android hangfeldolgozás", androidEffectsModes, androidEffectsMode, v -> { androidEffectsMode = v; save(); restartIfNeeded(); Toast.makeText(this, activeInputChainLabel(), Toast.LENGTH_LONG).show(); }); }
               void chooseOpenAiNoise() { chooseFrom("OpenAI Realtime zajszűrés (nem gpt-4o STT)", openAiNoiseModes, openAiNoiseMode, v -> { openAiNoiseMode = v; save(); sessionUpdateIfConnected(); Toast.makeText(this, activeInputChainLabel(), Toast.LENGTH_LONG).show(); }); }
-
+          
               void resetCoreSettings() {
                   new AlertDialog.Builder(this)
                     .setTitle("Alapbeállítások")
@@ -4582,13 +4602,13 @@ jobs:
                     .setNegativeButton("Mégse", null)
                     .show();
               }
-
+          
               String interpreterLabel() {
                   if("headset".equals(interpreterAudioMode)) return "Bluetooth/headset mód – gyors, visszahallásvédelem nélkül";
                   if("speaker".equals(interpreterAudioMode)) return "kihangosított telefon mód – visszahallásvédelemmel";
                   return "kikapcsolva – csak szöveges fordítás";
               }
-
+          
               void chooseInterpreterMode() {
                   String[][] data = {
                       {"Kikapcsolva", "off", "csak szöveges fordítás, nincs felolvasás"},
@@ -4615,11 +4635,11 @@ jobs:
                       updateButtons();
                   });
               }
-
+          
               String displayModeLabel() {
                   return mirrorBottomMode ? "tükör mód – felső ablak fejjel lefelé" : "normál mód – mindkét ablak egy irányba";
               }
-
+          
               void chooseDisplayMode() {
                   String[][] data = {
                       {"Normál mód", "normal"},
@@ -4638,16 +4658,16 @@ jobs:
                       updateButtons();
                   });
               }
-
+          
               void applyDisplayMode() {
                   try {
                       if(topBox != null) topBox.setRotation(mirrorBottomMode ? 180f : 0f);
                       if(bottomBox != null) bottomBox.setRotation(0f);
                   } catch(Exception ignored) {}
               }
-
+          
               interface Setter { void set(String v); }
-
+          
               void chooseFrom(String title, String[][] data, String current, Setter setter) {
                   CharSequence[] labels = new CharSequence[data.length];
                   for(int i=0;i<data.length;i++) labels[i] = menuItem(data[i][0], data[i][1].equals(current) ? "kiválasztva" : "", data[i][1].equals(current));
@@ -4656,7 +4676,7 @@ jobs:
                       updateButtons();
                   });
               }
-
+          
               void chooseLang(boolean top) {
                   if(uiLockedForLive || finalizingStop) return;
                   String current = top ? topLang : bottomLang;
@@ -4671,7 +4691,7 @@ jobs:
                       }
                       if(top) topLang = langs[w][2];
                       else bottomLang = langs[w][2];
-                      // V263: nyelvválasztás nem jelent forrásablak-választást.
+                      // V268: nyelvválasztás nem jelent forrásablak-választást.
                       // A beszéd következő transcript blokkjánál automatikusan döntünk a felismert nyelv alapján.
                       topBox.clearFocus();
                       bottomBox.clearFocus();
@@ -4680,18 +4700,18 @@ jobs:
                       updateButtons();
                   });
               }
-
+          
               void restartIfNeeded() {
                   if(streaming) {
                       stop();
                       new Handler().postDelayed(() -> start(true), 700);
                   }
               }
-
+          
               void sessionUpdateIfConnected() {
                   if(ws != null && connected) sessionUpdate();
               }
-
+          
               String profilePrompt() {
                   String base = "Default to natural everyday meaning. The profile is only a light terminology hint, not a forced interpretation. ";
                   if(profile.equals("truck_bulk")) return base + "If clearly relevant, prefer logistics/bulk transport terms such as loaded, unloaded, silo, weighing, site, freight, trailer, loading point and delivery point. Do not force truck meaning onto normal conversation.";
@@ -4709,23 +4729,23 @@ jobs:
                   if(profile.equals("pharmacy")) return base + "Use pharmacy, medicine, dosage and symptom terminology only when relevant.";
                   return base + "General conversation.";
               }
-
+          
               String modelLabel() { return labelOf(models, transcriptionModel); }
               String profileLabel() { return labelOf(profiles, profile); }
               String modeLabel() { return labelOf(modes, mode); }
               String vadLabel() { return labelOf(vadModes, vadMode); }
-
+          
               String labelOf(String[][] arr, String key) {
                   for(String[] x: arr) if(x[1].equals(key)) return x[0];
                   return key;
               }
-
+          
               String code(String code) {
                   if(code == null || code.isEmpty()) return "AUTO";
                   for(String[] l: langs) if(l[2].equals(code)) return l[1];
                   return code.toUpperCase(Locale.ROOT);
               }
-
+          
               String speechBcp47Tag(String langCode) {
                   String lc = langCode == null ? "" : langCode.trim().toLowerCase(Locale.ROOT);
                   if(lc.equals("hu")) return "hu-HU";
@@ -4740,7 +4760,7 @@ jobs:
                   if(lc.equals("sl")) return "sl-SI";
                   return lc;
               }
-
+          
               String apiCode(String code) {
                   if(code == null || code.isEmpty() || code.equals("AUTO")) return "";
                   for(String[] l: langs) {
@@ -4749,9 +4769,9 @@ jobs:
                   }
                   return code.toLowerCase(Locale.ROOT);
               }
-
+          
               void setLiveUiLocked(boolean locked) {
-                  // V263: élő mikrofon alatt nem zárjuk a kezelőfelületet.
+                  // V268: élő mikrofon alatt nem zárjuk a kezelőfelületet.
                   // A háttérmód miatt a véletlen nyomkodás elleni régi védelemre nincs szükség;
                   // csak a mikrofon gomb színe/szövege jelzi az aktív állapotot.
                   uiLockedForLive = false;
@@ -4761,7 +4781,7 @@ jobs:
                       styleUiState();
                   } catch(Exception ignored) {}
               }
-
+          
               void styleUiState() {
                   try {
                       int active = Color.rgb(65,100,155);
@@ -4770,13 +4790,13 @@ jobs:
                       int green = Color.rgb(30,140,70);
                       int red = Color.rgb(150,55,50);
                       int orange = Color.rgb(170,105,30);
-
+          
                       if(topLangBtn != null) topLangBtn.setBackgroundColor(topActive ? active : inactive);
                       if(bottomLangBtn != null) bottomLangBtn.setBackgroundColor(!topActive ? active : inactive);
                       
                       if(translateBtn != null) translateBtn.setBackgroundColor(inactive);
                       if(menuBtn != null) menuBtn.setBackgroundColor(inactive);
-
+          
                       if(micBtn != null) {
                           micBtn.setEnabled(true);
                           if(finalizingStop) {
@@ -4792,14 +4812,14 @@ jobs:
                       }
                   } catch(Exception ignored) {}
               }
-
+          
               void stopWithFinalizeDelay() {
-                  // V263: felhasználói stop = utolsó hangblokk lezárása és a már indított munka kifuttatása.
+                  // V268: felhasználói stop = utolsó hangblokk lezárása és a már indított munka kifuttatása.
                   try { gracefulUserStop(); } catch(Exception ignored) {}
                   setLiveUiLocked(false);
                   updateButtons();
               }
-
+          
               void updateButtons() {
                   if(micBtn != null) {
                       if(finalizingStop) {
@@ -4818,7 +4838,7 @@ jobs:
                   bottomLangBtn.setBackgroundColor(!topActive ? Color.rgb(60,95,150) : Color.rgb(55,60,70));
                   styleUiState();
               }
-
+          
               void startClipboardSystemSpeech() {
                   try {
                       if(clipboardSpeechActive) {
@@ -4830,19 +4850,19 @@ jobs:
                       Toast.makeText(this, "Vágólapos diktálás hiba: " + e.getMessage(), Toast.LENGTH_LONG).show();
                   }
               }
-
+          
               void startClipboardGoogleSpeech() {
                   try {
                       // Ágváltás: a főprogram mikrofonja teljesen álljon le, a vágólapos ág kapja a mikrofont.
                       if(streaming) stop();
                       backgroundScreenAllowed = false;
                       stopBackgroundForegroundService();
-
+          
                       if(!SpeechRecognizer.isRecognitionAvailable(this)) {
                           Toast.makeText(this, "Google/Android beszédfelismerő nem elérhető ezen a készüléken.", Toast.LENGTH_LONG).show();
                           return;
                       }
-
+          
                       clipboardSpeechActive = true;
                       if(clipboardMicButton != null) {
                           clipboardMicButton.setText("STOP");
@@ -4862,7 +4882,7 @@ jobs:
                       if(clipboardSpeechBaseText.equalsIgnoreCase("vágólap szövege") || clipboardSpeechBaseText.equalsIgnoreCase("fordítás") || clipboardSpeechBaseText.equalsIgnoreCase("javított vagy fordítandó szöveg")) clipboardSpeechBaseText = "";
                       clipboardSpeechCommittedText = clipboardSpeechBaseText;
                       clipboardSpeechLastPartial = "";
-
+          
                       if(clipboardSpeechRecognizer == null) {
                           clipboardSpeechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
                           clipboardSpeechRecognizer.setRecognitionListener(new RecognitionListener() {
@@ -4872,13 +4892,13 @@ jobs:
                               @Override public void onBufferReceived(byte[] buffer) {}
                               @Override public void onEndOfSpeech() {}
                               @Override public void onEvent(int eventType, Bundle params) {}
-
+          
                               @Override public void onPartialResults(Bundle partialResults) {
                                   if(!clipboardSpeechActive) return;
                                   ArrayList<String> list = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                                   if(list != null && list.size() > 0) showClipboardDictationPartial(list.get(0));
                               }
-
+          
                               @Override public void onResults(Bundle results) {
                                   if(!clipboardSpeechActive) return;
                                   ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
@@ -4887,7 +4907,7 @@ jobs:
                                   stopClipboardSystemSpeech(false);
                                   autoPrepareClipboardRawText();
                               }
-
+          
                               @Override public void onError(int error) {
                                   if(!clipboardSpeechActive) return;
                                   if(clipboardSpeechLastPartial != null && clipboardSpeechLastPartial.trim().length() > 0) {
@@ -4899,15 +4919,15 @@ jobs:
                               }
                           });
                       }
-
+          
                       clipboardSpeechIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-                      // V263: stabil visszaállás. A vágólapos Google diktálás fixen magyar.
+                      // V268: stabil visszaállás. A vágólapos Google diktálás fixen magyar.
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hu-HU");
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hu-HU");
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, true);
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-                      // V263: a Google/Android beszédfelismerő ne csillagozza ki a sértőnek ítélt szavakat.
+                      // V268: a Google/Android beszédfelismerő ne csillagozza ki a sértőnek ítélt szavakat.
                       // A nyers felismerési eredmény változtatás nélkül jusson tovább.
                       if(Build.VERSION.SDK_INT >= 33) {
                           clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_MASK_OFFENSIVE_WORDS, false);
@@ -4916,14 +4936,14 @@ jobs:
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000);
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3000);
                       clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 8000);
-
+          
                       startClipboardSpeechNow();
                   } catch(Exception e) {
                       stopClipboardSystemSpeech(false);
                       Toast.makeText(this, "A vágólapos Google diktálás nem indítható: " + e.getMessage(), Toast.LENGTH_LONG).show();
                   }
               }
-
+          
               void startClipboardSpeechNow() {
                   try {
                       clipboardSpeechRecognizer.startListening(clipboardSpeechIntent);
@@ -4933,7 +4953,7 @@ jobs:
                       Toast.makeText(this, "A vágólapos Google diktálás nem indítható: " + e.getMessage(), Toast.LENGTH_LONG).show();
                   }
               }
-
+          
               void stopClipboardSystemSpeech(boolean toast) {
                   boolean wasActive = clipboardSpeechActive;
                   if(toast && wasActive && clipboardSpeechLastPartial != null && clipboardSpeechLastPartial.trim().length() > 0) {
@@ -4951,11 +4971,11 @@ jobs:
                       scheduleClipboardAutoPrepare();
                   }
               }
-
+          
               String normSpeech(String s) {
                   return s == null ? "" : s.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
               }
-
+          
               String appendSpeechPart(String base, String part) {
                   base = base == null ? "" : base.trim();
                   part = part == null ? "" : part.trim();
@@ -4967,7 +4987,7 @@ jobs:
                   if(np.startsWith(nb)) return part;
                   return base + " " + part;
               }
-
+          
               boolean sameOrGrowingPartial(String oldPart, String newPart) {
                   String a = normSpeech(oldPart);
                   String b = normSpeech(newPart);
@@ -4978,7 +4998,7 @@ jobs:
                   if(n >= 8 && a.substring(0, n).equals(b.substring(0, n))) return true;
                   return false;
               }
-
+          
               void renderClipboardDictationText(String text) {
                   if(clipboardRawEdit == null) return;
                   clipboardRawEdit.setText(text == null ? "" : text.trim());
@@ -4986,33 +5006,33 @@ jobs:
                   clipboardRawEdit.setSelection(clipboardRawEdit.getText().length());
                   clipboardResponseMode = true;
               }
-
+          
               void showClipboardDictationPartial(String spoken) {
                   spoken = spoken == null ? "" : spoken.trim();
                   if(spoken.length() == 0 || clipboardRawEdit == null) return;
-
+          
                   // Google partial sajátosság: rövid szünet után néha új részletet kezd,
                   // ami már nem tartalmazza az előző partialt. Ilyenkor az előző partialt
                   // megtartjuk, nem engedjük kitörölni.
                   if(clipboardSpeechLastPartial.length() > 0 && !sameOrGrowingPartial(clipboardSpeechLastPartial, spoken)) {
                       clipboardSpeechCommittedText = appendSpeechPart(clipboardSpeechCommittedText, clipboardSpeechLastPartial);
                   }
-
+          
                   clipboardSpeechLastPartial = spoken;
                   renderClipboardDictationText(appendSpeechPart(clipboardSpeechCommittedText, clipboardSpeechLastPartial));
               }
-
+          
               void commitClipboardDictationResult(String spoken) {
                   spoken = spoken == null ? "" : spoken.trim();
                   if(spoken.length() == 0) spoken = clipboardSpeechLastPartial == null ? "" : clipboardSpeechLastPartial.trim();
                   if(spoken.length() == 0 || clipboardRawEdit == null) return;
-
+          
                   clipboardSpeechCommittedText = appendSpeechPart(clipboardSpeechCommittedText, spoken);
                   clipboardSpeechBaseText = clipboardSpeechCommittedText;
                   clipboardSpeechLastPartial = "";
                   renderClipboardDictationText(clipboardSpeechCommittedText);
               }
-
+          
               @Override public void onBackPressed() {
                   if(clipboardDialog != null && clipboardDialog.isShowing()) {
                       stopClipboardSystemSpeech(false);
@@ -5028,7 +5048,7 @@ jobs:
                   }
                   super.onBackPressed();
               }
-
+          
               @Override public void onPause() {
                   super.onPause();
                   if(streaming && !backgroundScreenAllowed) stop();
@@ -5044,7 +5064,7 @@ jobs:
                   }
                   if(floatingTranslatorEnabled) new Handler().postDelayed(() -> ensureFloatingTranslator(), 250);
               }
-
+          
               @Override public void onResume() {
                   super.onResume();
                   if(!streaming) {
@@ -5054,7 +5074,7 @@ jobs:
                   }
                   if(floatingTranslatorEnabled) new Handler().postDelayed(() -> ensureFloatingTranslator(), 250);
               }
-
+          
               @Override public void onDestroy() {
                   hideFloatingTranslator();
                   stopClipboardSystemSpeech(false);
@@ -5113,14 +5133,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V263.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V263.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V268.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V268.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V263
+          name: V268
           path: |
             artifact/*.apk
             artifact/*.aab
