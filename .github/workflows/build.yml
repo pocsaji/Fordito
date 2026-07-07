@@ -1,4 +1,4 @@
-name: Build Android APK V268
+name: Build Android APK V274
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 273; versionName = "27.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 274; versionName = "27.4" }
 
               signingConfigs {
                   create("release") {
@@ -347,7 +347,7 @@ jobs:
               String profile = "general";
               String soundProfile = "general";
               String mode = "natural";
-              String vadMode = "high";
+              String vadMode = "medium";
               String delayMode = "medium";
               String micGateMode = "sensitive";
               String audioSourceMode = "recognition";
@@ -403,10 +403,10 @@ jobs:
               };
           
               final String[][] vadModes = {
-                  {"Gyors élő tolmács – 0,7 mp csend / 8 mp max","high"},
-                  {"Kiegyensúlyozott – 1,0 mp csend / 12 mp max","medium"},
-                  {"Nyugodtabb beszéd – 1,4 mp csend / 16 mp max","low"},
-                  {"Automatikus – kiegyensúlyozott","auto"}
+                  {"Érzékeny – halk beszéd / GPS","high"},
+                  {"Normál – ajánlott","medium"},
+                  {"Kamion / zajos – erősebb kapu","low"},
+                  {"Nyers teszt – minimális szűrés","auto"}
               };
           
               final String[][] micGateModes = {
@@ -469,7 +469,7 @@ jobs:
                   profile = sp.getString("profile", "general");
                   soundProfile = sp.getString("soundProfile", "general");
                   mode = sp.getString("mode", "natural");
-                  vadMode = sp.getString("vadMode", "high");
+                  vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "xhigh");
                   micGateMode = sp.getString("micGateMode", "sensitive");
                   audioSourceMode = sp.getString("audioSourceMode", "recognition");
@@ -498,11 +498,11 @@ jobs:
                   // V268: menü-átszervezés. A V254 beállításokat nem írjuk felül frissítéskor.
                   // Új telepítésnél a korábbi stabil alapok maradnak, a háttér mód továbbra is minden induláskor kikapcsolt.
                   int last = sp.getInt("stableDefaultsVersion", 0);
-                  if(last < 245) {
+                  if(last < 274) {
                       profile = "general";
                       soundProfile = "general";
                       mode = "natural";
-                      vadMode = "high";
+                      vadMode = "medium";
                       micGateMode = "sensitive";
                       audioSourceMode = "recognition";
                       androidEffectsMode = "off";
@@ -511,9 +511,9 @@ jobs:
                       interpreterMode = false;
                       interpreterAudioMode = "off";
                   }
-                  if(last < 245) {
+                  if(last < 274) {
                       if(soundProfile == null || soundProfile.length() == 0) soundProfile = "general";
-                      sp.edit().putInt("stableDefaultsVersion", 245).apply();
+                      sp.edit().putInt("stableDefaultsVersion", 274).apply();
                       save();
                   }
               }
@@ -547,7 +547,7 @@ jobs:
               void ui() {
                   LinearLayout root = new LinearLayout(this);
                   root.setOrientation(LinearLayout.VERTICAL);
-                  // V273: a felső diagnosztikai mezők ne csússzanak a státuszsáv alá.
+                  // V274: a felső diagnosztikai mezők ne csússzanak a státuszsáv alá.
                   root.setPadding(dp(3), dp(30), dp(3), dp(63));
                   root.setBackgroundColor(Color.rgb(16,19,24));
                   setContentView(root);
@@ -555,7 +555,7 @@ jobs:
                   // V270: nincs külön, egy teljes sort foglaló build-fejléc.
                   // Az állapot és a halvány verzió a nyelvsor fölött egy keskeny sorban marad.
                   LinearLayout bar = row();
-                  TextView title = label("V273");
+                  TextView title = label("V274");
                   title.setAlpha(0.35f);
                   title.setTextSize(10);
                   state = label("készenlét");
@@ -578,7 +578,7 @@ jobs:
                   preparedLiveBox = box("");
                   rawLiveBox.setEnabled(false);
                   preparedLiveBox.setEnabled(false);
-                  // V273: kizárólag kijelző-elrendezés. A hang/STT/VAD adatút változatlan.
+                  // V274: kizárólag kijelző-elrendezés. A hang/STT/VAD adatút változatlan.
                   // A két diagnosztikai mező kicsi: kb. 2 sor, egységes 14sp betűmérettel.
                   rawLiveBox.setTextSize(14);
                   rawLiveBox.setMinLines(1);
@@ -1297,20 +1297,19 @@ jobs:
               String openAiNoiseLabel() { return labelOf(openAiNoiseModes, openAiNoiseMode); }
           
               double vadThreshold() {
-                  if("high".equals(vadMode)) return 0.50;     // gyors/érzékeny: halk beszédnél könnyebben indul
-                  if("medium".equals(vadMode)) return 0.58;   // V254 alap: kamionban is ne kelljen ordítani
-                  if("auto".equals(vadMode)) return 0.58;
-                  return 0.64;                                // várakozó: hosszabb, óvatosabb blokkzárás
+                  // V274: nem döntési logika, csak kompatibilitási kijelzés a menühöz.
+                  if("auto" .equals(vadMode)) return 0.35;   // Nyers teszt
+                  if("high" .equals(vadMode)) return 0.45;   // Érzékeny
+                  if("medium".equals(vadMode)) return 0.58;  // Normál
+                  return 0.70;                               // Kamion / zajos
               }
           
               int vadSilenceMs() {
-                  // V254 hibrid blokkzárás: természetes csend VAGY kemény max. blokkidő.
-                  // A gyors mód az alap élő tolmácsoláshoz: rövid válaszoknál nem vár tapsra,
-                  // hosszú monológnál pedig a max-idő commit nem engedi félperces blokkba nőni.
-                  if("high".equals(vadMode)) return 700;
-                  if("medium".equals(vadMode)) return 1000;
-                  if("auto".equals(vadMode)) return 1000;
-                  return 1400;
+                  // V274: választható VAD-profilok. Nem fixen bedrótózott egyetlen kapu.
+                  if("auto" .equals(vadMode)) return 600;   // Nyers teszt
+                  if("high" .equals(vadMode)) return 750;   // Érzékeny
+                  if("medium".equals(vadMode)) return 850;   // Normál
+                  return 950;                                // Kamion / zajos
               }
           
               int micGateThreshold() {
@@ -1343,19 +1342,57 @@ jobs:
                   liveSpeechStartFrames = 0;
               }
 
+              int liveSpeechStartFramesRequired() {
+                  if("auto" .equals(vadMode)) return 2;  // Nyers teszt
+                  if("high" .equals(vadMode)) return 3;  // Érzékeny
+                  if("medium".equals(vadMode)) return 4;  // Normál
+                  return 6;                               // Kamion / zajos
+              }
+
+              double liveStartMultiplier() {
+                  if("auto" .equals(vadMode)) return 1.70;
+                  if("high" .equals(vadMode)) return 2.05;
+                  if("medium".equals(vadMode)) return 2.55;
+                  return 3.20;
+              }
+
+              double liveStartOffset() {
+                  if("auto" .equals(vadMode)) return 22.0;
+                  if("high" .equals(vadMode)) return 35.0;
+                  if("medium".equals(vadMode)) return 50.0;
+                  return 70.0;
+              }
+
+              double liveHoldMultiplier() {
+                  if("auto" .equals(vadMode)) return 1.22;
+                  if("high" .equals(vadMode)) return 1.42;
+                  if("medium".equals(vadMode)) return 1.65;
+                  return 1.90;
+              }
+
+              double liveHoldOffset() {
+                  if("auto" .equals(vadMode)) return 8.0;
+                  if("high" .equals(vadMode)) return 16.0;
+                  if("medium".equals(vadMode)) return 25.0;
+                  return 35.0;
+              }
+
               boolean isLiveSpeechFrame(int avg) {
-                  // A régi fix 30-as küszöb a kamion alapzaját is beszédnek nézte, ezért
-                  // csendből teljes STT-blokkok készültek. A küszöb most a saját háttérzajhoz igazodik.
+                  // V274: egyetlen helyen vezérelt, menüből állítható beszédindítás.
+                  // Cél: ne fix szélsőség legyen, hanem Érzékeny / Normál / Kamion / Nyers profil.
                   if(avg < 0) avg = 0;
                   if(!voiceSendActive) {
-                      if(liveNoiseFloor <= 0.0) liveNoiseFloor = Math.max(20.0, avg);
-                      else if(avg < liveNoiseFloor * 1.8) liveNoiseFloor = liveNoiseFloor * 0.94 + avg * 0.06;
+                      if(liveNoiseFloor <= 0.0) liveNoiseFloor = Math.max(18.0, avg);
+                      else if(avg < liveNoiseFloor * 1.65 + 30.0) liveNoiseFloor = liveNoiseFloor * 0.95 + avg * 0.05;
                   }
-                  double adaptive = Math.max(hybridSpeechEnergyThreshold(), liveNoiseFloor * 3.2 + 65.0);
-                  boolean above = avg >= adaptive;
-                  if(voiceSendActive) return avg >= Math.max(hybridSpeechEnergyThreshold(), liveNoiseFloor * 1.75 + 30.0);
-                  if(above) liveSpeechStartFrames++; else liveSpeechStartFrames = 0;
-                  if(liveSpeechStartFrames >= LIVE_SPEECH_START_FRAMES_REQUIRED) {
+                  double base = hybridSpeechEnergyThreshold();
+                  if(voiceSendActive) {
+                      double hold = Math.max(base * 0.80, liveNoiseFloor * liveHoldMultiplier() + liveHoldOffset());
+                      return avg >= hold;
+                  }
+                  double start = Math.max(base, liveNoiseFloor * liveStartMultiplier() + liveStartOffset());
+                  if(avg >= start) liveSpeechStartFrames++; else liveSpeechStartFrames = 0;
+                  if(liveSpeechStartFrames >= liveSpeechStartFramesRequired()) {
                       liveSpeechStartFrames = 0;
                       return true;
                   }
@@ -1601,9 +1638,13 @@ jobs:
               }
           
               int hybridSpeechEnergyThreshold() {
-                  // V268: a 100 ms szabály előtt ne legyen túl kemény helyi hangerőkapu.
-                  // A rövid, halk válaszok (igen/nem/oui/non) is indulhassanak, de a kapu menüből továbbra is emelhető.
-                  return Math.max(55, micGateThreshold());
+                  // V274: a VAD-profil adja az alap küszöböt, a mikrofonkapu csak tudatos szakértői szigorítás.
+                  int profileBase;
+                  if("auto" .equals(vadMode)) profileBase = 28;      // Nyers teszt
+                  else if("high" .equals(vadMode)) profileBase = 45; // Érzékeny
+                  else if("medium".equals(vadMode)) profileBase = 70; // Normál
+                  else profileBase = 105;                             // Kamion / zajos
+                  return Math.max(profileBase, micGateThreshold());
               }
           
               void noteSpeechForHybridBlockClosing(long now) {
@@ -1612,10 +1653,10 @@ jobs:
               }
           
               int hybridMaxSpeechSegmentMs() {
-                  if("high".equals(vadMode)) return 3000;
+                  if("auto" .equals(vadMode)) return 3000;
+                  if("high" .equals(vadMode)) return 4000;
                   if("medium".equals(vadMode)) return 5000;
-                  if("auto".equals(vadMode)) return 5000;
-                  return 8000;
+                  return 6500;
               }
           
               void maybeCloseHybridSpeechSegment(long now, boolean speechNow) {
@@ -4331,7 +4372,7 @@ jobs:
               void speechMenu() {
                   if(uiLockedForLive || finalizingStop) return;
                   CharSequence[] items = {
-                      menuItem("Blokkzárás", vadLabel() + " – max " + (hybridMaxSpeechSegmentMs()/1000) + " mp", false),
+                      menuItem("Beszédérzékelés / VAD", vadLabel() + " – " + vadSilenceMs() + " ms / max " + (hybridMaxSpeechSegmentMs()/1000) + " mp", false),
                       menuItem("Hangprofil váltása", soundProfileLabel(), false),
                       menuItem("Aktív hanglánc", activeInputChainLabel(), false)
                   };
@@ -4620,7 +4661,7 @@ jobs:
                   return "Általános";
               }
           
-              void chooseVad() { chooseFrom("Blokkzárás: csend + maximum idő", vadModes, vadMode, v -> { vadMode = v; save(); applyRecognitionTimingChange(); Toast.makeText(this, "Blokkzárás: " + vadLabel(), Toast.LENGTH_SHORT).show(); }); }
+              void chooseVad() { chooseFrom("Beszédérzékelés / VAD profil", vadModes, vadMode, v -> { vadMode = v; save(); resetLiveSpeechDetector(); applyRecognitionTimingChange(); Toast.makeText(this, "VAD profil: " + vadLabel(), Toast.LENGTH_SHORT).show(); }); }
               void chooseMicGate() { chooseFrom("Mikrofon küldési kapu", micGateModes, micGateMode, v -> { micGateMode = v; save(); Toast.makeText(this, activeInputChainLabel(), Toast.LENGTH_LONG).show(); }); }
               void chooseAudioSource() { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }); }
               void chooseAndroidEffects() { chooseFrom("Android hangfeldolgozás", androidEffectsModes, androidEffectsMode, v -> { androidEffectsMode = v; save(); restartIfNeeded(); Toast.makeText(this, activeInputChainLabel(), Toast.LENGTH_LONG).show(); }); }
@@ -4636,7 +4677,7 @@ jobs:
                         profile = "general";
                         soundProfile = "general";
                         mode = "natural";
-                        vadMode = "high";
+                        vadMode = "medium";
                         micGateMode = "sensitive";
                         audioSourceMode = "recognition";
                         androidEffectsMode = "off";
@@ -5186,8 +5227,8 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V273.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V273.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V274.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V274.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
