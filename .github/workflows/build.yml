@@ -1,4 +1,4 @@
-name: Build Android APK V283
+name: Build Android APK V284
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 283; versionName = "28.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 284; versionName = "28.4" }
 
               signingConfigs {
                   create("release") {
@@ -86,7 +86,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V283" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V284" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -514,7 +514,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V283");
+                  TextView title = label("Fordito_V284");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1084,17 +1084,14 @@ jobs:
                           input.put("noise_reduction", nr);
                       }
 
+                      // V284: STT átállítva gpt-4o-transcribe modellre.
+                      // A teljes lánc változatlan marad: mikrofon -> Realtime input audio -> transcript -> gpt-realtime-2 fordítás.
+                      // Nem állítunk fix language mezőt, mert ugyanabban a munkamenetben TOP és BOTTOM nyelv is megszólalhat.
+                      // A 4o-transcribe támogat promptot, ezért a kiválasztott nyelvpárt és a szó szerinti STT-fegyelmet itt is megadjuk.
+                      // A régi gpt-realtime-whisper-specifikus delay mezőt szándékosan nem küldjük, mert az új modellnél nem erre építünk.
                       JSONObject tr = new JSONObject();
-                      tr.put("model", "gpt-realtime-whisper");
-                      // V240: gpt-realtime-whisper GA Realtime sessionben a transcription prompt NEM támogatott.
-                      // Ezért itt nem küldünk prompt mezőt, különben API hiba jön:
-                      // "The 'prompt' parameter is not supported for this model."
-                      // Nyelvi zárás és szó szerinti fordítási fegyelem a transcript UTÁNI fordító promptban történik.
-                      // Nyelvi hintet sem állítunk fixre, mert a mikrofon egy munkameneten belül TOP és BOTTOM nyelven is megszólalhat.
-                      // A kiválasztott nyelvpárt a BEVITEL után, még fordítás előtt zárjuk:
-                      // csak TOP/BOTTOM nyelvpárba illő, tisztított transcript blokk mehet tovább.
-                      // Így a fordító már nem kap holland/angol/spanyol/német zaj-hallucinációt.
-                      tr.put("delay", delayMode);
+                      tr.put("model", "gpt-4o-transcribe");
+                      tr.put("prompt", liveTranscriptionPrompt());
                       input.put("transcription", tr);
 
                       JSONObject audio = new JSONObject();
@@ -4788,14 +4785,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V283.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V283.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V284.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V284.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V283
+          name: V284
           path: |
             artifact/*.apk
             artifact/*.aab
