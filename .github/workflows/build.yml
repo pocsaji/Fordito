@@ -1,4 +1,4 @@
-name: Build Android APK V282
+name: Build Android APK V283
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 282; versionName = "28.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 283; versionName = "28.3" }
 
               signingConfigs {
                   create("release") {
@@ -86,7 +86,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V282" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V283" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -231,7 +231,7 @@ jobs:
               volatile boolean pendingAudioStartAfterSessionUpdate = false;
               final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
               int preRollAudioBytes = 0;
-              String vadEngineMode = "silero"; // server / webrtc / silero
+              String vadEngineMode = "webrtc"; // server / webrtc / silero
               Object liveVadInstance = null;
               String liveVadInstanceMode = "";
               ByteArrayOutputStream vadFrameBuffer = new ByteArrayOutputStream();
@@ -438,8 +438,8 @@ jobs:
                   vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "xhigh");
                   micGateMode = sp.getString("micGateMode", "sensitive");
-                  vadEngineMode = sp.getString("vadEngineMode", "silero");
-                  if(!"server".equals(vadEngineMode) && !"webrtc".equals(vadEngineMode) && !"silero".equals(vadEngineMode)) vadEngineMode = "silero";
+                  vadEngineMode = sp.getString("vadEngineMode", "webrtc");
+                  if(!"server".equals(vadEngineMode) && !"webrtc".equals(vadEngineMode) && !"silero".equals(vadEngineMode)) vadEngineMode = "webrtc";
                   audioSourceMode = sp.getString("audioSourceMode", "recognition");
                   androidEffectsMode = sp.getString("androidEffectsMode", "recommended");
                   openAiNoiseMode = sp.getString("openAiNoiseMode", "off");
@@ -463,14 +463,14 @@ jobs:
               }
 
               void applyV240StableDefaultsOnce() {
-                  // V282: telepítés/frissítés után egyszer visszaállítjuk az élő hanglánc ajánlott alapját.
+                  // V283: telepítés/frissítés után egyszer visszaállítjuk az élő hanglánc ajánlott alapját.
                   // API kulcsot, kiválasztott nyelvpárt és korábbi beszélgetést nem törlünk.
                   int last = sp.getInt("stableDefaultsVersion", 0);
                   if(last < 282) {
                       profile = "general";
                       soundProfile = "general";
                       mode = "natural";
-                      vadEngineMode = "silero";
+                      vadEngineMode = "webrtc";
                       applyInputProfileValues();
                       interpreterMode = false;
                       interpreterAudioMode = "off";
@@ -514,7 +514,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V282");
+                  TextView title = label("Fordito_V283");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1741,14 +1741,13 @@ jobs:
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
                           if(msg.contains("response in progress")) {
                               responseInProgress = true;
-                              // V240: ha live fordítás közben túl korán próbáltunk új választ indítani,
-                              // ne nyeljük le végleg a sort: röviden visszarakjuk a blokkot és újrapróbáljuk.
+                              // A fordítási sort kizárólag a response.done engedi tovább.
+                              // Itt nincs időzített újrapróbálás, mert az torlódást és döcögést okoz.
                               if(liveTranslateMode && pendingLiveBlockId >= 0) {
                                   int retryId = pendingLiveBlockId;
                                   pendingLiveBlockId = -1;
                                   liveTranslateMode = false;
-                                  liveTranslateQueue.add(retryId);
-                                  new Handler().postDelayed(() -> processNextLiveTranslation(), 700);
+                                  if(!liveTranslateQueue.contains(retryId)) liveTranslateQueue.addFirst(retryId);
                               }
                           }
                           if(manualResponseMode) {
@@ -1935,7 +1934,7 @@ jobs:
                       // Alapelv: ha bizonytalan, átengedjük, nem nyeljük el a beszédet.
                       b = normalizeAndDeduplicateLiveBlock(b);
                       if(b.length() == 0) continue;
-                      // V282: valódi tolmács mód. A nyers STT blokkot nem zárjuk magyarra és
+                      // V283: valódi tolmács mód. A nyers STT blokkot nem zárjuk magyarra és
                       // nem dobjuk el helyi nyelvi kapuval. A TOP/BOTTOM forrásnyelvet a meglévő
                       // AI osztályozó + eredeti nyelvű helyreállító + fordító lépés dönti el.
                       // A helyi oldalbecslés csak ideiglenes kijelzési hely, az AI válasz után
@@ -1952,7 +1951,7 @@ jobs:
                       // V240: sikeres kiírás után a régi idle flush már nem zárhat ugyanarra.
                       liveIdleFlushToken++;
                   }
-                  // V282: a blokkok sorrendben kerülnek a meglévő egyetlen live fordítási sorba.
+                  // V283: a blokkok sorrendben kerülnek a meglévő egyetlen live fordítási sorba.
                   // Egyszerre csak egy blokk fordul; a kézi FORDÍT lehetőség változatlanul megmarad.
                   if(releasedCount > 0) processNextLiveTranslation();
                   return releasedCount;
@@ -2601,12 +2600,10 @@ jobs:
 
               void processNextLiveTranslation() {
                   clipboardResponseMode = false;
-                  // V240: a live fordítást nem szabad a globális responseInProgress flag miatt megállítani.
-                  // A Realtime transcription közben nem fordítási válasz, ezért ez a flag itt könnyen beragadhat.
-                  // Élő beszédnél csak a saját liveTranslateMode zárja ki a párhuzamos blokkfordítást.
-                  if(liveTranslateMode) return;
+                  // A live fordítási sor egyetlen gazdája a response.done.
+                  // Ha már van futó AI-válasz, nem indítunk rá újabbat és nem próbálkozunk időzítővel.
+                  if(liveTranslateMode || responseInProgress) return;
                   if(ws == null || !connected) return;
-                  responseInProgress = false;
                   Integer idObj = liveTranslateQueue.poll();
                   if(idObj == null) return;
                   int id = idObj.intValue();
@@ -2658,7 +2655,7 @@ jobs:
                       b.retryCount++;
                       if(b.retryCount <= 2 && !liveTranslateQueue.contains(id)) {
                           liveTranslateQueue.add(id);
-                          new Handler().postDelayed(() -> processNextLiveTranslation(), 650);
+                          processNextLiveTranslation();
                           return;
                       }
                   }
@@ -2692,7 +2689,7 @@ jobs:
                           translation = trp[2] == null ? "" : trp[2];
                           sourceIsTop = sourceIsTopFromAi(sourceLang, b.sourceTop);
                       } else {
-                          // V282: nincs nyers AI-válasz fallback.
+                          // V283: nincs nyers AI-válasz fallback.
                           // Ha a live fordító nem ad szabályos SOURCE_LANG / ORIGINAL / TRANSLATION hármast,
                           // a blokk hibásként újrapróbálható vagy kiesik, de prompt/meta szöveg nem kerülhet ablakba.
                           retryLiveBlockOrRender(id);
@@ -4260,7 +4257,7 @@ jobs:
                         soundProfile = "general";
                         mode = "natural";
                         applyInputProfileValues();
-                        vadEngineMode = "silero";
+                        vadEngineMode = "webrtc";
                         interpreterMode = false;
                         interpreterAudioMode = "off";
                         ttsMuteUntilMs = 0L;
@@ -4791,14 +4788,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V282.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V282.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V283.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V283.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V240
+          name: V283
           path: |
             artifact/*.apk
             artifact/*.aab
