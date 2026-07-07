@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 269; versionName = "26.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 270; versionName = "27.0" }
 
               signingConfigs {
                   create("release") {
@@ -84,7 +84,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V269" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V270" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -254,6 +254,11 @@ jobs:
               volatile boolean trailingSilenceOpen = false;
               volatile boolean voiceSendActive = false;
               volatile boolean pendingAudioStartAfterSessionUpdate = false;
+              // V270: az élő ág saját, adaptív beszédindítása. Nem szöveget szűr:
+              // a mikrofon háttérszintjéhez képest dönti el, mikor kezdődött tényleges beszéd.
+              double liveNoiseFloor = 0.0;
+              int liveSpeechStartFrames = 0;
+              static final int LIVE_SPEECH_START_FRAMES_REQUIRED = 3;
               final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
               int preRollAudioBytes = 0;
               boolean mirrorBottomMode = false;
@@ -545,13 +550,17 @@ jobs:
                   root.setBackgroundColor(Color.rgb(16,19,24));
                   setContentView(root);
           
+                  // V270: nincs külön, egy teljes sort foglaló build-fejléc.
+                  // Az állapot és a halvány verzió a nyelvsor fölött egy keskeny sorban marad.
                   LinearLayout bar = row();
-                  TextView title = label("V269");
-                  title.setAlpha(0.45f);
+                  TextView title = label("V270");
+                  title.setAlpha(0.35f);
+                  title.setTextSize(10);
                   state = label("készenlét");
+                  state.setTextSize(10);
                   state.setGravity(Gravity.RIGHT);
-                  bar.addView(title, new LinearLayout.LayoutParams(0,30,1));
-                  bar.addView(state, new LinearLayout.LayoutParams(0,30,1));
+                  bar.addView(title, new LinearLayout.LayoutParams(0,18,1));
+                  bar.addView(state, new LinearLayout.LayoutParams(0,18,1));
                   root.addView(bar);
           
                   LinearLayout langRow = row();
@@ -569,8 +578,8 @@ jobs:
                   preparedLiveBox.setEnabled(false);
                   rawLiveBox.setTextSize(14);
                   preparedLiveBox.setTextSize(14);
-                  root.addView(rawLiveBox, new LinearLayout.LayoutParams(-1,72));
-                  root.addView(preparedLiveBox, new LinearLayout.LayoutParams(-1,72));
+                  root.addView(rawLiveBox, new LinearLayout.LayoutParams(-1,58));
+                  root.addView(preparedLiveBox, new LinearLayout.LayoutParams(-1,58));
 
                   topBox = box("FELSŐ ABLAK — átirat / fordítás");
                   bottomBox = box("ALSÓ ABLAK — átirat / fordítás");
@@ -1309,6 +1318,30 @@ jobs:
                   return (int)(sum / samples);
               }
           
+              void resetLiveSpeechDetector() {
+                  liveNoiseFloor = 0.0;
+                  liveSpeechStartFrames = 0;
+              }
+
+              boolean isLiveSpeechFrame(int avg) {
+                  // A régi fix 30-as küszöb a kamion alapzaját is beszédnek nézte, ezért
+                  // csendből teljes STT-blokkok készültek. A küszöb most a saját háttérzajhoz igazodik.
+                  if(avg < 0) avg = 0;
+                  if(!voiceSendActive) {
+                      if(liveNoiseFloor <= 0.0) liveNoiseFloor = Math.max(20.0, avg);
+                      else if(avg < liveNoiseFloor * 1.8) liveNoiseFloor = liveNoiseFloor * 0.94 + avg * 0.06;
+                  }
+                  double adaptive = Math.max(hybridSpeechEnergyThreshold(), liveNoiseFloor * 2.6 + 35.0);
+                  boolean above = avg >= adaptive;
+                  if(voiceSendActive) return avg >= Math.max(hybridSpeechEnergyThreshold(), liveNoiseFloor * 1.55 + 20.0);
+                  if(above) liveSpeechStartFrames++; else liveSpeechStartFrames = 0;
+                  if(liveSpeechStartFrames >= LIVE_SPEECH_START_FRAMES_REQUIRED) {
+                      liveSpeechStartFrames = 0;
+                      return true;
+                  }
+                  return false;
+              }
+
               void clearPreRollAudio() {
                   synchronized(preRollAudioChunks) {
                       preRollAudioChunks.clear();
@@ -1381,7 +1414,7 @@ jobs:
                   boolean ok = false;
               }
           
-              // V269: egyetlen STT-gazda. Nincs két párhuzamos felismerés, nincs logprob-verseny.
+              // V270: egyetlen STT-gazda. Nincs két párhuzamos felismerés, nincs logprob-verseny.
               void transcribeSelectedPairInParallel(byte[] pcm) {
                   final String topCode = apiCode(topLang);
                   final String bottomCode = apiCode(bottomLang);
@@ -1724,6 +1757,7 @@ jobs:
                       trailingSilenceOpen = false;
                       lastVoiceChunkSentAtMs = 0L;
                       resetForcedAudioSegmentState();
+                      resetLiveSpeechDetector();
                       while(streaming && connected && ws != null && rec != null) {
                           int read = rec.read(buf, 0, buf.length);
                           if(read > 0) {
@@ -1741,7 +1775,7 @@ jobs:
           
                                   long now = System.currentTimeMillis();
                                   int avg = avgAbsPcm16(buf, read);
-                                  boolean speechNow = avg >= hybridSpeechEnergyThreshold();
+                                  boolean speechNow = isLiveSpeechFrame(avg);
           
                                   if(speechNow) {
                                       if(!voiceSendActive) {
@@ -1821,6 +1855,7 @@ jobs:
                   voiceSendActive = false;
                   pendingAudioStartAfterSessionUpdate = false;
                   clearPreRollAudio();
+                  resetLiveSpeechDetector();
                   releaseAndroidAudioEffects();
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception ignored) {}
                   rec = null;
@@ -1885,6 +1920,7 @@ jobs:
                   voiceSendActive = false;
                   pendingAudioStartAfterSessionUpdate = false;
                   clearPreRollAudio();
+                  resetLiveSpeechDetector();
                   releaseAndroidAudioEffects();
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception ignored) {}
                   rec = null;
@@ -5130,8 +5166,8 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V269.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V269.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V270.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V270.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
