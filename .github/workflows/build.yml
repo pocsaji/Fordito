@@ -1,4 +1,4 @@
-name: Build Android APK V294
+name: Build Android APK V295
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 294; versionName = "29.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 295; versionName = "29.5" }
 
               signingConfigs {
                   create("release") {
@@ -86,7 +86,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V294" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V295" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -232,7 +232,7 @@ jobs:
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
               static final int MAX_LIVE_SILENCE_MS = 1200;
               static final int MAX_CONTINUOUS_LIVE_BLOCK_MS = 8000;
-              // V294: finom, lépcsős monológ-vágás rádiós / folyamatos beszédhez.
+              // V295: finom, lépcsős monológ-vágás rádiós / folyamatos beszédhez.
               // 150 karakter után mondatvégnél vágunk.
               // 180 karakter után a vessző is elfogadható részmondat-vég.
               // 260 karakter végső szövegplafon, ahol a központi vágólogika szóhatárt is használhat.
@@ -530,7 +530,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V294");
+                  TextView title = label("Fordito_V295");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1109,7 +1109,7 @@ jobs:
                           input.put("noise_reduction", nr);
                       }
 
-                      // V294: STT átállítva gpt-4o-transcribe modellre.
+                      // V295: STT átállítva gpt-4o-transcribe modellre.
                       // A teljes lánc változatlan marad: mikrofon -> Realtime input audio -> transcript -> gpt-realtime-2 fordítás.
                       // Nem állítunk fix language mezőt, mert ugyanabban a munkamenetben TOP és BOTTOM nyelv is megszólalhat.
                       // A 4o-transcribe támogat promptot, ezért a kiválasztott nyelvpárt és a szó szerinti STT-fegyelmet itt is megadjuk.
@@ -1913,7 +1913,7 @@ jobs:
                   if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
                   liveTranscriptBuffer += delta;
 
-                  // V294: a részleges STT delta még javulhat a completed eseményig.
+                  // V295: a részleges STT delta még javulhat a completed eseményig.
                   // Normál esetben nem adjuk ki korán, mert ezzel elveszne a modell későbbi
                   // önjavítása és a teljes mondat kontextusa. Csak a 8 s abszolút blokkmaximum
                   // kényszeríthet ki delta közbeni vágást.
@@ -1922,7 +1922,11 @@ jobs:
                   long age = started > 0L ? now - started : 0L;
                   if(age >= MAX_CONTINUOUS_LIVE_BLOCK_MS ||
                           shouldTryTextLengthCut(liveTranscriptBuffer)) {
-                      released = flushReadyTranscriptBlocks(false);
+                      // V295: folyamatos rádió/delta ágon nem várunk completed eseményre.
+                      // Ha a puffer már hosszú, közvetlenül levágjuk a stabil elejét és fordítási sorba tesszük.
+                      // Ha ez valamiért nem talál vágási pontot, csak akkor esünk vissza a régi központi flush-ra.
+                      released = forceFlushLongLiveDeltaPrefix(age);
+                      if(released == 0) released = flushReadyTranscriptBlocks(false);
                   }
                   if(released > 0) {
                       liveDeltaReleasedSinceLastCompleted = true;
@@ -1951,7 +1955,7 @@ jobs:
                   if(transcript != null && transcript.trim().length() > 0) {
                       completedIsOnlyAlreadyReleased = isAlreadyReleasedTranscript(transcript);
 
-                      // V294: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
+                      // V295: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
                       // a completed szöveg felülírja a részleges delta puffert. Ez őrzi meg
                       // a transcribe modell végső javítását és a teljes mondat kontextusát.
                       if(!completedIsOnlyAlreadyReleased && !liveDeltaReleasedSinceLastCompleted) {
@@ -2060,6 +2064,55 @@ jobs:
 
                   // 260 karakter a végső szövegplafon. Itt már ne hízzon tovább a blokk.
                   return len >= HARD_TEXT_CUT_CHARS;
+              }
+
+              int forceLiveDeltaCut(String s, long ageMs) {
+                  if(s == null) return -1;
+                  String t = s.trim();
+                  if(t.length() == 0) return -1;
+
+                  int cut = firstHardSentenceEnd(s);
+                  if(cut > 0) return cut;
+
+                  if(t.length() >= SOFT_COMMA_CUT_START_CHARS) {
+                      int commaCut = lastCommaCut(s, 60, s.length());
+                      if(commaCut > 0) return commaCut;
+                  }
+
+                  if(t.length() >= HARD_TEXT_CUT_CHARS || ageMs >= MAX_CONTINUOUS_LIVE_BLOCK_MS) {
+                      int forced = safeWholeBufferFlushCut(s);
+                      return forced >= 0 ? forced : s.length();
+                  }
+
+                  return -1;
+              }
+
+              int forceFlushLongLiveDeltaPrefix(long ageMs) {
+                  try {
+                      if(!firstSpeechBlockReleased && !initialSpeechGateOpen()) return 0;
+                      String s = liveTranscriptBuffer == null ? "" : liveTranscriptBuffer;
+                      int cut = forceLiveDeltaCut(s, ageMs);
+                      if(cut <= 0 || cut > s.length()) return 0;
+
+                      String b = s.substring(0, cut).trim();
+                      liveTranscriptBuffer = s.substring(cut).trim();
+                      liveBufferStartedAt = liveTranscriptBuffer.length() > 0 ? System.currentTimeMillis() : 0L;
+
+                      b = normalizeAndDeduplicateLiveBlock(b);
+                      if(b.length() == 0) return 0;
+
+                      boolean sourceGuessTop = sourceIsTopBySelectedPair(b, topActive);
+                      int id = addSourceOnlyBlock(sourceGuessTop, b);
+                      if(id < 0) return 0;
+
+                      firstSpeechBlockReleased = true;
+                      liveTranslateQueue.add(id);
+                      lastLiveBlockReleasedAt = System.currentTimeMillis();
+                      processNextLiveTranslation();
+                      return 1;
+                  } catch(Exception ignored) {
+                      return 0;
+                  }
               }
 
               boolean isAlreadyReleasedTranscript(String transcript) {
@@ -2401,7 +2454,7 @@ jobs:
                   int cut = firstHardSentenceEnd(s);
                   if(cut >= 0) return cut;
 
-                  // V294: hosszú blokknál a vessző kemény részmondat-zárás.
+                  // V295: hosszú blokknál a vessző kemény részmondat-zárás.
                   // Rövid válaszoknál és rövid mondatoknál nem működik, csak 180 karakter felett.
                   // Így nem darálja szét a normál beszédet, de a rádiós/politikai monológ nem hízik oldalnyira.
                   if(t.length() >= SOFT_COMMA_CUT_START_CHARS) {
@@ -4925,14 +4978,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V294.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V294.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V295.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V295.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V294
+          name: V295
           path: |
             artifact/*.apk
             artifact/*.aab
