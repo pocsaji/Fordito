@@ -1,4 +1,4 @@
-name: Build Android APK V302
+name: Build Android APK V303
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 302; versionName = "30.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 303; versionName = "30.3" }
 
               signingConfigs {
                   create("release") {
@@ -86,7 +86,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V302" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V303" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -231,7 +231,7 @@ jobs:
               // 8 s folyamatos beszédnél vágunk blokkot akkor is, ha nincs csend.
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
               static final int MAX_LIVE_SILENCE_MS = 1200;
-              // V302: egyszerű folyamatos tolmácslogika.
+              // V303: egyszerű folyamatos tolmácslogika.
               // Nem karaktert, vesszőt vagy szótárat számolunk: legfeljebb 2 mp beszédpuffer után
               // szóhatáron kiadjuk a kész elejét, a felismerő/fordító végzi a nyelvi munkát.
               static final int MAX_CONTINUOUS_LIVE_BLOCK_MS = 2000;
@@ -435,7 +435,7 @@ jobs:
                   reqMic();
                   reqNotifications();
                   initTts();
-                  new Handler().postDelayed(() -> { if(floatingTranslatorEnabled) ensureFloatingTranslator(); }, 600);
+                  new Handler().postDelayed(() -> { if(floatingTranslatorEnabled) ensureFloatingTranslator(); if(interpreterMode) ensureInterpreterFloatingButton(); }, 600);
               }
 
               void load() {
@@ -469,6 +469,8 @@ jobs:
                   floatingTranslatorEnabled = sp.getBoolean("floatingTranslatorEnabled", false);
                   floatingButtonX = sp.getInt("floatingButtonX", 24);
                   floatingButtonY = sp.getInt("floatingButtonY", 0);
+                  interpreterFloatingX = sp.getInt("interpreterFloatingX", 24);
+                  interpreterFloatingY = sp.getInt("interpreterFloatingY", -140);
                   topLang = sp.getString("topLang", "fr");
                   bottomLang = sp.getString("bottomLang", "hu");
                   if("normal".equals(vadMode)) vadMode = "medium";
@@ -514,6 +516,8 @@ jobs:
                     .putBoolean("floatingTranslatorEnabled", floatingTranslatorEnabled)
                     .putInt("floatingButtonX", floatingButtonX)
                     .putInt("floatingButtonY", floatingButtonY)
+                    .putInt("interpreterFloatingX", interpreterFloatingX)
+                    .putInt("interpreterFloatingY", interpreterFloatingY)
                     .putString("topLang", topLang)
                     .putString("bottomLang", bottomLang)
                     .apply();
@@ -527,7 +531,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V302");
+                  TextView title = label("Fordito_V303");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1106,7 +1110,7 @@ jobs:
                           input.put("noise_reduction", nr);
                       }
 
-                      // V302: STT átállítva gpt-4o-transcribe modellre.
+                      // V303: STT átállítva gpt-4o-transcribe modellre.
                       // A teljes lánc változatlan marad: mikrofon -> Realtime input audio -> transcript -> gpt-realtime-2 fordítás.
                       // Nem állítunk fix language mezőt, mert ugyanabban a munkamenetben TOP és BOTTOM nyelv is megszólalhat.
                       // A 4o-transcribe támogat promptot, ezért a kiválasztott nyelvpárt és a szó szerinti STT-fegyelmet itt is megadjuk.
@@ -1507,7 +1511,7 @@ jobs:
                   ws.send(evt.toString());
                   audioCommitWindowBytes += chunk.length;
 
-                  // V302: valódi audio-oldali 2 mp-es határ.
+                  // V303: valódi audio-oldali 2 mp-es határ.
                   // A Realtime bemeneti puffert commitoljuk, nem a később érkező transcriptet próbáljuk feldarabolni.
                   if(now - audioCommitWindowStartedAtMs >= AUDIO_COMMIT_WINDOW_MS) {
                       commitCurrentAudioWindow();
@@ -1833,7 +1837,7 @@ jobs:
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
                           if(msg.contains("response in progress")) {
                               responseInProgress = true;
-                              // V302: ez nem felhasználói hiba, hanem túl gyors blokkérkezés.
+                              // V303: ez nem felhasználói hiba, hanem túl gyors blokkérkezés.
                               // A blokk nem veszhet el és nem kell Toasttal zajongani: vissza a sor elejére,
                               // majd a következő response.done indítja újra a fordítást.
                               if(liveTranslateMode && pendingLiveBlockId >= 0) {
@@ -1868,7 +1872,7 @@ jobs:
               void manualTranslate() {
                   if(uiLockedForLive || finalizingStop) return;
 
-                  // V302: a FORDÍT gomb külön üzemmód.
+                  // V303: a FORDÍT gomb külön üzemmód.
                   // Először lezárjuk a mikrofont/live sort, utána az aktív ablak teljes szövegét
                   // egyetlen nagy, kontextusos kézi fordításként kezeljük.
                   if(streaming) {
@@ -1958,7 +1962,7 @@ jobs:
                   if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
                   liveTranscriptBuffer += delta;
 
-                  // V302: a részleges STT delta még javulhat a completed eseményig.
+                  // V303: a részleges STT delta még javulhat a completed eseményig.
                   // Normál esetben nem adjuk ki korán, mert ezzel elveszne a modell későbbi
                   // önjavítása és a teljes mondat kontextusa. Csak a 8 s abszolút blokkmaximum
                   // kényszeríthet ki delta közbeni vágást.
@@ -1966,7 +1970,7 @@ jobs:
                   long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
                   long age = started > 0L ? now - started : 0L;
                   if(age >= MAX_CONTINUOUS_LIVE_BLOCK_MS) {
-                      // V302: valódi 2 mp-es folyamatos blokkkiadás.
+                      // V303: valódi 2 mp-es folyamatos blokkkiadás.
                       // Nem a régi mondat/vessző/karakter okoskodó útvonalat hívjuk,
                       // hanem szóhatáron levágjuk a puffer kiadható elejét és azonnal fordítási sorba tesszük.
                       released = forceFlushTimedLivePrefix();
@@ -1999,7 +2003,7 @@ jobs:
                   if(transcript != null && transcript.trim().length() > 0) {
                       completedIsOnlyAlreadyReleased = isAlreadyReleasedTranscript(transcript);
 
-                      // V302: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
+                      // V303: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
                       // a completed szöveg felülírja a részleges delta puffert. Ez őrzi meg
                       // a transcribe modell végső javítását és a teljes mondat kontextusát.
                       if(!completedIsOnlyAlreadyReleased && !liveDeltaReleasedSinceLastCompleted) {
@@ -2456,7 +2460,7 @@ jobs:
                   String t = s.trim();
                   if(t.length() == 0) return -1;
 
-                  // V302: egyszerű blokkhatár-döntés.
+                  // V303: egyszerű blokkhatár-döntés.
                   // Ha van kész mondatvég, azonnal zár.
                   // Ha nincs, 2 mp folyamatos puffer után szóhatáron zár.
                   // Nincs karakter-, vessző-, szótár- vagy többágú monológlogika.
@@ -3133,9 +3137,9 @@ jobs:
                       return true;
                   });
                   refreshInterpreterMenuButton(interpreterBtn);
-                  addMenuButton(box, "Lebegő gomb", floatingTranslatorLabel(), floatingTranslatorEnabled, v -> {
+                  addMenuButton(box, "Vágólap mód", floatingTranslatorLabel(), floatingTranslatorEnabled, v -> {
                       toggleFloatingTranslator();
-                      refreshMenuButton((Button)v, "Lebegő gomb", floatingTranslatorLabel(), floatingTranslatorEnabled);
+                      refreshMenuButton((Button)v, "Vágólap mód", floatingTranslatorLabel(), floatingTranslatorEnabled);
                       updateButtons();
                   });
                   addMenuButton(box, "Tükör mód", displayModeLabel(), mirrorBottomMode, v -> {
@@ -3233,7 +3237,7 @@ jobs:
 
 
               String floatingTranslatorLabel() {
-                  return floatingTranslatorEnabled ? "vágólap fordítása mini ablakban" : "kikapcsolva – csak menüből indítható";
+                  return floatingTranslatorEnabled ? "két lebegő gomb – beillesztés és másolás" : "kikapcsolva";
               }
 
               boolean canDrawOverlayNow() {
@@ -3250,6 +3254,15 @@ jobs:
                   }
               }
 
+              android.view.WindowManager.LayoutParams floatingParams(int w, int h, int gravity) {
+                  int type = Build.VERSION.SDK_INT >= 26 ? android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : android.view.WindowManager.LayoutParams.TYPE_PHONE;
+                  android.view.WindowManager.LayoutParams lp = new android.view.WindowManager.LayoutParams(w, h, type,
+                      android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                      android.graphics.PixelFormat.TRANSLUCENT);
+                  lp.gravity = gravity;
+                  return lp;
+              }
+
               void toggleFloatingTranslator() {
                   floatingTranslatorEnabled = !floatingTranslatorEnabled;
                   if(floatingTranslatorEnabled && backgroundScreenAllowed) {
@@ -3258,10 +3271,7 @@ jobs:
                   }
                   save();
                   if(floatingTranslatorEnabled) ensureFloatingTranslator();
-                  else {
-                      stopClipboardSystemSpeech(false);
-                      hideFloatingTranslator();
-                  }
+                  else hideFloatingTranslator();
               }
 
               void ensureFloatingTranslator() {
@@ -3270,77 +3280,76 @@ jobs:
                   if(floatingButtonView != null) return;
                   try {
                       floatingWindowManager = (android.view.WindowManager)getSystemService(WINDOW_SERVICE);
-                      Button b = btn("⇄");
-                      b.setTextSize(22);
-                      b.setTextColor(Color.WHITE);
-                      b.setIncludeFontPadding(false);
-                      b.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-                      b.setPadding(0, 0, 0, 0);
-                      b.setTranslationY(0f);
-                      b.setMinWidth(0);
-                      b.setMinimumWidth(0);
-                      b.setMinHeight(0);
-                      b.setMinimumHeight(0);
-                      b.setBackgroundColor(Color.rgb(30,120,75));
-                      b.setOnClickListener(v -> floatingTranslatorButtonAction());
-                      final android.view.WindowManager.LayoutParams lp = floatingParams(96, 96, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+
+                      LinearLayout group = new LinearLayout(this);
+                      group.setOrientation(LinearLayout.HORIZONTAL);
+
+                      Button paste = btn("⇩");
+                      Button copy = btn("⇧");
+                      paste.setTextSize(24);
+                      copy.setTextSize(24);
+                      paste.setTextColor(Color.WHITE);
+                      copy.setTextColor(Color.WHITE);
+                      paste.setBackgroundColor(Color.rgb(30,120,75));
+                      copy.setBackgroundColor(Color.rgb(45,95,150));
+                      group.addView(paste, new LinearLayout.LayoutParams(92,92));
+                      group.addView(copy, new LinearLayout.LayoutParams(92,92));
+
+                      final android.view.WindowManager.LayoutParams lp = floatingParams(184, 92, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
                       lp.x = floatingButtonX;
                       lp.y = floatingButtonY;
-                      final int[] down = new int[4];
-                      final boolean[] moved = new boolean[1];
-                      final boolean[] longDone = new boolean[1];
-                      final Runnable longPressTask = () -> {
-                          if(!moved[0]) {
-                              longDone[0] = true;
-                              try { b.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); } catch(Exception ignored) {}
-                              openClipboardReplyMode();
-                          }
+
+                      paste.setOnClickListener(v -> pasteClipboardToLanguageBox());
+
+                      final boolean[] copyLongDone = new boolean[1];
+                      final Runnable copyLong = () -> {
+                          copyLongDone[0] = true;
+                          try { copy.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); } catch(Exception ignored) {}
+                          cleanActiveBoxToClipboard();
                       };
-                      b.setOnTouchListener((v, ev) -> {
+                      copy.setOnTouchListener((v, ev) -> {
                           if(ev.getAction() == android.view.MotionEvent.ACTION_DOWN) {
-                              down[0] = lp.x; down[1] = lp.y; down[2] = (int)ev.getRawX(); down[3] = (int)ev.getRawY();
-                              moved[0] = false;
-                              longDone[0] = false;
-                              floatingLongPressHandler.removeCallbacks(longPressTask);
-                              floatingLongPressHandler.postDelayed(longPressTask, 450);
-                              return true;
-                          }
-                          if(ev.getAction() == android.view.MotionEvent.ACTION_MOVE) {
-                              int dx = (int)ev.getRawX() - down[2];
-                              int dy = (int)ev.getRawY() - down[3];
-                              if(longDone[0]) return true;
-                              if(Math.abs(dx) > 34 || Math.abs(dy) > 34) {
-                                  moved[0] = true;
-                                  floatingLongPressHandler.removeCallbacks(longPressTask);
-                              }
-                              if(moved[0]) {
-                                  lp.x = Math.max(0, down[0] - dx);
-                                  lp.y = down[1] + dy;
-                                  try {
-                                      android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
-                                      int maxY = Math.max(0, dm.heightPixels / 2 - 64);
-                                      if(lp.y > maxY) lp.y = maxY;
-                                      if(lp.y < -maxY) lp.y = -maxY;
-                                      floatingWindowManager.updateViewLayout(b, lp);
-                                  } catch(Exception ignored) {}
-                              }
+                              copyLongDone[0] = false;
+                              floatingLongPressHandler.postDelayed(copyLong, 500);
                               return true;
                           }
                           if(ev.getAction() == android.view.MotionEvent.ACTION_UP) {
-                              floatingLongPressHandler.removeCallbacks(longPressTask);
-                              floatingButtonX = lp.x;
-                              floatingButtonY = lp.y;
-                              save();
-                              if(!moved[0] && !longDone[0]) floatingTranslatorButtonAction();
+                              floatingLongPressHandler.removeCallbacks(copyLong);
+                              if(!copyLongDone[0]) copyActiveBoxToClipboard();
                               return true;
                           }
                           if(ev.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
-                              floatingLongPressHandler.removeCallbacks(longPressTask);
+                              floatingLongPressHandler.removeCallbacks(copyLong);
                               return true;
                           }
                           return true;
                       });
-                      floatingButtonView = b;
+
+                      final int[] down = new int[4];
+                      final boolean[] moved = new boolean[1];
+                      group.setOnTouchListener((v, ev) -> {
+                          if(ev.getAction() == android.view.MotionEvent.ACTION_DOWN) {
+                              down[0]=lp.x; down[1]=lp.y; down[2]=(int)ev.getRawX(); down[3]=(int)ev.getRawY();
+                              moved[0]=false;
+                              return true;
+                          }
+                          if(ev.getAction() == android.view.MotionEvent.ACTION_MOVE) {
+                              int dx=(int)ev.getRawX()-down[2], dy=(int)ev.getRawY()-down[3];
+                              if(Math.abs(dx)>24 || Math.abs(dy)>24) moved[0]=true;
+                              if(moved[0]) {
+                                  lp.x=Math.max(0,down[0]-dx);
+                                  lp.y=down[1]+dy;
+                                  try { floatingWindowManager.updateViewLayout(group,lp); } catch(Exception ignored) {}
+                              }
+                              return true;
+                          }
+                          if(ev.getAction() == android.view.MotionEvent.ACTION_UP) {
+                              floatingButtonX=lp.x; floatingButtonY=lp.y; save(); return true;
+                          }
+                          return true;
+                      });
+
+                      floatingButtonView = group;
                       floatingWindowManager.addView(floatingButtonView, lp);
                   } catch(Exception e) {
                       floatingButtonView = null;
@@ -3348,767 +3357,174 @@ jobs:
                   }
               }
 
-              android.view.WindowManager.LayoutParams floatingParams(int w, int h, int gravity) {
-                  int type = Build.VERSION.SDK_INT >= 26 ? android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : android.view.WindowManager.LayoutParams.TYPE_PHONE;
-                  android.view.WindowManager.LayoutParams lp = new android.view.WindowManager.LayoutParams(w, h, type,
-                      android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                      android.graphics.PixelFormat.TRANSLUCENT);
-                  lp.gravity = gravity;
-                  lp.x = 18;
-                  lp.y = 0;
-                  return lp;
-              }
-
               void hideFloatingTranslator() {
                   try { if(floatingWindowManager != null && floatingButtonView != null) floatingWindowManager.removeView(floatingButtonView); } catch(Exception ignored) {}
                   floatingButtonView = null;
-                  hideFloatingResultWindow();
               }
 
-              void floatingTranslatorButtonAction() {
+              void setClipboardText(String text) {
                   try {
-                      if(clipboardDialog != null && clipboardDialog.isShowing()) {
-                          stopClipboardSystemSpeech(false);
-                          clipboardDialog.dismiss();
-                          moveTaskToBack(true);
-                          return;
-                      }
-                  } catch(Exception ignored) {}
-                  translateClipboardFromFloatingButton();
-              }
-
-              void openClipboardReplyMode() {
-                  try {
-                      setClipboardText(" ");
-                      clipboardResponseMode = true;
-                      clipboardCurrentSource = "";
-                      clipboardCurrentPrepared = "";
-                      clipboardCurrentTarget = "";
-                      clipboardForceFieldUpdate = true;
-                      hideFloatingResultWindow();
-                      bringAppToFrontForClipboardRead();
-                      new Handler().postDelayed(() -> {
-                          showClipboardTranslatorPanel("", "", "");
-                          try {
-                              if(clipboardRawEdit != null) {
-                                  clipboardRawEdit.requestFocus();
-                                  clipboardRawEdit.setSelection(clipboardRawEdit.getText().length());
-                              }
-                          } catch(Exception ignored) {}
-                      }, 220);
-                  } catch(Exception e) {
-                      Toast.makeText(this, "Új válasz mód hiba: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                  }
-              }
-
-              void translateClipboardFromFloatingButton() {
-                  if(!hasKey()) { bringAppToFrontForClipboardRead(); new Handler().postDelayed(() -> showApi(), 250); return; }
-                  hideFloatingResultWindow();
-                  bringAppToFrontForClipboardRead();
-                  if(clipboardDialog != null && clipboardDialog.isShowing()) return;
-                  new Handler().postDelayed(() -> translateClipboardNow(false), 480);
-              }
-
-              void translateClipboardNow(boolean allowForegroundRetry) {
-                  String text = getClipboardText().trim();
-                  if(isClipboardSystemMessage(text)) text = "";
-                  clipboardCurrentSource = text;
-                  clipboardCurrentPrepared = "";
-                  clipboardCurrentTarget = clipboardTargetCode(text);
-                  clipboardForceFieldUpdate = true;
-                  if(text.length() == 0) {
-                      showClipboardTranslatorPanel("", "", "");
-                      return;
-                  }
-                  showClipboardTranslatorPanel(text, "Értelmezés folyamatban…", "");
-                  prepareClipboardOnlyHttp(text);
-              }
-
-              void runClipboardPanelTranslate() {
-                  String raw = clipboardRawEdit == null ? "" : clipboardRawEdit.getText().toString().trim();
-                  String prep = clipboardPreparedEdit == null ? "" : clipboardPreparedEdit.getText().toString().trim();
-                  String tr = clipboardTranslationEdit == null ? "" : clipboardTranslationEdit.getText().toString().trim();
-                  if(clipboardTranslationEdit != null && clipboardTranslationEdit.hasFocus()) {
-                      Toast.makeText(this, "Másoláshoz használd a MÁSOL gombot.", Toast.LENGTH_SHORT).show();
-                      return;
-                  }
-                  if(clipboardPreparedEdit != null && clipboardPreparedEdit.hasFocus() && prep.length() > 0) {
-                      clipboardCurrentPrepared = prep;
-                      clipboardCurrentTarget = clipboardTargetCode(prep);
-                      showClipboardTranslatorPanel(raw, prep, "Fordítás folyamatban…");
-                      translateClipboardOnlyHttp(prep, clipboardCurrentTarget);
-                      return;
-                  }
-                  if(prep.length() > 0) {
-                      clipboardCurrentSource = raw;
-                      clipboardCurrentPrepared = prep;
-                      clipboardCurrentTarget = clipboardTargetCode(prep);
-                      showClipboardTranslatorPanel(raw, prep, "Fordítás folyamatban…");
-                      translateClipboardOnlyHttp(prep, clipboardCurrentTarget);
-                      return;
-                  }
-                  String source = raw;
-                  if(source.length() == 0) {
-                      Toast.makeText(this, "Nincs fordítható szöveg.", Toast.LENGTH_SHORT).show();
-                      return;
-                  }
-                  clipboardCurrentSource = source;
-                  clipboardCurrentTarget = clipboardTargetCode(source);
-                  String mid = isClipboardHungarian(source) ? "Értelmezés folyamatban…" : "";
-                  showClipboardTranslatorPanel(source, mid, "Fordítás folyamatban…");
-                  translateClipboardFullHttp(source, clipboardCurrentTarget);
-              }
-
-              void translateClipboardFullHttp(String sourceText, String targetCode) {
-                  final int requestToken = ++clipboardFullRequestToken;
-                  try {
-                      OkHttpClient http = new OkHttpClient.Builder()
-                          .connectTimeout(25, TimeUnit.SECONDS)
-                          .readTimeout(70, TimeUnit.SECONDS)
-                          .writeTimeout(30, TimeUnit.SECONDS)
-                          .build();
-
-                      JSONObject root = new JSONObject();
-                      root.put("model", "gpt-4o-mini");
-                      root.put("temperature", 0.1);
-                      JSONArray messages = new JSONArray();
-                      messages.put(new JSONObject().put("role", "system").put("content", clipboardFullInstructions()));
-                      messages.put(new JSONObject().put("role", "user").put("content",
-                          "SOURCE_LANG: AUTO\nTARGET_LANG: " + targetCode + "\nTEXT:\n" + sourceText));
-                      root.put("messages", messages);
-
-                      MediaType mt = MediaType.parse("application/json; charset=utf-8");
-                      RequestBody body = RequestBody.create(root.toString(), mt);
-                      Request req = new Request.Builder()
-                          .url("https://api.openai.com/v1/chat/completions")
-                          .addHeader("Authorization", "Bearer " + apiKey.trim())
-                          .addHeader("Content-Type", "application/json")
-                          .post(body)
-                          .build();
-
-                      http.newCall(req).enqueue(new Callback() {
-                          @Override public void onFailure(Call call, java.io.IOException e) {
-                              runOnUiThread(() -> showClipboardTranslatorPanel(sourceText, "", "Vágólap-fordítási hiba: kapcsolat nem sikerült."));
-                          }
-                          @Override public void onResponse(Call call, Response response) throws java.io.IOException {
-                              String raw = response.body() == null ? "" : response.body().string();
-                              if(!response.isSuccessful()) {
-                                  runOnUiThread(() -> showClipboardTranslatorPanel(sourceText, "", "Vágólap-fordítási hiba: HTTP " + response.code()));
-                                  return;
-                              }
-                              try {
-                                  JSONObject obj = new JSONObject(raw);
-                                  JSONArray choices = obj.optJSONArray("choices");
-                                  String out = "";
-                                  if(choices != null && choices.length() > 0) {
-                                      JSONObject msg = choices.getJSONObject(0).optJSONObject("message");
-                                      if(msg != null) out = msg.optString("content", "");
-                                  }
-                                  final String modelOut = out;
-                                  runOnUiThread(() -> { if(requestToken == clipboardFullRequestToken) applyClipboardFullResult(sourceText, modelOut); });
-                              } catch(Exception ex) {
-                                  runOnUiThread(() -> showClipboardTranslatorPanel(sourceText, "", "Vágólap-fordítási hiba: nem értelmezhető válasz."));
-                              }
-                          }
-                      });
-                  } catch(Exception e) {
-                      showClipboardTranslatorPanel(sourceText, "", "Vágólap-fordítási hiba: " + e.getMessage());
-                  }
-              }
-
-              String clipboardPrepareOnlyInstructions() {
-                  return clipboardContextPrompt() + "Every word must be output in full. Never replace letters with asterisks or symbols. Never mask, redact, soften, sanitize, euphemize, hide, or partially replace any profanity, insult, slang, vulgar, sexual, rude, or emotional wording. If such wording appears in the input or is required by the translation, write the complete word exactly in the target language. " + "Never censor, mask, redact, soften, sanitize or replace any word, including profanity, vulgarity, insults, sexual language, slang or rude wording. Preserve every such word in full, with its original spelling and meaning. Never use asterisks, partial masking, euphemisms, square-bracket placeholders or category labels. " + "You repair raw dictated or clipboard text for the middle field of a 3-window translator. Return ONLY the corrected source-language text, no labels, no markdown, no quotes, no explanation. " +
-                    "The user may provide text in either one of the selected language pair. You must keep the ORIGINAL input language. In this middle step translation is strictly forbidden. " +
-                    "Make the original-language source message natural and culturally well-formed: punctuation, capitalization, accents, sentence boundaries, grammar, broken sentence structure and clear speech-recognition errors. " +
-                    "Preserve the speaker's meaning, intent, facts and tone, but do not behave like a literal transcript. Remove obvious dictation noise, accidental filler words, false starts, repeated fragments, self-corrections and words that clearly do not belong when the surrounding context makes that clear. " +
-                    "If a random isolated word or phrase has no semantic role in the surrounding message, drop it instead of preserving it. Example: in 'kakaós próbáljuk ki hogy működik-e', the random first word 'kakaós' is noise unless the rest of the message is actually about cocoa. " +
-                    "This is not censorship: keep profanity, insults, slang, names, work terms, objects and strange words when they are plausibly intended. " +
-                    "You may rewrite awkward wording naturally when this does not change meaning. Do NOT invent facts, explanations, opinions or new content. If an unusual or test word could be intentional, keep it. If genuinely ambiguous, prefer the closest plausible wording rather than guessing a new meaning. " +
-                    "Do not add comments or explain the text. Preserve vulgarity, intimacy, friendliness and official or informal register.";
-              }
-
-              void scheduleClipboardAutoPrepare() {
-                  final int token = ++clipboardAutoPrepareToken;
-                  new Handler().postDelayed(() -> {
-                      if(token != clipboardAutoPrepareToken) return;
-                      if(clipboardSpeechActive) return;
-                      autoPrepareClipboardRawText();
-                  }, 5000);
-              }
-
-              void autoPrepareClipboardRawText() {
-                  try {
-                      if(clipboardRawEdit == null || clipboardPreparedEdit == null) return;
-                      if(!hasKey()) return;
-                      String raw = clipboardRawEdit.getText() == null ? "" : clipboardRawEdit.getText().toString().trim();
-                      if(raw.length() == 0 || raw.equalsIgnoreCase("vágólap szövege") || isClipboardSystemMessage(raw)) return;
-                      clipboardCurrentSource = raw;
-                      clipboardForceFieldUpdate = false;
-                      clipboardPreparedEdit.setText("Értelmezés folyamatban…");
-                      prepareClipboardOnlyHttp(raw);
-                  } catch(Exception ignored) {}
-              }
-
-              void prepareClipboardOnlyHttp(String rawText) {
-                  final int requestToken = ++clipboardPrepareRequestToken;
-                  try {
-                      OkHttpClient http = new OkHttpClient.Builder()
-                          .connectTimeout(25, TimeUnit.SECONDS)
-                          .readTimeout(70, TimeUnit.SECONDS)
-                          .writeTimeout(30, TimeUnit.SECONDS)
-                          .build();
-                      JSONObject root = new JSONObject();
-                      root.put("model", "gpt-4o-mini");
-                      root.put("temperature", 0.05);
-                      JSONArray messages = new JSONArray();
-                      messages.put(new JSONObject().put("role", "system").put("content", clipboardPrepareOnlyInstructions()));
-                      messages.put(new JSONObject().put("role", "user").put("content", "TOP_LANG: " + code(topLang) + "\nBOTTOM_LANG: " + code(bottomLang) + "\nTEXT:\n" + rawText));
-                      root.put("messages", messages);
-                      MediaType mt = MediaType.parse("application/json; charset=utf-8");
-                      RequestBody body = RequestBody.create(root.toString(), mt);
-                      Request req = new Request.Builder()
-                          .url("https://api.openai.com/v1/chat/completions")
-                          .addHeader("Authorization", "Bearer " + apiKey.trim())
-                          .addHeader("Content-Type", "application/json")
-                          .post(body)
-                          .build();
-                      http.newCall(req).enqueue(new Callback() {
-                          @Override public void onFailure(Call call, java.io.IOException e) {
-                              runOnUiThread(() -> { if(requestToken == clipboardPrepareRequestToken && clipboardPreparedEdit != null) clipboardPreparedEdit.setText(rawText); });
-                          }
-                          @Override public void onResponse(Call call, Response response) throws java.io.IOException {
-                              String rawResp = response.body() == null ? "" : response.body().string();
-                              if(!response.isSuccessful()) {
-                                  runOnUiThread(() -> { if(requestToken == clipboardPrepareRequestToken && clipboardPreparedEdit != null) clipboardPreparedEdit.setText(rawText); });
-                                  return;
-                              }
-                              try {
-                                  JSONObject obj = new JSONObject(rawResp);
-                                  JSONArray choices = obj.optJSONArray("choices");
-                                  String out = "";
-                                  if(choices != null && choices.length() > 0) {
-                                      JSONObject msg = choices.getJSONObject(0).optJSONObject("message");
-                                      if(msg != null) out = msg.optString("content", "");
-                                  }
-                                  final String clean = cleanClipboardApiText(out).trim();
-                                  runOnUiThread(() -> {
-                                      if(requestToken != clipboardPrepareRequestToken) return;
-                                      String prepared = (clean.length() == 0 || isClipboardSystemMessage(clean)) ? rawText : clean;
-                                      if(clipboardPreparedEdit != null) clipboardPreparedEdit.setText(prepared);
-                                      clipboardCurrentPrepared = prepared;
-                                      if(clipboardAutoTranslateEnabled && prepared.trim().length() > 0) {
-                                          clipboardCurrentTarget = clipboardTargetCode(prepared);
-                                          if(clipboardTranslationEdit != null) clipboardTranslationEdit.setText("Fordítás folyamatban…");
-                                          translateClipboardOnlyHttp(prepared, clipboardCurrentTarget);
-                                      }
-                                  });
-                              } catch(Exception ex) {
-                                  runOnUiThread(() -> { if(requestToken == clipboardPrepareRequestToken && clipboardPreparedEdit != null) clipboardPreparedEdit.setText(rawText); });
-                              }
-                          }
-                      });
-                  } catch(Exception e) {
-                      if(clipboardPreparedEdit != null) clipboardPreparedEdit.setText(rawText);
-                  }
-              }
-
-              void translateClipboardOnlyHttp(String preparedText, String targetCode) {
-                  final int requestToken = ++clipboardTranslateRequestToken;
-                  try {
-                      OkHttpClient http = new OkHttpClient.Builder()
-                          .connectTimeout(25, TimeUnit.SECONDS)
-                          .readTimeout(70, TimeUnit.SECONDS)
-                          .writeTimeout(30, TimeUnit.SECONDS)
-                          .build();
-                      JSONObject root = new JSONObject();
-                      root.put("model", "gpt-4o-mini");
-                      root.put("temperature", 0.1);
-                      JSONArray messages = new JSONArray();
-                      messages.put(new JSONObject().put("role", "system").put("content", clipboardTranslationInstructions()));
-                      messages.put(new JSONObject().put("role", "user").put("content", "SOURCE_LANG: AUTO\nTARGET_LANG: " + targetCode + "\nTEXT:\n" + preparedText));
-                      root.put("messages", messages);
-                      MediaType mt = MediaType.parse("application/json; charset=utf-8");
-                      RequestBody body = RequestBody.create(root.toString(), mt);
-                      Request req = new Request.Builder()
-                          .url("https://api.openai.com/v1/chat/completions")
-                          .addHeader("Authorization", "Bearer " + apiKey.trim())
-                          .addHeader("Content-Type", "application/json")
-                          .post(body)
-                          .build();
-                      http.newCall(req).enqueue(new Callback() {
-                          @Override public void onFailure(Call call, java.io.IOException e) {
-                              runOnUiThread(() -> { if(requestToken == clipboardTranslateRequestToken) showClipboardTranslatorPanel(clipboardCurrentSource, preparedText, "Vágólap-fordítási hiba: kapcsolat nem sikerült."); });
-                          }
-                          @Override public void onResponse(Call call, Response response) throws java.io.IOException {
-                              String raw = response.body() == null ? "" : response.body().string();
-                              if(!response.isSuccessful()) {
-                                  runOnUiThread(() -> { if(requestToken == clipboardTranslateRequestToken) showClipboardTranslatorPanel(clipboardCurrentSource, preparedText, "Vágólap-fordítási hiba: HTTP " + response.code()); });
-                                  return;
-                              }
-                              try {
-                                  JSONObject obj = new JSONObject(raw);
-                                  JSONArray choices = obj.optJSONArray("choices");
-                                  String out = "";
-                                  if(choices != null && choices.length() > 0) {
-                                      JSONObject msg = choices.getJSONObject(0).optJSONObject("message");
-                                      if(msg != null) out = msg.optString("content", "");
-                                  }
-                                  final String result = cleanClipboardApiText(out);
-                                  runOnUiThread(() -> { if(requestToken == clipboardTranslateRequestToken) applyClipboardTranslationOnly(preparedText, result); });
-                              } catch(Exception ex) {
-                                  runOnUiThread(() -> { if(requestToken == clipboardTranslateRequestToken) showClipboardTranslatorPanel(clipboardCurrentSource, preparedText, "Vágólap-fordítási hiba: nem értelmezhető válasz."); });
-                              }
-                          }
-                      });
-                  } catch(Exception e) {
-                      showClipboardTranslatorPanel(clipboardCurrentSource, preparedText, "Vágólap-fordítási hiba: " + e.getMessage());
-                  }
-              }
-
-              String cleanClipboardApiText(String out) {
-                  String t = out == null ? "" : out.trim();
-                  if(t.startsWith("```")) {
-                      t = t.replaceFirst("^```[a-zA-Z]*\\s*", "");
-                      t = t.replaceFirst("\\s*```$", "");
-                  }
-                  t = t.trim();
-                  if(t.startsWith("\"") && t.endsWith("\"") && t.length() >= 2) t = t.substring(1, t.length() - 1).trim();
-                  return t;
-              }
-
-              void applyClipboardFullResult(String source, String out) {
-                  String prepared = "";
-                  String translation = "";
-                  try {
-                      String cleaned = out == null ? "" : out.trim();
-                      int a = cleaned.indexOf('{');
-                      int b = cleaned.lastIndexOf('}');
-                      if(a >= 0 && b > a) cleaned = cleaned.substring(a, b + 1);
-                      JSONObject jo = new JSONObject(cleaned);
-                      prepared = cleanClipboardApiText(jo.optString("prepared", ""));
-                      translation = stripClipboardTranslationLabels(jo.optString("translation", ""));
-                  } catch(Exception ignored) {
-                      prepared = source == null ? "" : source.trim();
-                      translation = stripClipboardTranslationLabels(out);
-                  }
-                  if(prepared.length() == 0) prepared = source == null ? "" : source.trim();
-                  if(translation.length() == 0) {
-                      showClipboardTranslatorPanel(source, prepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
-                      return;
-                  }
-                  clipboardCurrentPrepared = prepared;
-                  clipboardForceFieldUpdate = true;
-                  showClipboardTranslatorPanel(source, prepared, translation);
-                  Toast.makeText(this, "Fordítás elkészült.", Toast.LENGTH_SHORT).show();
-              }
-
-              String stripClipboardTranslationLabels(String s) {
-                  String t = cleanClipboardApiText(s);
-                  if(t.length() == 0) return "";
-                  String[] lines = t.split("\\r?\\n");
-                  StringBuilder translation = new StringBuilder();
-                  boolean foundTranslation = false;
-                  for(String line : lines) {
-                      String l = line == null ? "" : line.trim();
-                      String upper = l.toUpperCase(Locale.ROOT);
-                      if(upper.startsWith("TRANSLATION:")) {
-                          foundTranslation = true;
-                          String rest = l.substring(l.indexOf(':') + 1).trim();
-                          if(rest.length() > 0) translation.append(rest);
-                          continue;
-                      }
-                      if(upper.startsWith("SOURCE_LANG:") || upper.startsWith("ORIGINAL:") || upper.startsWith("TARGET_LANG:") || upper.startsWith("TEXT:")) {
-                          continue;
-                      }
-                      if(foundTranslation) {
-                          if(translation.length() > 0) translation.append("\n");
-                          translation.append(l);
-                      }
-                  }
-                  if(translation.length() > 0) return translation.toString().trim();
-                  return t;
-              }
-
-              void applyClipboardTranslationOnly(String prepared, String tr) {
-                  String clean = stripClipboardTranslationLabels(tr);
-                  if(clean.length() == 0) {
-                      showClipboardTranslatorPanel(clipboardCurrentSource, prepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
-                      return;
-                  }
-                  showClipboardTranslatorPanel(clipboardCurrentSource, prepared, clean);
-                  Toast.makeText(this, "Fordítás elkészült.", Toast.LENGTH_SHORT).show();
-              }
-
-              void bringAppToFrontForClipboardRead() {
-                  try {
-                      Intent it = new Intent(this, MainActivity.class);
-                      it.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
-                      startActivity(it);
+                      android.content.ClipboardManager cm = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+                      if(cm != null) cm.setPrimaryClip(ClipData.newPlainText("Fordito", text));
                   } catch(Exception ignored) {}
               }
 
               String getClipboardText() {
                   try {
                       android.content.ClipboardManager cm = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
-                      if(cm == null || !cm.hasPrimaryClip()) return "";
-                      ClipData cd = cm.getPrimaryClip();
-                      if(cd == null || cd.getItemCount() == 0) return "";
-                      StringBuilder sb = new StringBuilder();
-                      for(int i = 0; i < cd.getItemCount(); i++) {
-                          CharSequence cs = cd.getItemAt(i).coerceToText(this);
-                          if(cs != null) {
-                              String part = cs.toString().trim();
-                              if(part.length() > 0) {
-                                  if(sb.length() > 0) sb.append("\n");
-                                  sb.append(part);
+                      if(cm == null || !cm.hasPrimaryClip() || cm.getPrimaryClip() == null || cm.getPrimaryClip().getItemCount() == 0) return "";
+                      CharSequence cs = cm.getPrimaryClip().getItemAt(0).coerceToText(this);
+                      return cs == null ? "" : cs.toString();
+                  } catch(Exception ignored) { return ""; }
+              }
+
+              void pasteClipboardToLanguageBox() {
+                  String s = getClipboardText().trim();
+                  if(s.length() == 0) { Toast.makeText(this, "A vágólap üres.", Toast.LENGTH_SHORT).show(); return; }
+                  boolean sourceTop = sourceIsTopBySelectedPair(s, topActive);
+                  EditText box = sourceTop ? topBox : bottomBox;
+                  programmaticChange = true;
+                  String old = box.getText().toString();
+                  box.setText(old.trim().length() == 0 ? s : old + "\n" + s);
+                  box.setSelection(box.getText().length());
+                  programmaticChange = false;
+                  selectActiveBox(sourceTop);
+                  bringAppToFrontForClipboardRead();
+                  Toast.makeText(this, sourceTop ? "Vágólap → felső ablak." : "Vágólap → alsó ablak.", Toast.LENGTH_SHORT).show();
+              }
+
+              String activeBoxText() {
+                  EditText box = manualTopSource ? topBox : bottomBox;
+                  return stripDisplayBlockNumbers(box.getText().toString()).trim();
+              }
+
+              void copyActiveBoxToClipboard() {
+                  String s = activeBoxText();
+                  if(s.length() == 0) { Toast.makeText(this, "Az aktív ablak üres.", Toast.LENGTH_SHORT).show(); return; }
+                  setClipboardText(s);
+                  Toast.makeText(this, "Aktív ablak a vágólapra másolva.", Toast.LENGTH_SHORT).show();
+              }
+
+              void cleanActiveBoxToClipboard() {
+                  String s = activeBoxText();
+                  if(s.length() == 0) { Toast.makeText(this, "Az aktív ablak üres.", Toast.LENGTH_SHORT).show(); return; }
+                  if(!hasKey()) { bringAppToFrontForClipboardRead(); new Handler().postDelayed(() -> showApi(),250); return; }
+                  cleanSameLanguageHttp(s);
+              }
+
+              void cleanSameLanguageHttp(String sourceText) {
+                  try {
+                      OkHttpClient http = new OkHttpClient.Builder()
+                          .connectTimeout(25, TimeUnit.SECONDS).readTimeout(70, TimeUnit.SECONDS).writeTimeout(30, TimeUnit.SECONDS).build();
+                      JSONObject root = new JSONObject();
+                      root.put("model", "gpt-4o-mini");
+                      root.put("temperature", 0.1);
+                      JSONArray messages = new JSONArray();
+                      String instructions =
+                          clipboardContextPrompt() +
+                          "Work only in the original language. Repair the complete text into clear, coherent, natural native-language writing. " +
+                          "Use the full text and selected context profile to correct obvious speech-recognition errors, broken word forms, missing punctuation and misplaced fragments when the intended meaning is clear. " +
+                          "Do not translate. Do not invent facts, names, numbers, times, places or intentions. Preserve the speaker's meaning, tone and level of formality. " +
+                          "Never censor, mask, redact, soften, sanitize or replace profanity, insults, slang, vulgar, sexual, rude or emotional wording. Write every word in full. " +
+                          "Return ONLY the cleaned text, no labels, markdown, quotes or explanation.";
+                      messages.put(new JSONObject().put("role","system").put("content",instructions));
+                      messages.put(new JSONObject().put("role","user").put("content",sourceText));
+                      root.put("messages",messages);
+
+                      Request req = new Request.Builder().url("https://api.openai.com/v1/chat/completions")
+                          .addHeader("Authorization","Bearer "+apiKey)
+                          .addHeader("Content-Type","application/json")
+                          .post(RequestBody.create(MediaType.parse("application/json; charset=utf-8"),root.toString())).build();
+                      http.newCall(req).enqueue(new Callback() {
+                          @Override public void onFailure(Call call, java.io.IOException e) {
+                              runOnUiThread(() -> Toast.makeText(MainActivity.this,"Szövegrendezési hiba: kapcsolat.",Toast.LENGTH_LONG).show());
+                          }
+                          @Override public void onResponse(Call call, Response response) throws java.io.IOException {
+                              String raw=response.body()==null?"":response.body().string();
+                              if(!response.isSuccessful()) {
+                                  runOnUiThread(() -> Toast.makeText(MainActivity.this,"Szövegrendezési hiba: HTTP "+response.code(),Toast.LENGTH_LONG).show());
+                                  return;
+                              }
+                              try {
+                                  JSONObject obj=new JSONObject(raw);
+                                  String out=obj.getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content","").trim();
+                                  runOnUiThread(() -> {
+                                      if(out.length()==0) { Toast.makeText(MainActivity.this,"Üres válasz érkezett.",Toast.LENGTH_LONG).show(); return; }
+                                      setClipboardText(out);
+                                      Toast.makeText(MainActivity.this,"Rendbe tett szöveg a vágólapon.",Toast.LENGTH_SHORT).show();
+                                  });
+                              } catch(Exception e) {
+                                  runOnUiThread(() -> Toast.makeText(MainActivity.this,"A válasz nem értelmezhető.",Toast.LENGTH_LONG).show());
                               }
                           }
-                      }
-                      return sb.toString().trim();
+                      });
                   } catch(Exception e) {
-                      return "";
+                      Toast.makeText(this,"Szövegrendezési hiba.",Toast.LENGTH_LONG).show();
                   }
               }
-              String clipboardTargetCode(String text) {
-                  // V240: vágólapos ág saját iránylogikája.
-                  // Magyar bemenet: a másik (nem HU) beállított nyelvre fordít.
-                  // Idegen bemenet: mindig magyarra fordít, a középső mező üres marad.
-                  String bottom = code(bottomLang);
-                  String top = code(topLang);
-                  String guessed = guessClipboardLangCode(text);
-                  if(guessed.length() > 0 && !guessed.equalsIgnoreCase("HU")) return "HU";
-                  if(guessed.equalsIgnoreCase("HU")) {
-                      if(bottom.equalsIgnoreCase("HU") && !top.equalsIgnoreCase("HU")) return top;
-                      if(top.equalsIgnoreCase("HU") && !bottom.equalsIgnoreCase("HU")) return bottom;
-                  }
-                  return bottom;
-              }
 
-              boolean isClipboardHungarian(String text) {
-                  return "HU".equalsIgnoreCase(guessClipboardLangCode(text));
-              }
+              android.view.View interpreterFloatingView;
+              int interpreterFloatingX = 24;
+              int interpreterFloatingY = -140;
 
-              String guessClipboardLangCode(String text) {
-                  String t = (text == null ? "" : text).toLowerCase(Locale.ROOT);
-                  if(t.trim().length() == 0) return "";
-                  int hu = 0, fr = 0, de = 0, en = 0, it = 0;
-                  for(int i=0;i<t.length();i++) {
-                      char ch = t.charAt(i);
-                      if("áéíóöőúüű".indexOf(ch) >= 0) hu += 3;
-                      if("àâçéèêëîïôùûüÿœæ".indexOf(ch) >= 0) fr += 2;
-                      if("äöüß".indexOf(ch) >= 0) de += 3;
-                      if("ìòàèù".indexOf(ch) >= 0) it += 2;
-                  }
-                  String pad = " " + t.replaceAll("[^\\p{L}]+", " ") + " ";
-                  String[] huWords = {" hogy "," vagy "," nem "," igen "," te "," én "," en "," mi "," mit "," mire "," ki "," hol "," mikor "," hallasz "," hallod "," ezt "," azt "," akkor "," most "," lehet "," kérlek "," szeretném "," miért "," mert "," tehát "," van "," lesz "," volt "};
-                  String[] frWords = {" je "," tu "," vous "," nous "," oui "," non "," quoi "," qui "," où "," ou "," quand "," est "," pas "," que "," pour "," avec "," dans "," une "," des "," les "," mais "," donc "," alors "," pourquoi "};
-                  String[] deWords = {" ich "," du "," sie "," wir "," nicht "," und "," oder "," dass "," mit "," für "," ein "," eine "," der "," die "," das "," warum "};
-                  String[] enWords = {" i "," you "," we "," they "," the "," and "," or "," not "," with "," for "," this "," that "," why "," because "};
-                  String[] itWords = {" io "," tu "," noi "," non "," che "," per "," con "," una "," gli "," sono "," perché "," allora "};
-                  for(String w: huWords) if(pad.contains(w)) hu += 2;
-                  for(String w: frWords) if(pad.contains(w)) fr += 2;
-                  for(String w: deWords) if(pad.contains(w)) de += 2;
-                  for(String w: enWords) if(pad.contains(w)) en += 2;
-                  for(String w: itWords) if(pad.contains(w)) it += 2;
-                  int max = hu; String lang = "HU";
-                  if(fr > max) { max = fr; lang = "FR"; }
-                  if(de > max) { max = de; lang = "DE"; }
-                  if(en > max) { max = en; lang = "EN"; }
-                  if(it > max) { max = it; lang = "IT"; }
-                  return max >= 2 ? lang : "";
-              }
-
-
-              void sendClipboardTextToTranslate(String text) {
-                  clipboardResponseMode = true;
-                  manualResponseMode = false;
-                  liveTranslateMode = false;
-                  pendingLiveBlockId = -1;
-                  liveTranslateQueue.clear();
-                  pendingOutput = "";
-                  updateButtons();
-                  if(responseInProgress && ws != null) {
-                      try {
-                          JSONObject cancel = new JSONObject();
-                          cancel.put("type", "response.cancel");
-                          ws.send(cancel.toString());
-                          responseInProgress = false;
-                      } catch(Exception ignored) {}
-                  }
+              void ensureInterpreterFloatingButton() {
+                  if(!interpreterMode) { hideInterpreterFloatingButton(); return; }
+                  if(!canDrawOverlayNow()) { requestOverlayPermission(); return; }
+                  if(interpreterFloatingView != null) { refreshInterpreterFloatingButton(); return; }
                   try {
-                      JSONObject msg = new JSONObject();
-                      msg.put("type", "conversation.item.create");
-                      JSONObject item = new JSONObject();
-                      item.put("type", "message");
-                      item.put("role", "user");
-                      JSONArray content = new JSONArray();
-                      JSONObject c = new JSONObject();
-                      c.put("type", "input_text");
-                      c.put("text", "CLIPBOARD_FLOATING_TRANSLATION\n" + text + "\n\nReturn ONLY the translated text. Preserve practical meaning and tone. Do not write labels, markdown, quotes or explanation.");
-                      content.put(c);
-                      item.put("content", content);
-                      msg.put("item", item);
-                      ws.send(msg.toString());
-
-                      JSONObject resp = new JSONObject();
-                      resp.put("type", "response.create");
-                      JSONObject response = new JSONObject();
-                      response.put("instructions", clipboardTranslationInstructions());
-                      resp.put("response", response);
-                      responseInProgress = true;
-                      ws.send(resp.toString());
-                  } catch(Exception e) {
-                      clipboardResponseMode = false;
-                      showFloatingResultWindow("Vágólap-fordítás hiba. Próbáld újra.");
-                  }
-              }
-
-              String clipboardFullInstructions() {
-                  return clipboardContextPrompt() + "Never censor, mask, redact, soften, sanitize or replace any word, including profanity, vulgarity, insults, sexual language, slang or rude wording. Preserve every such word in full, with its original spelling and meaning. Never use asterisks, partial masking, euphemisms, square-bracket placeholders or category labels. " + "You are a standalone clipboard text repair and translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
-                    "Return ONLY valid JSON with exactly two string fields: prepared and translation. No markdown, no labels outside JSON. " +
-                    "Detect the source language from TEXT. prepared must ALWAYS be the corrected source-language version of TEXT. In prepared, translation is forbidden: keep the original input language, only repair punctuation, sentence boundaries, capitalization, accents, obvious speech-recognition mistakes, repeated fragments and grammar when the intended meaning is clear. " +
-                    "Then translate prepared to TARGET_LANG. translation must contain only the translated text. Do not write SOURCE_LANG, ORIGINAL, TRANSLATION, labels, markdown, quotes or explanation. " +
-                    "Be context-aware but conservative: do NOT invent new content and do NOT replace strange, test-like or unclear words with a different meaning. If a word is odd but could be intentional, keep it. " +
-                    "Keep the user's practical meaning, tone, register, emotional intensity and context. Friendly stays friendly; official stays official; direct work messages stay direct; intimate or sexual text stays intimate or sexual instead of being made formal. Make the result natural and native-sounding. " +
-                    "Every word must be output in full. Never replace letters with asterisks or symbols. Do not mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording.";
-              }
-
-              String clipboardTranslationInstructions() {
-                  return clipboardContextPrompt() + "Never censor, mask, redact, soften, sanitize or replace any word, including profanity, vulgarity, insults, sexual language, slang or rude wording. Preserve every such word in full, with its original spelling and meaning. Never use asterisks, partial masking, euphemisms, square-bracket placeholders or category labels. " + "You are a standalone clipboard translation engine. The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. This clipboard branch is independent from the live speech translator. " +
-                    "If SOURCE_LANG is AUTO, detect the source language from TEXT. Translate the entire TEXT to TARGET_LANG. If TARGET_LANG is HU, the answer must be Hungarian. " +
-                    "Return ONLY the translated text. Preserve paragraphs where reasonable. No labels, no markdown, no quotes, no explanation. Preserve the original style, register and emotional tone: friendly stays friendly, official stays official, intimate or sexual stays intimate or sexual, and practical work messages stay natural and direct. " +
-                    "Every word must be output in full. Never replace letters with asterisks or symbols. Do not mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Keep meaning, context and tone.";
-              }
-
-              void applyClipboardTranslation(String out) {
-                  String tr = cleanClipboardApiText(out);
-                  if(tr.length() == 0) {
-                      showClipboardTranslatorPanel(clipboardCurrentSource, clipboardCurrentPrepared, "Vágólap-fordítási hiba: üres válasz érkezett.");
-                      return;
-                  }
-                  showClipboardTranslatorPanel(clipboardCurrentSource, clipboardCurrentPrepared, tr);
-                  Toast.makeText(this, "Fordítás elkészült.", Toast.LENGTH_SHORT).show();
-              }
-
-              void updateClipboardTranslateButtonLabel() {
-                  if(clipboardTranslateButton != null) clipboardTranslateButton.setText(clipboardAutoTranslateEnabled ? "FORDÍT\nAUTO" : "FORDÍT\nMANUÁL");
-              }
-
-              boolean isClipboardSystemMessage(String s) {
-                  if(s == null) return false;
-                  String x = s.trim();
-                  if(x.startsWith("Nincs fordítható szöveg")) return true;
-                  if(x.startsWith("Vágólap-fordítási hiba")) return true;
-                  if(x.equalsIgnoreCase("Fordítás folyamatban…")) return true;
-                  if(x.equalsIgnoreCase("Értelmezés folyamatban…")) return true;
-                  return false;
-              }
-
-              boolean usableClipboardText(String s) {
-                  if(s == null) return false;
-                  String x = s.trim();
-                  if(x.length() == 0) return false;
-                  if(x.equalsIgnoreCase("Fordítás folyamatban…")) return false;
-                  if(x.equalsIgnoreCase("Értelmezés folyamatban…")) return false;
-                  if(x.equalsIgnoreCase("fordítás")) return false;
-                  if(x.equalsIgnoreCase("javított vagy fordítandó szöveg")) return false;
-                  if(x.equalsIgnoreCase("vágólap szövege")) return false;
-                  if(x.startsWith("Nincs fordítható szöveg")) return false;
-                  if(x.startsWith("Vágólap-fordítási hiba")) return false;
-                  return true;
-              }
-
-              String bestClipboardCopyText() {
-                  String tr = clipboardTranslationEdit == null ? "" : clipboardTranslationEdit.getText().toString().trim();
-                  if(usableClipboardText(tr)) return tr;
-                  String prep = clipboardPreparedEdit == null ? "" : clipboardPreparedEdit.getText().toString().trim();
-                  if(usableClipboardText(prep)) return prep;
-                  String raw = clipboardRawEdit == null ? "" : clipboardRawEdit.getText().toString().trim();
-                  if(usableClipboardText(raw)) return raw;
-                  return "";
-              }
-
-              EditText clipboardEditBox(String hint, int textSize, int maxLines) {
-                  EditText e = new EditText(this);
-                  e.setHint(hint);
-                  e.setTextColor(Color.WHITE);
-                  e.setHintTextColor(Color.rgb(150,150,150));
-                  e.setTextSize(textSize);
-                  e.setGravity(Gravity.TOP | Gravity.START);
-                  e.setMinLines(2);
-                  e.setMaxLines(maxLines);
-                  e.setPadding(12, 8, 12, 8);
-                  e.setSingleLine(false);
-                  e.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-                  e.setBackgroundColor(Color.rgb(18,21,27));
-                  return e;
-              }
-
-              void showClipboardTranslatorPanel(String source, String prepared, String translation) {
-                  try {
-                      if(streaming) stop();
-                      if(clipboardDialog == null) {
-                          clipboardDialog = new Dialog(this);
-                          LinearLayout lay = new LinearLayout(this);
-                          lay.setOrientation(LinearLayout.VERTICAL);
-                          lay.setPadding(18, 14, 18, 14);
-                          lay.setBackgroundColor(Color.rgb(28,31,37));
-
-                          LinearLayout clipboardTitleRow = row();
-                          TextView title = label("Vágólap fordító");
-                          title.setTextSize(13);
-                          title.setTextColor(Color.rgb(255, 210, 80));
-                          clipboardMicButton = btn("🎙");
-                          clipboardMicButton.setTextSize(20);
-                          clipboardMicButton.setTextColor(Color.WHITE);
-                          clipboardMicButton.setIncludeFontPadding(false);
-                          clipboardMicButton.setGravity(Gravity.CENTER);
-                          clipboardMicButton.setPadding(0, 0, 0, 0);
-                          clipboardMicButton.setMinWidth(0);
-                          clipboardMicButton.setMinimumWidth(0);
-                          clipboardMicButton.setMinHeight(0);
-                          clipboardMicButton.setMinimumHeight(0);
-                          clipboardMicButton.setBackgroundColor(Color.rgb(30,120,75));
-                          clipboardMicButton.setTranslationY(0f);
-                          clipboardMicButton.setOnClickListener(v -> startClipboardSystemSpeech());
-                          clipboardTitleRow.addView(title, new LinearLayout.LayoutParams(0, 96, 1));
-                          clipboardTitleRow.addView(clipboardMicButton, new LinearLayout.LayoutParams(96, 96));
-                          lay.addView(clipboardTitleRow, new LinearLayout.LayoutParams(-1, -2));
-
-                          TextView rawTitle = label("Nyers beolvasott szöveg:");
-                          rawTitle.setTextSize(13);
-                          rawTitle.setTextColor(Color.rgb(255, 210, 80));
-                          lay.addView(rawTitle, new LinearLayout.LayoutParams(-1, -2));
-                          clipboardRawEdit = clipboardEditBox("vágólap szövege", 14, 5);
-                          clipboardRawEdit.addTextChangedListener(new TextWatcher() {
-                              public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-                              public void onTextChanged(CharSequence s, int start, int before, int count) {}
-                              public void afterTextChanged(Editable e) {
-                                  if(clipboardSpeechActive) return;
-                                  scheduleClipboardAutoPrepare();
-                              }
-                          });
-                          lay.addView(clipboardRawEdit, new LinearLayout.LayoutParams(-1, 0, 0.90f));
-
-                          clipboardPreparedTitle = label("Értelmezett / fordítandó szöveg:");
-                          clipboardPreparedTitle.setTextSize(13);
-                          clipboardPreparedTitle.setTextColor(Color.rgb(255, 210, 80));
-                          lay.addView(clipboardPreparedTitle, new LinearLayout.LayoutParams(-1, -2));
-                          clipboardPreparedEdit = clipboardEditBox("javított vagy fordítandó szöveg", 15, 5);
-                          lay.addView(clipboardPreparedEdit, new LinearLayout.LayoutParams(-1, 0, 1.05f));
-
-                          TextView trTitle = label("Fordítás:");
-                          trTitle.setTextSize(13);
-                          trTitle.setTextColor(Color.rgb(255, 210, 80));
-                          lay.addView(trTitle, new LinearLayout.LayoutParams(-1, -2));
-                          clipboardTranslationEdit = clipboardEditBox("fordítás", 16, 7);
-                          lay.addView(clipboardTranslationEdit, new LinearLayout.LayoutParams(-1, 0, 1.05f));
-
-                          LinearLayout buttons = row();
-                          Button translate = btn("FORDÍT");
-                          clipboardTranslateButton = translate;
-                          updateClipboardTranslateButtonLabel();
-                          translate.setSingleLine(false);
-                          translate.setGravity(Gravity.CENTER);
-                          Button copy = btn("MÁSOL");
-                          Button hide = btn("BEZÁR");
-                          int cb = Color.rgb(95,95,95);
-                          translate.setBackgroundColor(cb);
-                          copy.setBackgroundColor(cb);
-                          hide.setBackgroundColor(cb);
-                          translate.setTextColor(Color.WHITE);
-                          copy.setTextColor(Color.WHITE);
-                          hide.setTextColor(Color.WHITE);
-                          translate.setTextSize(15);
-                          copy.setTextSize(15);
-                          hide.setTextSize(15);
-                          translate.setOnClickListener(v -> runClipboardPanelTranslate());
-                          translate.setOnLongClickListener(v -> {
-                              clipboardAutoTranslateEnabled = !clipboardAutoTranslateEnabled;
-                              updateClipboardTranslateButtonLabel();
-                              Toast.makeText(this, clipboardAutoTranslateEnabled ? "Automatikus fordítás bekapcsolva." : "Manuális fordítás bekapcsolva.", Toast.LENGTH_SHORT).show();
+                      if(floatingWindowManager == null) floatingWindowManager=(android.view.WindowManager)getSystemService(WINDOW_SERVICE);
+                      Button b=btn("🔊");
+                      b.setTextSize(24);
+                      final android.view.WindowManager.LayoutParams lp=floatingParams(96,96,Gravity.LEFT|Gravity.CENTER_VERTICAL);
+                      lp.x=interpreterFloatingX; lp.y=interpreterFloatingY;
+                      b.setOnClickListener(v -> toggleInterpreterFloatingRun());
+                      final int[] down=new int[4]; final boolean[] moved=new boolean[1];
+                      b.setOnTouchListener((v,ev)->{
+                          if(ev.getAction()==android.view.MotionEvent.ACTION_DOWN){down[0]=lp.x;down[1]=lp.y;down[2]=(int)ev.getRawX();down[3]=(int)ev.getRawY();moved[0]=false;return true;}
+                          if(ev.getAction()==android.view.MotionEvent.ACTION_MOVE){
+                              int dx=(int)ev.getRawX()-down[2],dy=(int)ev.getRawY()-down[3];
+                              if(Math.abs(dx)>24||Math.abs(dy)>24)moved[0]=true;
+                              if(moved[0]){lp.x=Math.max(0,down[0]+dx);lp.y=down[1]+dy;try{floatingWindowManager.updateViewLayout(b,lp);}catch(Exception ignored){}}
                               return true;
-                          });
-                          copy.setOnClickListener(v -> {
-                              String txt = bestClipboardCopyText();
-                              if(txt.length() > 0) {
-                                  setClipboardText(txt);
-                                  Toast.makeText(this, "Vágólapra másolva.", Toast.LENGTH_SHORT).show();
-                              } else {
-                                  Toast.makeText(this, "Nincs másolható szöveg.", Toast.LENGTH_SHORT).show();
-                              }
-                          });
-                          hide.setOnClickListener(v -> { stopClipboardSystemSpeech(false); try { if(clipboardDialog != null) clipboardDialog.dismiss(); } catch(Exception ignored) {} });
-                          buttons.addView(translate, new LinearLayout.LayoutParams(0,64,1));
-                          buttons.addView(copy, new LinearLayout.LayoutParams(0,64,1));
-                          buttons.addView(hide, new LinearLayout.LayoutParams(0,64,1));
-                          lay.addView(buttons);
+                          }
+                          if(ev.getAction()==android.view.MotionEvent.ACTION_UP){
+                              interpreterFloatingX=lp.x;interpreterFloatingY=lp.y;save();
+                              if(!moved[0])toggleInterpreterFloatingRun();
+                              return true;
+                          }
+                          return true;
+                      });
+                      interpreterFloatingView=b;
+                      floatingWindowManager.addView(interpreterFloatingView,lp);
+                      refreshInterpreterFloatingButton();
+                  } catch(Exception e) { interpreterFloatingView=null; }
+              }
 
-                          clipboardDialog.setContentView(lay);
-                      }
-                      int prepVisibility = View.VISIBLE;
-                      if(clipboardPreparedTitle != null) clipboardPreparedTitle.setVisibility(prepVisibility);
-                      if(clipboardPreparedEdit != null) clipboardPreparedEdit.setVisibility(prepVisibility);
-                      boolean force = clipboardForceFieldUpdate;
-                      if(clipboardRawEdit != null && (force || !clipboardRawEdit.hasFocus())) clipboardRawEdit.setText(source == null || source.trim().length() == 0 ? "" : source.trim());
-                      if(clipboardPreparedEdit != null && (force || !clipboardPreparedEdit.hasFocus())) clipboardPreparedEdit.setText(prepared == null ? "" : prepared.trim());
-                      if(clipboardTranslationEdit != null && (force || !clipboardTranslationEdit.hasFocus())) clipboardTranslationEdit.setText(translation == null ? "" : translation.trim());
-                      clipboardForceFieldUpdate = false;
-                      if(!clipboardDialog.isShowing()) clipboardDialog.show();
-                      android.view.Window w = clipboardDialog.getWindow();
-                      if(w != null) {
-                          w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-                          w.setLayout(-1, -1);
-                          w.setGravity(Gravity.CENTER);
-                      }
-                  } catch(Exception e) {
-                      Toast.makeText(this, translation == null ? "Vágólap fordító hiba." : translation, Toast.LENGTH_LONG).show();
+              void refreshInterpreterFloatingButton() {
+                  if(!(interpreterFloatingView instanceof Button)) return;
+                  Button b=(Button)interpreterFloatingView;
+                  if(!streaming) {
+                      b.setText("🔊");
+                      b.setBackgroundColor(Color.rgb(150,45,45));
+                  } else if("headset".equals(interpreterAudioMode)) {
+                      b.setText("ᛒ");
+                      b.setBackgroundColor(Color.rgb(35,105,175));
+                  } else {
+                      b.setText("🔊");
+                      b.setBackgroundColor(Color.rgb(30,135,70));
                   }
               }
 
-              void setClipboardText(String text) {
-                  try {
-                      android.content.ClipboardManager cm = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
-                      if(cm != null) cm.setPrimaryClip(ClipData.newPlainText("Fordito fordítás", text));
-                  } catch(Exception ignored) {}
+              void toggleInterpreterFloatingRun() {
+                  if(!interpreterMode) return;
+                  if(streaming) stop(); else start(true);
+                  new Handler().postDelayed(() -> refreshInterpreterFloatingButton(),250);
               }
 
-              void showFloatingResultWindow(String text) {
-                  if(!canDrawOverlayNow()) { Toast.makeText(this, text, Toast.LENGTH_LONG).show(); return; }
-                  try {
-                      if(floatingWindowManager == null) floatingWindowManager = (android.view.WindowManager)getSystemService(WINDOW_SERVICE);
-                      hideFloatingResultWindow();
-                      LinearLayout lay = new LinearLayout(this);
-                      lay.setOrientation(LinearLayout.VERTICAL);
-                      lay.setPadding(18, 14, 18, 14);
-                      lay.setBackgroundColor(Color.rgb(35,38,44));
-                      TextView tv = label(text);
-                      tv.setTextSize(16);
-                      tv.setTextColor(Color.WHITE);
-                      tv.setMaxLines(12);
-                      lay.addView(tv, new LinearLayout.LayoutParams(-1, -2));
-                      LinearLayout row = row();
-                      Button copy = btn("MÁSOL");
-                      Button close = btn("BEZÁR");
-                      copy.setOnClickListener(v -> { setClipboardText(tv.getText().toString()); Toast.makeText(this, "Vágólapra másolva.", Toast.LENGTH_SHORT).show(); });
-                      close.setOnClickListener(v -> hideFloatingResultWindow());
-                      row.addView(copy, new LinearLayout.LayoutParams(0,70,1));
-                      row.addView(close, new LinearLayout.LayoutParams(0,70,1));
-                      lay.addView(row);
-                      floatingResultView = lay;
-                      android.view.WindowManager.LayoutParams lp = floatingParams(-1, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-                      lp.x = 0; lp.y = 60;
-                      floatingWindowManager.addView(floatingResultView, lp);
-                  } catch(Exception e) {
-                      Toast.makeText(this, text, Toast.LENGTH_LONG).show();
-                  }
+              void hideInterpreterFloatingButton() {
+                  try { if(floatingWindowManager!=null && interpreterFloatingView!=null) floatingWindowManager.removeView(interpreterFloatingView); } catch(Exception ignored) {}
+                  interpreterFloatingView=null;
               }
-
-              void hideFloatingResultWindow() {
-                  try { if(floatingWindowManager != null && floatingResultView != null) floatingWindowManager.removeView(floatingResultView); } catch(Exception ignored) {}
-                  floatingResultView = null;
-              }
-
 
               String translationMenuLabel() {
                   return profileLabel() + " / " + modeLabel();
@@ -4203,6 +3619,7 @@ jobs:
                   clearSpeakState();
                   ttsSpeaking = false;
                   try { if(tts != null) tts.stop(); } catch(Exception ignored) {}
+                  hideInterpreterFloatingButton();
                   save();
                   Toast.makeText(this, "Tolmács mód kikapcsolva.", Toast.LENGTH_SHORT).show();
               }
@@ -4218,6 +3635,7 @@ jobs:
                   }
                   if("speaker".equals(interpreterAudioMode) || "headset".equals(interpreterAudioMode)) lastInterpreterAudioMode = interpreterAudioMode;
                   save();
+                  if(interpreterMode) ensureInterpreterFloatingButton(); else hideInterpreterFloatingButton();
                   Toast.makeText(this, interpreterQuickLabel(), Toast.LENGTH_SHORT).show();
                   updateButtons();
               }
@@ -4690,139 +4108,6 @@ jobs:
                   styleUiState();
               }
 
-              void startClipboardSystemSpeech() {
-                  try {
-                      if(clipboardSpeechActive) {
-                          stopClipboardSystemSpeech(true);
-                      } else {
-                          startClipboardGoogleSpeech();
-                      }
-                  } catch(Exception e) {
-                      Toast.makeText(this, "Vágólapos diktálás hiba: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                  }
-              }
-
-              void startClipboardGoogleSpeech() {
-                  try {
-                      // Ágváltás: a főprogram mikrofonja teljesen álljon le, a vágólapos ág kapja a mikrofont.
-                      if(streaming) stop();
-                      backgroundScreenAllowed = false;
-                      stopBackgroundForegroundService();
-
-                      if(!SpeechRecognizer.isRecognitionAvailable(this)) {
-                          Toast.makeText(this, "Google/Android beszédfelismerő nem elérhető ezen a készüléken.", Toast.LENGTH_LONG).show();
-                          return;
-                      }
-
-                      clipboardSpeechActive = true;
-                      if(clipboardMicButton != null) {
-                          clipboardMicButton.setText("STOP");
-                          clipboardMicButton.setTextSize(13);
-                          clipboardMicButton.setBackgroundColor(Color.rgb(150,55,50));
-                      }
-                      if(clipboardDialog == null || !clipboardDialog.isShowing()) {
-                          clipboardForceFieldUpdate = true;
-                          showClipboardTranslatorPanel("", "", "");
-                      }
-                      if(clipboardRawEdit != null) {
-                          clipboardRawEdit.requestFocus();
-                          clipboardSpeechBaseText = clipboardRawEdit.getText() == null ? "" : clipboardRawEdit.getText().toString().trim();
-                      } else {
-                          clipboardSpeechBaseText = "";
-                      }
-                      if(clipboardSpeechBaseText.equalsIgnoreCase("vágólap szövege") || clipboardSpeechBaseText.equalsIgnoreCase("fordítás") || clipboardSpeechBaseText.equalsIgnoreCase("javított vagy fordítandó szöveg")) clipboardSpeechBaseText = "";
-                      clipboardSpeechCommittedText = clipboardSpeechBaseText;
-                      clipboardSpeechLastPartial = "";
-
-                      if(clipboardSpeechRecognizer == null) {
-                          clipboardSpeechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
-                          clipboardSpeechRecognizer.setRecognitionListener(new RecognitionListener() {
-                              @Override public void onReadyForSpeech(Bundle params) {}
-                              @Override public void onBeginningOfSpeech() {}
-                              @Override public void onRmsChanged(float rmsdB) {}
-                              @Override public void onBufferReceived(byte[] buffer) {}
-                              @Override public void onEndOfSpeech() {}
-                              @Override public void onEvent(int eventType, Bundle params) {}
-
-                              @Override public void onPartialResults(Bundle partialResults) {
-                                  if(!clipboardSpeechActive) return;
-                                  ArrayList<String> list = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                                  if(list != null && list.size() > 0) showClipboardDictationPartial(list.get(0));
-                              }
-
-                              @Override public void onResults(Bundle results) {
-                                  if(!clipboardSpeechActive) return;
-                                  ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                                  if(list != null && list.size() > 0) commitClipboardDictationResult(list.get(0));
-                                  else if(clipboardSpeechLastPartial != null && clipboardSpeechLastPartial.trim().length() > 0) commitClipboardDictationResult(clipboardSpeechLastPartial);
-                                  stopClipboardSystemSpeech(false);
-                                  autoPrepareClipboardRawText();
-                              }
-
-                              @Override public void onError(int error) {
-                                  if(!clipboardSpeechActive) return;
-                                  if(clipboardSpeechLastPartial != null && clipboardSpeechLastPartial.trim().length() > 0) {
-                                      commitClipboardDictationResult(clipboardSpeechLastPartial);
-                                  }
-                                  stopClipboardSystemSpeech(false);
-                                  autoPrepareClipboardRawText();
-                                  Toast.makeText(MainActivity.this, "Diktálás vége.", Toast.LENGTH_SHORT).show();
-                              }
-                          });
-                      }
-
-                      clipboardSpeechIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-                      // V240: stabil visszaállás. A vágólapos Google diktálás fixen magyar.
-                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hu-HU");
-                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hu-HU");
-                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, true);
-                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-                      // V240: a Google/Android beszédfelismerő ne csillagozza ki a sértőnek ítélt szavakat.
-                      // A nyers felismerési eredmény változtatás nélkül jusson tovább.
-                      if(Build.VERSION.SDK_INT >= 33) {
-                          clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_MASK_OFFENSIVE_WORDS, false);
-                      }
-                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
-                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000);
-                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3000);
-                      clipboardSpeechIntent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 8000);
-
-                      startClipboardSpeechNow();
-                  } catch(Exception e) {
-                      stopClipboardSystemSpeech(false);
-                      Toast.makeText(this, "A vágólapos Google diktálás nem indítható: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                  }
-              }
-
-              void startClipboardSpeechNow() {
-                  try {
-                      clipboardSpeechRecognizer.startListening(clipboardSpeechIntent);
-                      Toast.makeText(this, "Vágólapos Google diktálás indul.", Toast.LENGTH_SHORT).show();
-                  } catch(Exception e) {
-                      stopClipboardSystemSpeech(false);
-                      Toast.makeText(this, "A vágólapos Google diktálás nem indítható: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                  }
-              }
-
-              void stopClipboardSystemSpeech(boolean toast) {
-                  boolean wasActive = clipboardSpeechActive;
-                  if(toast && wasActive && clipboardSpeechLastPartial != null && clipboardSpeechLastPartial.trim().length() > 0) {
-                      commitClipboardDictationResult(clipboardSpeechLastPartial);
-                  }
-                  clipboardSpeechActive = false;
-                  try { if(clipboardSpeechRecognizer != null) clipboardSpeechRecognizer.cancel(); } catch(Exception ignored) {}
-                  if(clipboardMicButton != null) {
-                      clipboardMicButton.setText("🎙");
-                      clipboardMicButton.setTextSize(20);
-                      clipboardMicButton.setBackgroundColor(Color.rgb(30,120,75));
-                  }
-                  if(toast) {
-                      Toast.makeText(this, "Vágólapos diktálás leállítva.", Toast.LENGTH_SHORT).show();
-                      scheduleClipboardAutoPrepare();
-                  }
-              }
-
               String normSpeech(String s) {
                   return s == null ? "" : s.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
               }
@@ -4889,7 +4174,7 @@ jobs:
                       stopClipboardSystemSpeech(false);
                       try { clipboardDialog.dismiss(); } catch(Exception ignored) {}
                       moveTaskToBack(true);
-                      if(floatingTranslatorEnabled) new Handler().postDelayed(() -> ensureFloatingTranslator(), 250);
+                      if(floatingTranslatorEnabled) new Handler().postDelayed(() -> ensureFloatingTranslator(), 250); if(interpreterMode) new Handler().postDelayed(() -> ensureInterpreterFloatingButton(), 250);
                       return;
                   }
                   if(floatingTranslatorEnabled) {
@@ -4913,7 +4198,7 @@ jobs:
                       } catch(Exception ignored) {}
                       updateButtons();
                   }
-                  if(floatingTranslatorEnabled) new Handler().postDelayed(() -> ensureFloatingTranslator(), 250);
+                  if(floatingTranslatorEnabled) new Handler().postDelayed(() -> ensureFloatingTranslator(), 250); if(interpreterMode) new Handler().postDelayed(() -> ensureInterpreterFloatingButton(), 250);
               }
 
               @Override public void onResume() {
@@ -4923,11 +4208,12 @@ jobs:
                       setLiveUiLocked(false);
                       updateButtons();
                   }
-                  if(floatingTranslatorEnabled) new Handler().postDelayed(() -> ensureFloatingTranslator(), 250);
+                  if(floatingTranslatorEnabled) new Handler().postDelayed(() -> ensureFloatingTranslator(), 250); if(interpreterMode) new Handler().postDelayed(() -> ensureInterpreterFloatingButton(), 250);
               }
 
               @Override public void onDestroy() {
                   hideFloatingTranslator();
+                  hideInterpreterFloatingButton();
                   stopClipboardSystemSpeech(false);
                   try { if(clipboardSpeechRecognizer != null) { clipboardSpeechRecognizer.destroy(); clipboardSpeechRecognizer = null; } } catch(Exception ignored) {}
                   if(streaming) stop();
@@ -4980,14 +4266,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V302.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V302.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V303.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V303.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V302
+          name: V303
           path: |
             artifact/*.apk
             artifact/*.aab
