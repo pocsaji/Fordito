@@ -1,4 +1,4 @@
-name: Build Android APK V310
+name: Build Android APK V311
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 310; versionName = "31.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 311; versionName = "31.1" }
 
               signingConfigs {
                   create("release") {
@@ -86,7 +86,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V310" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V311" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -231,7 +231,7 @@ jobs:
               // 8 s folyamatos beszédnél vágunk blokkot akkor is, ha nincs csend.
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
               static final int MAX_LIVE_SILENCE_MS = 1200;
-              // V310: egyszerű folyamatos tolmácslogika.
+              // V311: egyszerű folyamatos tolmácslogika.
               // Nem karaktert, vesszőt vagy szótárat számolunk: legfeljebb 2 mp beszédpuffer után
               // szóhatáron kiadjuk a kész elejét, a felismerő/fordító végzi a nyelvi munkát.
               static final int MAX_CONTINUOUS_LIVE_BLOCK_MS = 2000;
@@ -254,6 +254,8 @@ jobs:
               android.view.WindowManager floatingWindowManager;
               android.view.View floatingButtonView;
               android.view.View floatingResultView;
+              boolean floatingClipboardCollapsed = false;
+              Handler floatingCollapseHandler = new Handler();
               int floatingButtonX = 24;
               int floatingButtonY = 0;
               Dialog clipboardDialog;
@@ -531,7 +533,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V310");
+                  TextView title = label("Fordito_V311");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1110,7 +1112,7 @@ jobs:
                           input.put("noise_reduction", nr);
                       }
 
-                      // V310: STT átállítva gpt-4o-transcribe modellre.
+                      // V311: STT átállítva gpt-4o-transcribe modellre.
                       // A teljes lánc változatlan marad: mikrofon -> Realtime input audio -> transcript -> gpt-realtime-2 fordítás.
                       // Nem állítunk fix language mezőt, mert ugyanabban a munkamenetben TOP és BOTTOM nyelv is megszólalhat.
                       // A 4o-transcribe támogat promptot, ezért a kiválasztott nyelvpárt és a szó szerinti STT-fegyelmet itt is megadjuk.
@@ -1511,7 +1513,7 @@ jobs:
                   ws.send(evt.toString());
                   audioCommitWindowBytes += chunk.length;
 
-                  // V310: valódi audio-oldali 2 mp-es határ.
+                  // V311: valódi audio-oldali 2 mp-es határ.
                   // A Realtime bemeneti puffert commitoljuk, nem a később érkező transcriptet próbáljuk feldarabolni.
                   if(now - audioCommitWindowStartedAtMs >= AUDIO_COMMIT_WINDOW_MS) {
                       commitCurrentAudioWindow();
@@ -1837,7 +1839,7 @@ jobs:
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
                           if(msg.contains("response in progress")) {
                               responseInProgress = true;
-                              // V310: ez nem felhasználói hiba, hanem túl gyors blokkérkezés.
+                              // V311: ez nem felhasználói hiba, hanem túl gyors blokkérkezés.
                               // A blokk nem veszhet el és nem kell Toasttal zajongani: vissza a sor elejére,
                               // majd a következő response.done indítja újra a fordítást.
                               if(liveTranslateMode && pendingLiveBlockId >= 0) {
@@ -1872,7 +1874,7 @@ jobs:
               void manualTranslate() {
                   if(uiLockedForLive || finalizingStop) return;
 
-                  // V310: a FORDÍT gomb külön üzemmód.
+                  // V311: a FORDÍT gomb külön üzemmód.
                   // Először lezárjuk a mikrofont/live sort, utána az aktív ablak teljes szövegét
                   // egyetlen nagy, kontextusos kézi fordításként kezeljük.
                   if(streaming) {
@@ -1962,7 +1964,7 @@ jobs:
                   if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
                   liveTranscriptBuffer += delta;
 
-                  // V310: a részleges STT delta még javulhat a completed eseményig.
+                  // V311: a részleges STT delta még javulhat a completed eseményig.
                   // Normál esetben nem adjuk ki korán, mert ezzel elveszne a modell későbbi
                   // önjavítása és a teljes mondat kontextusa. Csak a 8 s abszolút blokkmaximum
                   // kényszeríthet ki delta közbeni vágást.
@@ -1970,7 +1972,7 @@ jobs:
                   long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
                   long age = started > 0L ? now - started : 0L;
                   if(age >= MAX_CONTINUOUS_LIVE_BLOCK_MS) {
-                      // V310: valódi 2 mp-es folyamatos blokkkiadás.
+                      // V311: valódi 2 mp-es folyamatos blokkkiadás.
                       // Nem a régi mondat/vessző/karakter okoskodó útvonalat hívjuk,
                       // hanem szóhatáron levágjuk a puffer kiadható elejét és azonnal fordítási sorba tesszük.
                       released = forceFlushTimedLivePrefix();
@@ -2003,7 +2005,7 @@ jobs:
                   if(transcript != null && transcript.trim().length() > 0) {
                       completedIsOnlyAlreadyReleased = isAlreadyReleasedTranscript(transcript);
 
-                      // V310: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
+                      // V311: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
                       // a completed szöveg felülírja a részleges delta puffert. Ez őrzi meg
                       // a transcribe modell végső javítását és a teljes mondat kontextusát.
                       if(!completedIsOnlyAlreadyReleased && !liveDeltaReleasedSinceLastCompleted) {
@@ -2460,7 +2462,7 @@ jobs:
                   String t = s.trim();
                   if(t.length() == 0) return -1;
 
-                  // V310: egyszerű blokkhatár-döntés.
+                  // V311: egyszerű blokkhatár-döntés.
                   // Ha van kész mondatvég, azonnal zár.
                   // Ha nincs, 2 mp folyamatos puffer után szóhatáron zár.
                   // Nincs karakter-, vessző-, szótár- vagy többágú monológlogika.
@@ -3278,26 +3280,122 @@ jobs:
                   if(!floatingTranslatorEnabled) return;
                   if(!canDrawOverlayNow()) { requestOverlayPermission(); return; }
                   if(floatingButtonView != null) return;
+                  showFloatingClipboardExpanded();
+              }
+
+              android.graphics.drawable.GradientDrawable roundBg(int color) {
+                  android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+                  gd.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+                  gd.setColor(color);
+                  return gd;
+              }
+
+              android.graphics.drawable.GradientDrawable rectBg(int color) {
+                  android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+                  gd.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+                  gd.setCornerRadius(16);
+                  gd.setColor(color);
+                  return gd;
+              }
+
+              Button overlayBtn(String txt, int color, int textSize) {
+                  Button b = btn(txt);
+                  b.setSingleLine(false);
+                  b.setTextSize(textSize);
+                  b.setTextColor(Color.WHITE);
+                  b.setGravity(Gravity.CENTER);
+                  b.setIncludeFontPadding(false);
+                  b.setPadding(2, 2, 2, 2);
+                  b.setBackground(rectBg(color));
+                  return b;
+              }
+
+              void scheduleFloatingClipboardCollapse() {
+                  floatingCollapseHandler.removeCallbacksAndMessages(null);
+                  floatingCollapseHandler.postDelayed(() -> {
+                      if(floatingTranslatorEnabled && floatingButtonView != null && !floatingClipboardCollapsed) {
+                          showFloatingClipboardCollapsed();
+                      }
+                  }, 7000);
+              }
+
+              void removeFloatingClipboardViewOnly() {
+                  try { if(floatingWindowManager != null && floatingButtonView != null) floatingWindowManager.removeView(floatingButtonView); } catch(Exception ignored) {}
+                  floatingButtonView = null;
+              }
+
+              void showFloatingClipboardCollapsed() {
                   try {
-                      floatingWindowManager = (android.view.WindowManager)getSystemService(WINDOW_SERVICE);
+                      if(!floatingTranslatorEnabled) return;
+                      if(floatingWindowManager == null) floatingWindowManager = (android.view.WindowManager)getSystemService(WINDOW_SERVICE);
+                      removeFloatingClipboardViewOnly();
+                      floatingClipboardCollapsed = true;
+
+                      Button mini = btn("⇄");
+                      mini.setTextSize(22);
+                      mini.setTextColor(Color.WHITE);
+                      mini.setGravity(Gravity.CENTER);
+                      mini.setPadding(0,0,0,0);
+                      mini.setBackground(roundBg(Color.rgb(30,140,75)));
+
+                      final android.view.WindowManager.LayoutParams lp = floatingParams(58, 58, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+                      lp.x = floatingButtonX;
+                      lp.y = floatingButtonY;
+
+                      final int[] down = new int[4];
+                      final boolean[] moved = new boolean[1];
+                      mini.setOnTouchListener((v, ev) -> {
+                          if(ev.getAction() == android.view.MotionEvent.ACTION_DOWN) {
+                              down[0]=lp.x; down[1]=lp.y; down[2]=(int)ev.getRawX(); down[3]=(int)ev.getRawY();
+                              moved[0]=false;
+                              return true;
+                          }
+                          if(ev.getAction() == android.view.MotionEvent.ACTION_MOVE) {
+                              int dx=(int)ev.getRawX()-down[2], dy=(int)ev.getRawY()-down[3];
+                              if(Math.abs(dx)>16 || Math.abs(dy)>16) moved[0]=true;
+                              if(moved[0]) {
+                                  lp.x=Math.max(0,down[0]-dx);
+                                  lp.y=down[1]+dy;
+                                  try { floatingWindowManager.updateViewLayout(mini,lp); } catch(Exception ignored) {}
+                              }
+                              return true;
+                          }
+                          if(ev.getAction() == android.view.MotionEvent.ACTION_UP) {
+                              floatingButtonX=lp.x; floatingButtonY=lp.y; save();
+                              if(!moved[0]) {
+                                  try { mini.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP); } catch(Exception ignored) {}
+                                  showFloatingClipboardExpanded();
+                              }
+                              return true;
+                          }
+                          return true;
+                      });
+
+                      floatingButtonView = mini;
+                      floatingWindowManager.addView(floatingButtonView, lp);
+                  } catch(Exception e) {
+                      floatingButtonView = null;
+                      Toast.makeText(this, "Lebegő gomb hiba: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                  }
+              }
+
+              void showFloatingClipboardExpanded() {
+                  try {
+                      if(!floatingTranslatorEnabled) return;
+                      if(!canDrawOverlayNow()) { requestOverlayPermission(); return; }
+                      if(floatingWindowManager == null) floatingWindowManager = (android.view.WindowManager)getSystemService(WINDOW_SERVICE);
+                      removeFloatingClipboardViewOnly();
+                      floatingClipboardCollapsed = false;
 
                       LinearLayout group = new LinearLayout(this);
                       group.setOrientation(LinearLayout.VERTICAL);
 
-                      Button paste = btn("BEILLESZT");
-                      Button copy = btn("MÁSOL\nRENDEZ");
-                      paste.setSingleLine(false);
-                      copy.setSingleLine(false);
-                      paste.setTextSize(10);
-                      copy.setTextSize(10);
-                      paste.setTextColor(Color.WHITE);
-                      copy.setTextColor(Color.WHITE);
-                      paste.setBackgroundColor(Color.rgb(30,120,75));
-                      copy.setBackgroundColor(Color.rgb(45,95,150));
-                      group.addView(paste, new LinearLayout.LayoutParams(150,96));
-                      group.addView(copy, new LinearLayout.LayoutParams(150,96));
+                      Button paste = overlayBtn("ÉRINTÉS:\nBEILLESZT", Color.rgb(30,120,75), 9);
+                      Button copy = overlayBtn("ÉRINTÉS:\nMÁSOL\nNYOMVA:\nRENDEZ", Color.rgb(45,95,150), 8);
+                      group.addView(paste, new LinearLayout.LayoutParams(180,112));
+                      group.addView(copy, new LinearLayout.LayoutParams(180,112));
 
-                      final android.view.WindowManager.LayoutParams lp = floatingParams(150, 192, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+                      final android.view.WindowManager.LayoutParams lp = floatingParams(180, 224, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
                       lp.x = floatingButtonX;
                       lp.y = floatingButtonY;
 
@@ -3309,6 +3407,7 @@ jobs:
                               copyLongDone[0] = true;
                               try { copy.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); } catch(Exception ignored) {}
                               cleanActiveBoxToClipboard();
+                              scheduleFloatingClipboardCollapse();
                           }
                       };
 
@@ -3318,8 +3417,9 @@ jobs:
                               down[0]=lp.x; down[1]=lp.y; down[2]=(int)ev.getRawX(); down[3]=(int)ev.getRawY();
                               moved[0]=false;
                               copyLongDone[0]=false;
+                              floatingCollapseHandler.removeCallbacksAndMessages(null);
                               floatingLongPressHandler.removeCallbacks(copyLong);
-                              if(isCopy) floatingLongPressHandler.postDelayed(copyLong, 600);
+                              if(isCopy) floatingLongPressHandler.postDelayed(copyLong, 650);
                               return true;
                           }
                           if(ev.getAction() == android.view.MotionEvent.ACTION_MOVE) {
@@ -3343,10 +3443,12 @@ jobs:
                                   if(isCopy) copyActiveBoxToClipboard();
                                   else pasteClipboardToLanguageBox();
                               }
+                              scheduleFloatingClipboardCollapse();
                               return true;
                           }
                           if(ev.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
                               floatingLongPressHandler.removeCallbacks(copyLong);
+                              scheduleFloatingClipboardCollapse();
                               return true;
                           }
                           return true;
@@ -3358,6 +3460,7 @@ jobs:
 
                       floatingButtonView = group;
                       floatingWindowManager.addView(floatingButtonView, lp);
+                      scheduleFloatingClipboardCollapse();
                   } catch(Exception e) {
                       floatingButtonView = null;
                       Toast.makeText(this, "Lebegő gomb hiba: " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -3365,8 +3468,8 @@ jobs:
               }
 
               void hideFloatingTranslator() {
-                  try { if(floatingWindowManager != null && floatingButtonView != null) floatingWindowManager.removeView(floatingButtonView); } catch(Exception ignored) {}
-                  floatingButtonView = null;
+                  floatingCollapseHandler.removeCallbacksAndMessages(null);
+                  removeFloatingClipboardViewOnly();
               }
 
               void setClipboardText(String text) {
@@ -3394,7 +3497,7 @@ jobs:
               }
 
               void pasteClipboardToLanguageBox() {
-                  // V310: Android háttérben futó overlayből sok készüléken nem engedi a vágólap olvasását.
+                  // V311: Android háttérben futó overlayből sok készüléken nem engedi a vágólap olvasását.
                   // Ezért előbb előtérbe hozzuk a Forditót, és csak utána, kis késleltetéssel olvassuk ki.
                   bringAppToFrontForClipboardRead();
                   new Handler().postDelayed(() -> pasteClipboardToLanguageBoxAfterForeground(), 260);
@@ -3589,12 +3692,12 @@ jobs:
               }
 
               void stopClipboardSystemSpeech(boolean toast) {
-                  // V310: a régi háromablakos/vágólapos diktálási ág ki van szerelve.
+                  // V311: a régi háromablakos/vágólapos diktálási ág ki van szerelve.
                   // Ez csak kompatibilitási lezáró csonk a régi lifecycle/menu hivatkozásokhoz.
               }
 
               void applyClipboardTranslation(String out) {
-                  // V310: a régi háromablakos vágólapfordító ág ki van szerelve.
+                  // V311: a régi háromablakos vágólapfordító ág ki van szerelve.
                   // Késve érkező régi válasz nem kerülhet ablakba vagy vágólapra.
                   clipboardResponseMode = false;
               }
@@ -4354,14 +4457,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V310.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V310.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V311.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V311.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V310
+          name: V311
           path: |
             artifact/*.apk
             artifact/*.aab
