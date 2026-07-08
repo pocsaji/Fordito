@@ -212,6 +212,7 @@ jobs:
               boolean ttsSpeaking = false;
               int ttsSeq = 0;
               String currentTtsUtteranceId = "";
+              int queuedTtsUtterances = 0;
 
               boolean connected = false;
               boolean streaming = false;
@@ -231,14 +232,7 @@ jobs:
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
               static final int MAX_LIVE_SILENCE_MS = 1200;
               static final int MAX_CONTINUOUS_LIVE_BLOCK_MS = 10000;
-              // V292: óvatos audio-szintű kényszerzárás.
-              // Nem nyúl a felismerési promptokhoz, zajszűréshez vagy fordításhoz.
-              // Csak akkor commitoljuk az aktuális Realtime audio puffert, ha a helyi VAD szerint
-              // hosszú ideje folyamatos beszéd megy, mert ilyenkor a transcript-delta sokszor nem
-              // ad elég korai szöveget a meglévő 150/250 karakteres szövegvágónak.
-              static final int MAX_CONTINUOUS_AUDIO_COMMIT_MS = 9000;
-              static final int MIN_AUDIO_COMMIT_GAP_MS = 1800;
-              // V291: egyszerű, lépcsős monológ-vágás.
+              // V292: egyszerű, lépcsős monológ-vágás.
               // 150 karakter után csak valódi mondatvégnél vágunk.
               // 250 karakter után, ha nincs mondatvég, az utolsó vessző vagy szóköz a vészvágás.
               static final int SOFT_SENTENCE_CUT_START_CHARS = 150;
@@ -246,8 +240,6 @@ jobs:
               volatile long lastVoiceChunkSentAtMs = 0L;
               volatile boolean trailingSilenceOpen = false;
               volatile boolean voiceSendActive = false;
-              volatile long currentSpeechAudioStartedAtMs = 0L;
-              volatile long lastForcedAudioCommitAtMs = 0L;
               volatile boolean pendingAudioStartAfterSessionUpdate = false;
               final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
               int preRollAudioBytes = 0;
@@ -536,7 +528,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V291");
+                  TextView title = label("Fordito_V292");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -915,10 +907,15 @@ jobs:
 
               void finishTtsUtterance(String utteranceId) {
                   try {
-                      if(utteranceId == null || !utteranceId.equals(currentTtsUtteranceId)) return;
-                      currentTtsUtteranceId = "";
-                      if("speaker".equals(interpreterAudioMode)) ttsMuteUntilMs = System.currentTimeMillis() + 700L;
-                      ttsSpeaking = false;
+                      if(queuedTtsUtterances > 0) queuedTtsUtterances--;
+                      if(queuedTtsUtterances <= 0) {
+                          queuedTtsUtterances = 0;
+                          currentTtsUtteranceId = "";
+                          if("speaker".equals(interpreterAudioMode)) {
+                              ttsMuteUntilMs = System.currentTimeMillis() + 500L;
+                          }
+                          ttsSpeaking = false;
+                      }
                   } catch(Exception ignored) {}
               }
 
@@ -946,17 +943,20 @@ jobs:
                       if(s.isEmpty()) return;
 
                       b.ttsSpoken = true;
-                      try { tts.stop(); } catch(Exception ignored) {}
                       try { tts.setLanguage(localeForTts(targetLang)); } catch(Exception ignored) {}
                       try { tts.setSpeechRate(("hu".equals(targetLang) || "fr".equals(targetLang)) ? 1.17f : 1.10f); } catch(Exception ignored) {}
 
                       currentTtsUtteranceId = "fordito_tts_" + (++ttsSeq);
                       ttsSpeaking = true;
                       Bundle params = new Bundle();
-                      int r = tts.speak(s, TextToSpeech.QUEUE_FLUSH, params, currentTtsUtteranceId);
-                      if(r == TextToSpeech.ERROR) {
-                          ttsSpeaking = false;
-                          currentTtsUtteranceId = "";
+                      int r = tts.speak(s, TextToSpeech.QUEUE_ADD, params, currentTtsUtteranceId);
+                      if(r == TextToSpeech.SUCCESS) {
+                          queuedTtsUtterances++;
+                      } else {
+                          if(queuedTtsUtterances <= 0) {
+                              ttsSpeaking = false;
+                              currentTtsUtteranceId = "";
+                          }
                       }
                   } catch(Exception ignored) {
                       ttsSpeaking = false;
@@ -971,6 +971,7 @@ jobs:
 
               void clearSpeakState() {
                   currentTtsUtteranceId = "";
+                  queuedTtsUtterances = 0;
                   ttsSpeaking = false;
               }
 
@@ -1106,7 +1107,7 @@ jobs:
                           input.put("noise_reduction", nr);
                       }
 
-                      // V291: STT átállítva gpt-4o-transcribe modellre.
+                      // V292: STT átállítva gpt-4o-transcribe modellre.
                       // A teljes lánc változatlan marad: mikrofon -> Realtime input audio -> transcript -> gpt-realtime-2 fordítás.
                       // Nem állítunk fix language mezőt, mert ugyanabban a munkamenetben TOP és BOTTOM nyelv is megszólalhat.
                       // A 4o-transcribe támogat promptot, ezért a kiválasztott nyelvpárt és a szó szerinti STT-fegyelmet itt is megadjuk.
@@ -1483,26 +1484,6 @@ jobs:
                   ws.send(evt.toString());
               }
 
-              void commitRealtimeInputAudioBuffer() {
-                  try {
-                      if(ws == null || !connected || !streaming) return;
-                      JSONObject evt = new JSONObject();
-                      evt.put("type", "input_audio_buffer.commit");
-                      ws.send(evt.toString());
-                  } catch(Exception ignored) {}
-              }
-
-              void maybeForceRealtimeAudioCommit(long now) {
-                  if(currentSpeechAudioStartedAtMs <= 0L) return;
-                  if(now - currentSpeechAudioStartedAtMs < MAX_CONTINUOUS_AUDIO_COMMIT_MS) return;
-                  if(lastForcedAudioCommitAtMs > 0L && now - lastForcedAudioCommitAtMs < MIN_AUDIO_COMMIT_GAP_MS) return;
-
-                  commitRealtimeInputAudioBuffer();
-                  lastForcedAudioCommitAtMs = now;
-                  currentSpeechAudioStartedAtMs = now;
-                  liveIdleFlushToken++;
-              }
-
               byte[] prepareTrailingSilenceChunk(byte[] data, int len) {
                   long now = System.currentTimeMillis();
                   if(trailingSilenceOpen && lastVoiceChunkSentAtMs > 0L && now - lastVoiceChunkSentAtMs <= MAX_TRAILING_SILENCE_SEND_MS) {
@@ -1636,8 +1617,6 @@ jobs:
                       byte[] buf = new byte[bs];
                       clearPreRollAudio();
                       voiceSendActive = false;
-                      currentSpeechAudioStartedAtMs = 0L;
-                      lastForcedAudioCommitAtMs = 0L;
                       trailingSilenceOpen = false;
                       lastVoiceChunkSentAtMs = 0L;
                       while(streaming && connected && ws != null && rec != null) {
@@ -1652,7 +1631,6 @@ jobs:
                                   if(shouldMuteMicForSpeakerTts()) {
                                       trailingSilenceOpen = false;
                                       voiceSendActive = false;
-                                      currentSpeechAudioStartedAtMs = 0L;
                                       continue;
                                   }
 
@@ -1660,7 +1638,6 @@ jobs:
                                   boolean overGate = externalVadOverGate(buf, read);
                                   if(overGate) {
                                       if(!voiceSendActive) {
-                                          currentSpeechAudioStartedAtMs = now;
                                           rememberPendingSpeechAudio(buf, read);
                                           if(pendingSpeechAudioDurationMs() < MIN_TRUE_SPEECH_AUDIO_MS) {
                                               continue;
@@ -1673,13 +1650,6 @@ jobs:
                                       voiceSendActive = true;
                                       trailingSilenceOpen = true;
                                       lastVoiceChunkSentAtMs = now;
-
-                                      // V292: a vágást oda tesszük, ahol hosszú monológnál tényleg hatni tud:
-                                      // az OpenAI Realtime bemeneti audio pufferére. Ez nem fordít, nem javít,
-                                      // nem zárja le a mikrofont; csak transcript-eseményt kényszerít ki kb. 9 s
-                                      // folyamatos beszéd után. Így a meglévő szöveges 150/250 karakteres blokkosító
-                                      // már valódi, köztes transcriptet kap, nem csak a végső, óriás completed szöveget.
-                                      maybeForceRealtimeAudioCommit(now);
                                       continue;
                                   }
 
@@ -1692,7 +1662,6 @@ jobs:
                                   }
 
                                   clearPendingSpeechAudio();
-                                  currentSpeechAudioStartedAtMs = 0L;
                                   rememberPreRollAudio(buf, read);
                               } catch(Exception ignored) {}
                           }
@@ -1731,8 +1700,6 @@ jobs:
                   connected = false;
                   ttsMuteUntilMs = 0L;
                   lastVoiceChunkSentAtMs = 0L;
-                  currentSpeechAudioStartedAtMs = 0L;
-                  lastForcedAudioCommitAtMs = 0L;
                   trailingSilenceOpen = false;
                   voiceSendActive = false;
                   pendingAudioStartAfterSessionUpdate = false;
@@ -1944,7 +1911,7 @@ jobs:
                   if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
                   liveTranscriptBuffer += delta;
 
-                  // V291: a részleges STT delta még javulhat a completed eseményig.
+                  // V292: a részleges STT delta még javulhat a completed eseményig.
                   // Normál esetben nem adjuk ki korán, mert ezzel elveszne a modell későbbi
                   // önjavítása és a teljes mondat kontextusa. Csak a 8 s abszolút blokkmaximum
                   // kényszeríthet ki delta közbeni vágást.
@@ -1982,7 +1949,7 @@ jobs:
                   if(transcript != null && transcript.trim().length() > 0) {
                       completedIsOnlyAlreadyReleased = isAlreadyReleasedTranscript(transcript);
 
-                      // V291: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
+                      // V292: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
                       // a completed szöveg felülírja a részleges delta puffert. Ez őrzi meg
                       // a transcribe modell végső javítását és a teljes mondat kontextusát.
                       if(!completedIsOnlyAlreadyReleased && !liveDeltaReleasedSinceLastCompleted) {
@@ -4944,14 +4911,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V291.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V291.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V292.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V292.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V291
+          name: V292
           path: |
             artifact/*.apk
             artifact/*.aab
