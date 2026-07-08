@@ -1,4 +1,4 @@
-name: Build Android APK V298
+name: Build Android APK V300
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 298; versionName = "29.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 300; versionName = "30.0" }
 
               signingConfigs {
                   create("release") {
@@ -86,7 +86,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V298" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V300" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -231,7 +231,7 @@ jobs:
               // 8 s folyamatos beszédnél vágunk blokkot akkor is, ha nincs csend.
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
               static final int MAX_LIVE_SILENCE_MS = 1200;
-              // V298: egyszerű folyamatos tolmácslogika.
+              // V300: egyszerű folyamatos tolmácslogika.
               // Nem karaktert, vesszőt vagy szótárat számolunk: legfeljebb 2 mp beszédpuffer után
               // szóhatáron kiadjuk a kész elejét, a felismerő/fordító végzi a nyelvi munkát.
               static final int MAX_CONTINUOUS_LIVE_BLOCK_MS = 2000;
@@ -293,6 +293,7 @@ jobs:
               int liveSourceBlockSeq = 0;
               String lastSureLiveSourceLang = "";
               String lastSureLiveOriginal = "";
+              String lastSureLiveTranslation = "";
               final HashSet<String> recentLiveBlockHashes = new HashSet<>();
               final ArrayDeque<String> recentLiveBlockHashOrder = new ArrayDeque<>();
               String pendingManualText = "";
@@ -526,7 +527,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V298");
+                  TextView title = label("Fordito_V300");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1105,7 +1106,7 @@ jobs:
                           input.put("noise_reduction", nr);
                       }
 
-                      // V298: STT átállítva gpt-4o-transcribe modellre.
+                      // V300: STT átállítva gpt-4o-transcribe modellre.
                       // A teljes lánc változatlan marad: mikrofon -> Realtime input audio -> transcript -> gpt-realtime-2 fordítás.
                       // Nem állítunk fix language mezőt, mert ugyanabban a munkamenetben TOP és BOTTOM nyelv is megszólalhat.
                       // A 4o-transcribe támogat promptot, ezért a kiválasztott nyelvpárt és a szó szerinti STT-fegyelmet itt is megadjuk.
@@ -1143,11 +1144,16 @@ jobs:
               String mildPreviousLiveContext() {
                   String lang = lastSureLiveSourceLang == null ? "" : lastSureLiveSourceLang.trim().toUpperCase(Locale.ROOT);
                   String prev = lastSureLiveOriginal == null ? "" : lastSureLiveOriginal.trim();
+                  String prevTr = lastSureLiveTranslation == null ? "" : lastSureLiveTranslation.trim();
                   if(lang.length() == 0 || prev.length() == 0) return "";
-                  if(prev.length() > 160) prev = prev.substring(prev.length() - 160);
+                  if(prev.length() > 220) prev = prev.substring(prev.length() - 220);
+                  if(prevTr.length() > 220) prevTr = prevTr.substring(prevTr.length() - 220);
                   prev = prev.replace("\n", " ").replace("\r", " ").replaceAll("\\s+", " ").trim();
-                  return "Previous confirmed live block, weak context only: SOURCE_LANG=" + lang + "; ORIGINAL=" + prev + ". " +
-                         "Use this only as a light continuity hint for very short or noisy blocks. The current block may freely switch to the other selected language. ";
+                  prevTr = prevTr.replace("\n", " ").replace("\r", " ").replaceAll("\\s+", " ").trim();
+                  return "Previous confirmed live block for continuity only: SOURCE_LANG=" + lang + "; ORIGINAL=" + prev +
+                         (prevTr.length() > 0 ? "; PREVIOUS_TRANSLATION=" + prevTr : "") + ". " +
+                         "Use this to keep pronouns, names, numbers and sentence continuation consistent across short 4-second audio chunks. " +
+                         "Do not repeat the previous block. Translate only the current TEXT. The current block may freely switch to the other selected language. ";
               }
 
               String instructions() {
@@ -1190,6 +1196,7 @@ jobs:
                     "Choose SOURCE_LANG as exactly " + top + " or " + bottom + "; no other source language is valid. " +
                     "Translate into the other selected language. " +
                     "Do not reject short speech: one-word answers, two-word answers, short questions and fragments are valid when meaningful. " +
+                    "If TEXT is a continuation of the previous block, translate it as the next part of the same speech without repeating previous content. " +
                     "Before translating, restore ORIGINAL in the chosen source language. The input may contain phonetic STT mistakes, wrong accents, fragments or words written as if they belonged to another language. " +
                     "Use the whole current block and the two selected languages to repair only obvious speech-recognition mistakes. If the intended word is clear from context, restore it in SOURCE_LANG. If uncertain, preserve the spoken wording. " +
                     "Return exactly three lines and nothing else: SOURCE_LANG: <" + top + " or " + bottom + "> then ORIGINAL: <cleaned source-language speech> then TRANSLATION: <natural translation into the other selected language>. " +
@@ -1476,7 +1483,7 @@ jobs:
 
               long audioCommitWindowStartedAtMs = 0L;
               long audioCommitWindowBytes = 0L;
-              static final long AUDIO_COMMIT_WINDOW_MS = 2000L;
+              static final long AUDIO_COMMIT_WINDOW_MS = 4000L;
 
               void commitCurrentAudioWindow() throws Exception {
                   if(ws == null || audioCommitWindowBytes <= 0L) return;
@@ -1498,7 +1505,7 @@ jobs:
                   ws.send(evt.toString());
                   audioCommitWindowBytes += chunk.length;
 
-                  // V298: valódi audio-oldali 2 mp-es határ.
+                  // V300: valódi audio-oldali 2 mp-es határ.
                   // A Realtime bemeneti puffert commitoljuk, nem a később érkező transcriptet próbáljuk feldarabolni.
                   if(now - audioCommitWindowStartedAtMs >= AUDIO_COMMIT_WINDOW_MS) {
                       commitCurrentAudioWindow();
@@ -1751,6 +1758,9 @@ jobs:
                   responseInProgress = false;
                   recentLiveBlockHashes.clear();
                   recentLiveBlockHashOrder.clear();
+                  lastSureLiveSourceLang = "";
+                  lastSureLiveOriginal = "";
+                  lastSureLiveTranslation = "";
                   try { if(ws != null) ws.close(1000, "stop"); } catch(Exception ignored) {}
                   ws = null;
                   stopBackgroundForegroundService();
@@ -1821,14 +1831,16 @@ jobs:
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
                           if(msg.contains("response in progress")) {
                               responseInProgress = true;
-                              // A fordítási sort kizárólag a response.done engedi tovább.
-                              // Itt nincs időzített újrapróbálás, mert az torlódást és döcögést okoz.
+                              // V300: ez nem felhasználói hiba, hanem túl gyors blokkérkezés.
+                              // A blokk nem veszhet el és nem kell Toasttal zajongani: vissza a sor elejére,
+                              // majd a következő response.done indítja újra a fordítást.
                               if(liveTranslateMode && pendingLiveBlockId >= 0) {
                                   int retryId = pendingLiveBlockId;
                                   pendingLiveBlockId = -1;
                                   liveTranslateMode = false;
                                   if(!liveTranslateQueue.contains(retryId)) liveTranslateQueue.addFirst(retryId);
                               }
+                              return;
                           }
                           if(manualResponseMode) {
                               runOnUiThread(() -> handleConnectionFailure(new RuntimeException(msg)));
@@ -1936,7 +1948,7 @@ jobs:
                   if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
                   liveTranscriptBuffer += delta;
 
-                  // V298: a részleges STT delta még javulhat a completed eseményig.
+                  // V300: a részleges STT delta még javulhat a completed eseményig.
                   // Normál esetben nem adjuk ki korán, mert ezzel elveszne a modell későbbi
                   // önjavítása és a teljes mondat kontextusa. Csak a 8 s abszolút blokkmaximum
                   // kényszeríthet ki delta közbeni vágást.
@@ -1944,7 +1956,7 @@ jobs:
                   long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
                   long age = started > 0L ? now - started : 0L;
                   if(age >= MAX_CONTINUOUS_LIVE_BLOCK_MS) {
-                      // V298: valódi 2 mp-es folyamatos blokkkiadás.
+                      // V300: valódi 2 mp-es folyamatos blokkkiadás.
                       // Nem a régi mondat/vessző/karakter okoskodó útvonalat hívjuk,
                       // hanem szóhatáron levágjuk a puffer kiadható elejét és azonnal fordítási sorba tesszük.
                       released = forceFlushTimedLivePrefix();
@@ -1977,7 +1989,7 @@ jobs:
                   if(transcript != null && transcript.trim().length() > 0) {
                       completedIsOnlyAlreadyReleased = isAlreadyReleasedTranscript(transcript);
 
-                      // V298: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
+                      // V300: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
                       // a completed szöveg felülírja a részleges delta puffert. Ez őrzi meg
                       // a transcribe modell végső javítását és a teljes mondat kontextusát.
                       if(!completedIsOnlyAlreadyReleased && !liveDeltaReleasedSinceLastCompleted) {
@@ -2434,7 +2446,7 @@ jobs:
                   String t = s.trim();
                   if(t.length() == 0) return -1;
 
-                  // V298: egyszerű blokkhatár-döntés.
+                  // V300: egyszerű blokkhatár-döntés.
                   // Ha van kész mondatvég, azonnal zár.
                   // Ha nincs, 2 mp folyamatos puffer után szóhatáron zár.
                   // Nincs karakter-, vessző-, szótár- vagy többágú monológlogika.
@@ -2897,6 +2909,7 @@ jobs:
                       b.retryCount = 0;
                       lastSureLiveSourceLang = sourceIsTop ? code(topLang) : code(bottomLang);
                       lastSureLiveOriginal = original;
+                      lastSureLiveTranslation = translation;
                       setDetectedSourceSide(sourceIsTop);
                       renderBlocksKeepView();
                       if(speakText != null && speakLang != null) {
@@ -4957,14 +4970,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V298.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V298.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V300.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V300.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V298
+          name: V300
           path: |
             artifact/*.apk
             artifact/*.aab
