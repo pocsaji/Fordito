@@ -1,4 +1,4 @@
-name: Build Android APK V296
+name: Build Android APK V297
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 296; versionName = "29.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 297; versionName = "29.7" }
 
               signingConfigs {
                   create("release") {
@@ -86,7 +86,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V296" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V297" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -231,7 +231,7 @@ jobs:
               // 8 s folyamatos beszédnél vágunk blokkot akkor is, ha nincs csend.
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
               static final int MAX_LIVE_SILENCE_MS = 1200;
-              // V296: egyszerű folyamatos tolmácslogika.
+              // V297: egyszerű folyamatos tolmácslogika.
               // Nem karaktert, vesszőt vagy szótárat számolunk: legfeljebb 2 mp beszédpuffer után
               // szóhatáron kiadjuk a kész elejét, a felismerő/fordító végzi a nyelvi munkát.
               static final int MAX_CONTINUOUS_LIVE_BLOCK_MS = 2000;
@@ -526,7 +526,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V296");
+                  TextView title = label("Fordito_V297");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1105,7 +1105,7 @@ jobs:
                           input.put("noise_reduction", nr);
                       }
 
-                      // V296: STT átállítva gpt-4o-transcribe modellre.
+                      // V297: STT átállítva gpt-4o-transcribe modellre.
                       // A teljes lánc változatlan marad: mikrofon -> Realtime input audio -> transcript -> gpt-realtime-2 fordítás.
                       // Nem állítunk fix language mezőt, mert ugyanabban a munkamenetben TOP és BOTTOM nyelv is megszólalhat.
                       // A 4o-transcribe támogat promptot, ezért a kiválasztott nyelvpárt és a szó szerinti STT-fegyelmet itt is megadjuk.
@@ -1909,7 +1909,7 @@ jobs:
                   if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
                   liveTranscriptBuffer += delta;
 
-                  // V296: a részleges STT delta még javulhat a completed eseményig.
+                  // V297: a részleges STT delta még javulhat a completed eseményig.
                   // Normál esetben nem adjuk ki korán, mert ezzel elveszne a modell későbbi
                   // önjavítása és a teljes mondat kontextusa. Csak a 8 s abszolút blokkmaximum
                   // kényszeríthet ki delta közbeni vágást.
@@ -1917,7 +1917,11 @@ jobs:
                   long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
                   long age = started > 0L ? now - started : 0L;
                   if(age >= MAX_CONTINUOUS_LIVE_BLOCK_MS) {
-                      released = flushReadyTranscriptBlocks(false);
+                      // V297: valódi 2 mp-es folyamatos blokkkiadás.
+                      // Nem a régi mondat/vessző/karakter okoskodó útvonalat hívjuk,
+                      // hanem szóhatáron levágjuk a puffer kiadható elejét és azonnal fordítási sorba tesszük.
+                      released = forceFlushTimedLivePrefix();
+                      if(released == 0) released = flushReadyTranscriptBlocks(false);
                   }
                   if(released > 0) {
                       liveDeltaReleasedSinceLastCompleted = true;
@@ -1946,7 +1950,7 @@ jobs:
                   if(transcript != null && transcript.trim().length() > 0) {
                       completedIsOnlyAlreadyReleased = isAlreadyReleasedTranscript(transcript);
 
-                      // V296: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
+                      // V297: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
                       // a completed szöveg felülírja a részleges delta puffert. Ez őrzi meg
                       // a transcribe modell végső javítását és a teljes mondat kontextusát.
                       if(!completedIsOnlyAlreadyReleased && !liveDeltaReleasedSinceLastCompleted) {
@@ -2038,6 +2042,37 @@ jobs:
                   if(firstHardSentenceEnd(s) >= 0 && words >= 1) return true;
                   if(s.length() >= 18 && words >= 2) return true;
                   return false;
+              }
+
+              int forceFlushTimedLivePrefix() {
+                  try {
+                      if(!firstSpeechBlockReleased && !initialSpeechGateOpen()) return 0;
+                      String s = liveTranscriptBuffer == null ? "" : liveTranscriptBuffer;
+                      String t = s.trim();
+                      if(t.length() == 0) return 0;
+
+                      int cut = safeWholeBufferFlushCut(s);
+                      if(cut <= 0 || cut > s.length()) cut = s.length();
+
+                      String b = s.substring(0, cut).trim();
+                      liveTranscriptBuffer = s.substring(cut).trim();
+                      liveBufferStartedAt = liveTranscriptBuffer.length() > 0 ? System.currentTimeMillis() : 0L;
+
+                      b = normalizeAndDeduplicateLiveBlock(b);
+                      if(b.length() == 0) return 0;
+
+                      boolean sourceGuessTop = sourceIsTopBySelectedPair(b, topActive);
+                      int id = addSourceOnlyBlock(sourceGuessTop, b);
+                      if(id < 0) return 0;
+
+                      firstSpeechBlockReleased = true;
+                      liveTranslateQueue.add(id);
+                      lastLiveBlockReleasedAt = System.currentTimeMillis();
+                      processNextLiveTranslation();
+                      return 1;
+                  } catch(Exception ignored) {
+                      return 0;
+                  }
               }
 
               boolean isAlreadyReleasedTranscript(String transcript) {
@@ -2372,7 +2407,7 @@ jobs:
                   String t = s.trim();
                   if(t.length() == 0) return -1;
 
-                  // V296: egyszerű blokkhatár-döntés.
+                  // V297: egyszerű blokkhatár-döntés.
                   // Ha van kész mondatvég, azonnal zár.
                   // Ha nincs, 2 mp folyamatos puffer után szóhatáron zár.
                   // Nincs karakter-, vessző-, szótár- vagy többágú monológlogika.
@@ -4895,14 +4930,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V296.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V296.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V297.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V297.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V296
+          name: V297
           path: |
             artifact/*.apk
             artifact/*.aab
