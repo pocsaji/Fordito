@@ -1,4 +1,4 @@
-name: Build Android APK V308
+name: Build Android APK V310
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 308; versionName = "30.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 310; versionName = "31.0" }
 
               signingConfigs {
                   create("release") {
@@ -86,7 +86,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V308" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V310" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -231,7 +231,7 @@ jobs:
               // 8 s folyamatos beszédnél vágunk blokkot akkor is, ha nincs csend.
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
               static final int MAX_LIVE_SILENCE_MS = 1200;
-              // V308: egyszerű folyamatos tolmácslogika.
+              // V310: egyszerű folyamatos tolmácslogika.
               // Nem karaktert, vesszőt vagy szótárat számolunk: legfeljebb 2 mp beszédpuffer után
               // szóhatáron kiadjuk a kész elejét, a felismerő/fordító végzi a nyelvi munkát.
               static final int MAX_CONTINUOUS_LIVE_BLOCK_MS = 2000;
@@ -531,7 +531,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V308");
+                  TextView title = label("Fordito_V310");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1110,7 +1110,7 @@ jobs:
                           input.put("noise_reduction", nr);
                       }
 
-                      // V308: STT átállítva gpt-4o-transcribe modellre.
+                      // V310: STT átállítva gpt-4o-transcribe modellre.
                       // A teljes lánc változatlan marad: mikrofon -> Realtime input audio -> transcript -> gpt-realtime-2 fordítás.
                       // Nem állítunk fix language mezőt, mert ugyanabban a munkamenetben TOP és BOTTOM nyelv is megszólalhat.
                       // A 4o-transcribe támogat promptot, ezért a kiválasztott nyelvpárt és a szó szerinti STT-fegyelmet itt is megadjuk.
@@ -1511,7 +1511,7 @@ jobs:
                   ws.send(evt.toString());
                   audioCommitWindowBytes += chunk.length;
 
-                  // V308: valódi audio-oldali 2 mp-es határ.
+                  // V310: valódi audio-oldali 2 mp-es határ.
                   // A Realtime bemeneti puffert commitoljuk, nem a később érkező transcriptet próbáljuk feldarabolni.
                   if(now - audioCommitWindowStartedAtMs >= AUDIO_COMMIT_WINDOW_MS) {
                       commitCurrentAudioWindow();
@@ -1837,7 +1837,7 @@ jobs:
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
                           if(msg.contains("response in progress")) {
                               responseInProgress = true;
-                              // V308: ez nem felhasználói hiba, hanem túl gyors blokkérkezés.
+                              // V310: ez nem felhasználói hiba, hanem túl gyors blokkérkezés.
                               // A blokk nem veszhet el és nem kell Toasttal zajongani: vissza a sor elejére,
                               // majd a következő response.done indítja újra a fordítást.
                               if(liveTranslateMode && pendingLiveBlockId >= 0) {
@@ -1872,7 +1872,7 @@ jobs:
               void manualTranslate() {
                   if(uiLockedForLive || finalizingStop) return;
 
-                  // V308: a FORDÍT gomb külön üzemmód.
+                  // V310: a FORDÍT gomb külön üzemmód.
                   // Először lezárjuk a mikrofont/live sort, utána az aktív ablak teljes szövegét
                   // egyetlen nagy, kontextusos kézi fordításként kezeljük.
                   if(streaming) {
@@ -1962,7 +1962,7 @@ jobs:
                   if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
                   liveTranscriptBuffer += delta;
 
-                  // V308: a részleges STT delta még javulhat a completed eseményig.
+                  // V310: a részleges STT delta még javulhat a completed eseményig.
                   // Normál esetben nem adjuk ki korán, mert ezzel elveszne a modell későbbi
                   // önjavítása és a teljes mondat kontextusa. Csak a 8 s abszolút blokkmaximum
                   // kényszeríthet ki delta közbeni vágást.
@@ -1970,7 +1970,7 @@ jobs:
                   long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
                   long age = started > 0L ? now - started : 0L;
                   if(age >= MAX_CONTINUOUS_LIVE_BLOCK_MS) {
-                      // V308: valódi 2 mp-es folyamatos blokkkiadás.
+                      // V310: valódi 2 mp-es folyamatos blokkkiadás.
                       // Nem a régi mondat/vessző/karakter okoskodó útvonalat hívjuk,
                       // hanem szóhatáron levágjuk a puffer kiadható elejét és azonnal fordítási sorba tesszük.
                       released = forceFlushTimedLivePrefix();
@@ -2003,7 +2003,7 @@ jobs:
                   if(transcript != null && transcript.trim().length() > 0) {
                       completedIsOnlyAlreadyReleased = isAlreadyReleasedTranscript(transcript);
 
-                      // V308: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
+                      // V310: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
                       // a completed szöveg felülírja a részleges delta puffert. Ez őrzi meg
                       // a transcribe modell végső javítását és a teljes mondat kontextusát.
                       if(!completedIsOnlyAlreadyReleased && !liveDeltaReleasedSinceLastCompleted) {
@@ -2460,7 +2460,7 @@ jobs:
                   String t = s.trim();
                   if(t.length() == 0) return -1;
 
-                  // V308: egyszerű blokkhatár-döntés.
+                  // V310: egyszerű blokkhatár-döntés.
                   // Ha van kész mondatvég, azonnal zár.
                   // Ha nincs, 2 mp folyamatos puffer után szóhatáron zár.
                   // Nincs karakter-, vessző-, szótár- vagy többágú monológlogika.
@@ -3288,8 +3288,8 @@ jobs:
                       Button copy = btn("MÁSOL\nRENDEZ");
                       paste.setSingleLine(false);
                       copy.setSingleLine(false);
-                      paste.setTextSize(12);
-                      copy.setTextSize(12);
+                      paste.setTextSize(10);
+                      copy.setTextSize(10);
                       paste.setTextColor(Color.WHITE);
                       copy.setTextColor(Color.WHITE);
                       paste.setBackgroundColor(Color.rgb(30,120,75));
@@ -3339,6 +3339,7 @@ jobs:
                               floatingLongPressHandler.removeCallbacks(copyLong);
                               floatingButtonX=lp.x; floatingButtonY=lp.y; save();
                               if(!moved[0] && !copyLongDone[0]) {
+                                  try { ((View)v).performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP); } catch(Exception ignored) {}
                                   if(isCopy) copyActiveBoxToClipboard();
                                   else pasteClipboardToLanguageBox();
                               }
@@ -3393,18 +3394,59 @@ jobs:
               }
 
               void pasteClipboardToLanguageBox() {
+                  // V310: Android háttérben futó overlayből sok készüléken nem engedi a vágólap olvasását.
+                  // Ezért előbb előtérbe hozzuk a Forditót, és csak utána, kis késleltetéssel olvassuk ki.
+                  bringAppToFrontForClipboardRead();
+                  new Handler().postDelayed(() -> pasteClipboardToLanguageBoxAfterForeground(), 260);
+              }
+
+              void pasteClipboardToLanguageBoxAfterForeground() {
                   String s = getClipboardText().trim();
-                  if(s.length() == 0) { Toast.makeText(this, "A vágólap üres.", Toast.LENGTH_SHORT).show(); return; }
-                  boolean sourceTop = sourceIsTopBySelectedPair(s, topActive);
-                  EditText box = sourceTop ? topBox : bottomBox;
+                  if(s.length() == 0) { Toast.makeText(this, "A vágólap üres vagy Android háttérből nem adta át.", Toast.LENGTH_SHORT).show(); return; }
+                  boolean sourceTop = clipboardTextBelongsToTopBox(s);
+
                   programmaticChange = true;
-                  String old = box.getText().toString();
-                  box.setText(old.trim().length() == 0 ? s : old + "\n" + s);
+                  topBox.setText("");
+                  bottomBox.setText("");
+                  EditText box = sourceTop ? topBox : bottomBox;
+                  box.setText(s);
                   box.setSelection(box.getText().length());
                   programmaticChange = false;
+
+                  topManualStart = -1;
+                  bottomManualStart = -1;
+                  textBlocks.clear();
                   selectActiveBox(sourceTop);
-                  bringAppToFrontForClipboardRead();
                   Toast.makeText(this, sourceTop ? "Vágólap → felső ablak." : "Vágólap → alsó ablak.", Toast.LENGTH_SHORT).show();
+              }
+
+              boolean clipboardTextBelongsToTopBox(String s) {
+                  String lang = guessClipboardSelectedLanguage(s);
+                  if(lang.length() > 0) {
+                      if(lang.equals(apiCode(topLang))) return true;
+                      if(lang.equals(apiCode(bottomLang))) return false;
+                  }
+                  return topActive;
+              }
+
+              String guessClipboardSelectedLanguage(String s) {
+                  String t = s == null ? "" : s.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
+                  if(t.length() == 0) return "";
+                  int hu = 0;
+                  int fr = 0;
+
+                  if(t.matches(".*[áéíóöőúüű].*")) hu += 5;
+                  if(t.matches(".*[àâæçéèêëîïôœùûüÿ].*")) fr += 4;
+
+                  String padded = " " + t + " ";
+                  String[] huWords = {" hogy "," nem "," igen "," vagy "," és "," egy "," ezt "," azt "," akkor "," amikor "," mert "," szeretnék "," kell "," kérem "," köszönöm "," délután "," órakor "," lerakó "," rakodás "};
+                  String[] frWords = {" je "," tu "," vous "," nous "," il "," elle "," le "," la "," les "," des "," un "," une "," et "," est "," pas "," pour "," avec "," dans "," alors "," merci "," bonjour "," monsieur "," aujourd'hui "};
+                  for(String w: huWords) if(padded.contains(w)) hu += 2;
+                  for(String w: frWords) if(padded.contains(w)) fr += 2;
+
+                  if(hu >= fr + 2) return "hu";
+                  if(fr >= hu + 2) return "fr";
+                  return "";
               }
 
               String activeBoxText() {
@@ -3503,7 +3545,10 @@ jobs:
                           }
                           if(ev.getAction()==android.view.MotionEvent.ACTION_UP){
                               interpreterFloatingX=lp.x;interpreterFloatingY=lp.y;save();
-                              if(!moved[0])toggleInterpreterFloatingRun();
+                              if(!moved[0]) {
+                                  try { b.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP); } catch(Exception ignored) {}
+                                  toggleInterpreterFloatingRun();
+                              }
                               return true;
                           }
                           return true;
@@ -3544,12 +3589,12 @@ jobs:
               }
 
               void stopClipboardSystemSpeech(boolean toast) {
-                  // V308: a régi háromablakos/vágólapos diktálási ág ki van szerelve.
+                  // V310: a régi háromablakos/vágólapos diktálási ág ki van szerelve.
                   // Ez csak kompatibilitási lezáró csonk a régi lifecycle/menu hivatkozásokhoz.
               }
 
               void applyClipboardTranslation(String out) {
-                  // V308: a régi háromablakos vágólapfordító ág ki van szerelve.
+                  // V310: a régi háromablakos vágólapfordító ág ki van szerelve.
                   // Késve érkező régi válasz nem kerülhet ablakba vagy vágólapra.
                   clipboardResponseMode = false;
               }
@@ -4309,14 +4354,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V308.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V308.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V310.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V310.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V308
+          name: V310
           path: |
             artifact/*.apk
             artifact/*.aab
