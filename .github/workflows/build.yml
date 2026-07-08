@@ -1,4 +1,4 @@
-name: Build Android APK V306
+name: Build Android APK V307
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 306; versionName = "30.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 307; versionName = "30.7" }
 
               signingConfigs {
                   create("release") {
@@ -86,7 +86,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V306" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V307" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -231,7 +231,7 @@ jobs:
               // 8 s folyamatos beszédnél vágunk blokkot akkor is, ha nincs csend.
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
               static final int MAX_LIVE_SILENCE_MS = 1200;
-              // V306: egyszerű folyamatos tolmácslogika.
+              // V307: egyszerű folyamatos tolmácslogika.
               // Nem karaktert, vesszőt vagy szótárat számolunk: legfeljebb 2 mp beszédpuffer után
               // szóhatáron kiadjuk a kész elejét, a felismerő/fordító végzi a nyelvi munkát.
               static final int MAX_CONTINUOUS_LIVE_BLOCK_MS = 2000;
@@ -531,7 +531,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V306");
+                  TextView title = label("Fordito_V307");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1110,7 +1110,7 @@ jobs:
                           input.put("noise_reduction", nr);
                       }
 
-                      // V306: STT átállítva gpt-4o-transcribe modellre.
+                      // V307: STT átállítva gpt-4o-transcribe modellre.
                       // A teljes lánc változatlan marad: mikrofon -> Realtime input audio -> transcript -> gpt-realtime-2 fordítás.
                       // Nem állítunk fix language mezőt, mert ugyanabban a munkamenetben TOP és BOTTOM nyelv is megszólalhat.
                       // A 4o-transcribe támogat promptot, ezért a kiválasztott nyelvpárt és a szó szerinti STT-fegyelmet itt is megadjuk.
@@ -1511,7 +1511,7 @@ jobs:
                   ws.send(evt.toString());
                   audioCommitWindowBytes += chunk.length;
 
-                  // V306: valódi audio-oldali 2 mp-es határ.
+                  // V307: valódi audio-oldali 2 mp-es határ.
                   // A Realtime bemeneti puffert commitoljuk, nem a később érkező transcriptet próbáljuk feldarabolni.
                   if(now - audioCommitWindowStartedAtMs >= AUDIO_COMMIT_WINDOW_MS) {
                       commitCurrentAudioWindow();
@@ -1837,7 +1837,7 @@ jobs:
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
                           if(msg.contains("response in progress")) {
                               responseInProgress = true;
-                              // V306: ez nem felhasználói hiba, hanem túl gyors blokkérkezés.
+                              // V307: ez nem felhasználói hiba, hanem túl gyors blokkérkezés.
                               // A blokk nem veszhet el és nem kell Toasttal zajongani: vissza a sor elejére,
                               // majd a következő response.done indítja újra a fordítást.
                               if(liveTranslateMode && pendingLiveBlockId >= 0) {
@@ -1872,7 +1872,7 @@ jobs:
               void manualTranslate() {
                   if(uiLockedForLive || finalizingStop) return;
 
-                  // V306: a FORDÍT gomb külön üzemmód.
+                  // V307: a FORDÍT gomb külön üzemmód.
                   // Először lezárjuk a mikrofont/live sort, utána az aktív ablak teljes szövegét
                   // egyetlen nagy, kontextusos kézi fordításként kezeljük.
                   if(streaming) {
@@ -1962,7 +1962,7 @@ jobs:
                   if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
                   liveTranscriptBuffer += delta;
 
-                  // V306: a részleges STT delta még javulhat a completed eseményig.
+                  // V307: a részleges STT delta még javulhat a completed eseményig.
                   // Normál esetben nem adjuk ki korán, mert ezzel elveszne a modell későbbi
                   // önjavítása és a teljes mondat kontextusa. Csak a 8 s abszolút blokkmaximum
                   // kényszeríthet ki delta közbeni vágást.
@@ -1970,7 +1970,7 @@ jobs:
                   long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
                   long age = started > 0L ? now - started : 0L;
                   if(age >= MAX_CONTINUOUS_LIVE_BLOCK_MS) {
-                      // V306: valódi 2 mp-es folyamatos blokkkiadás.
+                      // V307: valódi 2 mp-es folyamatos blokkkiadás.
                       // Nem a régi mondat/vessző/karakter okoskodó útvonalat hívjuk,
                       // hanem szóhatáron levágjuk a puffer kiadható elejét és azonnal fordítási sorba tesszük.
                       released = forceFlushTimedLivePrefix();
@@ -2003,7 +2003,7 @@ jobs:
                   if(transcript != null && transcript.trim().length() > 0) {
                       completedIsOnlyAlreadyReleased = isAlreadyReleasedTranscript(transcript);
 
-                      // V306: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
+                      // V307: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
                       // a completed szöveg felülírja a részleges delta puffert. Ez őrzi meg
                       // a transcribe modell végső javítását és a teljes mondat kontextusát.
                       if(!completedIsOnlyAlreadyReleased && !liveDeltaReleasedSinceLastCompleted) {
@@ -2460,7 +2460,7 @@ jobs:
                   String t = s.trim();
                   if(t.length() == 0) return -1;
 
-                  // V306: egyszerű blokkhatár-döntés.
+                  // V307: egyszerű blokkhatár-döntés.
                   // Ha van kész mondatvég, azonnal zár.
                   // Ha nincs, 2 mp folyamatos puffer után szóhatáron zár.
                   // Nincs karakter-, vessző-, szótár- vagy többágú monológlogika.
@@ -3284,58 +3284,50 @@ jobs:
                       LinearLayout group = new LinearLayout(this);
                       group.setOrientation(LinearLayout.HORIZONTAL);
 
-                      Button paste = btn("⇩");
-                      Button copy = btn("⇧");
-                      paste.setTextSize(24);
-                      copy.setTextSize(24);
+                      Button paste = btn("BE\nILLESZT");
+                      Button copy = btn("MÁSOL\n/Rendez");
+                      paste.setSingleLine(false);
+                      copy.setSingleLine(false);
+                      paste.setTextSize(13);
+                      copy.setTextSize(13);
                       paste.setTextColor(Color.WHITE);
                       copy.setTextColor(Color.WHITE);
                       paste.setBackgroundColor(Color.rgb(30,120,75));
                       copy.setBackgroundColor(Color.rgb(45,95,150));
-                      group.addView(paste, new LinearLayout.LayoutParams(92,92));
-                      group.addView(copy, new LinearLayout.LayoutParams(92,92));
+                      group.addView(paste, new LinearLayout.LayoutParams(150,96));
+                      group.addView(copy, new LinearLayout.LayoutParams(150,96));
 
-                      final android.view.WindowManager.LayoutParams lp = floatingParams(184, 92, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+                      final android.view.WindowManager.LayoutParams lp = floatingParams(300, 96, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
                       lp.x = floatingButtonX;
                       lp.y = floatingButtonY;
 
-                      paste.setOnClickListener(v -> pasteClipboardToLanguageBox());
-
-                      final boolean[] copyLongDone = new boolean[1];
-                      final Runnable copyLong = () -> {
-                          copyLongDone[0] = true;
-                          try { copy.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); } catch(Exception ignored) {}
-                          cleanActiveBoxToClipboard();
-                      };
-                      copy.setOnTouchListener((v, ev) -> {
-                          if(ev.getAction() == android.view.MotionEvent.ACTION_DOWN) {
-                              copyLongDone[0] = false;
-                              floatingLongPressHandler.postDelayed(copyLong, 500);
-                              return true;
-                          }
-                          if(ev.getAction() == android.view.MotionEvent.ACTION_UP) {
-                              floatingLongPressHandler.removeCallbacks(copyLong);
-                              if(!copyLongDone[0]) copyActiveBoxToClipboard();
-                              return true;
-                          }
-                          if(ev.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
-                              floatingLongPressHandler.removeCallbacks(copyLong);
-                              return true;
-                          }
-                          return true;
-                      });
-
                       final int[] down = new int[4];
                       final boolean[] moved = new boolean[1];
-                      group.setOnTouchListener((v, ev) -> {
+                      final boolean[] copyLongDone = new boolean[1];
+                      final Runnable copyLong = () -> {
+                          if(!moved[0]) {
+                              copyLongDone[0] = true;
+                              try { copy.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); } catch(Exception ignored) {}
+                              cleanActiveBoxToClipboard();
+                          }
+                      };
+
+                      View.OnTouchListener floatingGroupTouch = (v, ev) -> {
+                          boolean isCopy = (v == copy);
                           if(ev.getAction() == android.view.MotionEvent.ACTION_DOWN) {
                               down[0]=lp.x; down[1]=lp.y; down[2]=(int)ev.getRawX(); down[3]=(int)ev.getRawY();
                               moved[0]=false;
+                              copyLongDone[0]=false;
+                              floatingLongPressHandler.removeCallbacks(copyLong);
+                              if(isCopy) floatingLongPressHandler.postDelayed(copyLong, 600);
                               return true;
                           }
                           if(ev.getAction() == android.view.MotionEvent.ACTION_MOVE) {
                               int dx=(int)ev.getRawX()-down[2], dy=(int)ev.getRawY()-down[3];
-                              if(Math.abs(dx)>24 || Math.abs(dy)>24) moved[0]=true;
+                              if(Math.abs(dx)>20 || Math.abs(dy)>20) {
+                                  moved[0]=true;
+                                  floatingLongPressHandler.removeCallbacks(copyLong);
+                              }
                               if(moved[0]) {
                                   lp.x=Math.max(0,down[0]-dx);
                                   lp.y=down[1]+dy;
@@ -3344,10 +3336,24 @@ jobs:
                               return true;
                           }
                           if(ev.getAction() == android.view.MotionEvent.ACTION_UP) {
-                              floatingButtonX=lp.x; floatingButtonY=lp.y; save(); return true;
+                              floatingLongPressHandler.removeCallbacks(copyLong);
+                              floatingButtonX=lp.x; floatingButtonY=lp.y; save();
+                              if(!moved[0] && !copyLongDone[0]) {
+                                  if(isCopy) copyActiveBoxToClipboard();
+                                  else pasteClipboardToLanguageBox();
+                              }
+                              return true;
+                          }
+                          if(ev.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
+                              floatingLongPressHandler.removeCallbacks(copyLong);
+                              return true;
                           }
                           return true;
-                      });
+                      };
+
+                      group.setOnTouchListener(floatingGroupTouch);
+                      paste.setOnTouchListener(floatingGroupTouch);
+                      copy.setOnTouchListener(floatingGroupTouch);
 
                       floatingButtonView = group;
                       floatingWindowManager.addView(floatingButtonView, lp);
@@ -3515,7 +3521,8 @@ jobs:
                       b.setText("🔊");
                       b.setBackgroundColor(Color.rgb(150,45,45));
                   } else if("headset".equals(interpreterAudioMode)) {
-                      b.setText("ᛒ");
+                      b.setText("BT");
+                      b.setTextSize(18);
                       b.setBackgroundColor(Color.rgb(35,105,175));
                   } else {
                       b.setText("🔊");
@@ -3526,7 +3533,9 @@ jobs:
               void toggleInterpreterFloatingRun() {
                   if(!interpreterMode) return;
                   if(streaming) stop(); else start(true);
+                  refreshInterpreterFloatingButton();
                   new Handler().postDelayed(() -> refreshInterpreterFloatingButton(),250);
+                  new Handler().postDelayed(() -> refreshInterpreterFloatingButton(),900);
               }
 
               void hideInterpreterFloatingButton() {
@@ -3535,12 +3544,12 @@ jobs:
               }
 
               void stopClipboardSystemSpeech(boolean toast) {
-                  // V306: a régi háromablakos/vágólapos diktálási ág ki van szerelve.
+                  // V307: a régi háromablakos/vágólapos diktálási ág ki van szerelve.
                   // Ez csak kompatibilitási lezáró csonk a régi lifecycle/menu hivatkozásokhoz.
               }
 
               void applyClipboardTranslation(String out) {
-                  // V306: a régi háromablakos vágólapfordító ág ki van szerelve.
+                  // V307: a régi háromablakos vágólapfordító ág ki van szerelve.
                   // Késve érkező régi válasz nem kerülhet ablakba vagy vágólapra.
                   clipboardResponseMode = false;
               }
@@ -4139,6 +4148,7 @@ jobs:
                   topLangBtn.setBackgroundColor(topActive ? Color.rgb(60,95,150) : Color.rgb(55,60,70));
                   bottomLangBtn.setBackgroundColor(!topActive ? Color.rgb(60,95,150) : Color.rgb(55,60,70));
                   styleUiState();
+                  refreshInterpreterFloatingButton();
               }
 
               String normSpeech(String s) {
@@ -4299,14 +4309,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V306.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V306.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V307.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V307.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V306
+          name: V307
           path: |
             artifact/*.apk
             artifact/*.aab
