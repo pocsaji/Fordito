@@ -1,4 +1,4 @@
-name: Build Android APK V292
+name: Build Android APK V293
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 292; versionName = "29.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 293; versionName = "29.3" }
 
               signingConfigs {
                   create("release") {
@@ -86,7 +86,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V292" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V293" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -231,12 +231,14 @@ jobs:
               // 8 s folyamatos beszédnél vágunk blokkot akkor is, ha nincs csend.
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
               static final int MAX_LIVE_SILENCE_MS = 1200;
-              static final int MAX_CONTINUOUS_LIVE_BLOCK_MS = 10000;
-              // V292: egyszerű, lépcsős monológ-vágás.
-              // 150 karakter után csak valódi mondatvégnél vágunk.
-              // 250 karakter után, ha nincs mondatvég, az utolsó vessző vagy szóköz a vészvágás.
+              static final int MAX_CONTINUOUS_LIVE_BLOCK_MS = 8000;
+              // V293: finom, lépcsős monológ-vágás rádiós / folyamatos beszédhez.
+              // 150 karakter után mondatvégnél vágunk.
+              // 180 karakter után a vessző is elfogadható részmondat-vég.
+              // 260 karakter végső szövegplafon, ahol a központi vágólogika szóhatárt is használhat.
               static final int SOFT_SENTENCE_CUT_START_CHARS = 150;
-              static final int HARD_TEXT_CUT_CHARS = 250;
+              static final int SOFT_COMMA_CUT_START_CHARS = 180;
+              static final int HARD_TEXT_CUT_CHARS = 260;
               volatile long lastVoiceChunkSentAtMs = 0L;
               volatile boolean trailingSilenceOpen = false;
               volatile boolean voiceSendActive = false;
@@ -528,7 +530,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V292");
+                  TextView title = label("Fordito_V293");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1107,7 +1109,7 @@ jobs:
                           input.put("noise_reduction", nr);
                       }
 
-                      // V292: STT átállítva gpt-4o-transcribe modellre.
+                      // V293: STT átállítva gpt-4o-transcribe modellre.
                       // A teljes lánc változatlan marad: mikrofon -> Realtime input audio -> transcript -> gpt-realtime-2 fordítás.
                       // Nem állítunk fix language mezőt, mert ugyanabban a munkamenetben TOP és BOTTOM nyelv is megszólalhat.
                       // A 4o-transcribe támogat promptot, ezért a kiválasztott nyelvpárt és a szó szerinti STT-fegyelmet itt is megadjuk.
@@ -1911,7 +1913,7 @@ jobs:
                   if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
                   liveTranscriptBuffer += delta;
 
-                  // V292: a részleges STT delta még javulhat a completed eseményig.
+                  // V293: a részleges STT delta még javulhat a completed eseményig.
                   // Normál esetben nem adjuk ki korán, mert ezzel elveszne a modell későbbi
                   // önjavítása és a teljes mondat kontextusa. Csak a 8 s abszolút blokkmaximum
                   // kényszeríthet ki delta közbeni vágást.
@@ -1949,7 +1951,7 @@ jobs:
                   if(transcript != null && transcript.trim().length() > 0) {
                       completedIsOnlyAlreadyReleased = isAlreadyReleasedTranscript(transcript);
 
-                      // V292: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
+                      // V293: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
                       // a completed szöveg felülírja a részleges delta puffert. Ez őrzi meg
                       // a transcribe modell végső javítását és a teljes mondat kontextusát.
                       if(!completedIsOnlyAlreadyReleased && !liveDeltaReleasedSinceLastCompleted) {
@@ -2046,14 +2048,18 @@ jobs:
               boolean shouldTryTextLengthCut(String s) {
                   if(s == null) return false;
                   String t = s.trim();
-                  if(t.length() < SOFT_SENTENCE_CUT_START_CHARS) return false;
+                  int len = t.length();
+                  if(len < SOFT_SENTENCE_CUT_START_CHARS) return false;
 
-                  // 150 karakter felett csak akkor kérünk vágást, ha már van valódi mondatvég.
+                  // 150 karakter felett valódi mondatvég már elég a kulturált záráshoz.
                   if(firstHardSentenceEnd(t) >= 0) return true;
 
-                  // 250 karakter a kemény szöveges plafon. Itt már a központi vágólogika
-                  // az utolsó biztonságos vesszőt/szóközt is használhatja.
-                  return t.length() >= HARD_TEXT_CUT_CHARS;
+                  // 180 karakter felett a vessző is elfogadható részmondat-vég:
+                  // ez a gyors rádiós / politikai monológokat finoman darabolja.
+                  if(len >= SOFT_COMMA_CUT_START_CHARS && t.lastIndexOf(',') >= 60) return true;
+
+                  // 260 karakter a végső szövegplafon. Itt már ne hízzon tovább a blokk.
+                  return len >= HARD_TEXT_CUT_CHARS;
               }
 
               boolean isAlreadyReleasedTranscript(String transcript) {
@@ -4911,14 +4917,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V292.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V292.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V293.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V293.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V292
+          name: V293
           path: |
             artifact/*.apk
             artifact/*.aab
