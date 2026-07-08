@@ -1,4 +1,4 @@
-name: Build Android APK V300
+name: Build Android APK V302
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 300; versionName = "30.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 302; versionName = "30.2" }
 
               signingConfigs {
                   create("release") {
@@ -86,7 +86,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V300" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V302" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -231,7 +231,7 @@ jobs:
               // 8 s folyamatos beszédnél vágunk blokkot akkor is, ha nincs csend.
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
               static final int MAX_LIVE_SILENCE_MS = 1200;
-              // V300: egyszerű folyamatos tolmácslogika.
+              // V302: egyszerű folyamatos tolmácslogika.
               // Nem karaktert, vesszőt vagy szótárat számolunk: legfeljebb 2 mp beszédpuffer után
               // szóhatáron kiadjuk a kész elejét, a felismerő/fordító végzi a nyelvi munkát.
               static final int MAX_CONTINUOUS_LIVE_BLOCK_MS = 2000;
@@ -527,7 +527,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V300");
+                  TextView title = label("Fordito_V302");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1106,7 +1106,7 @@ jobs:
                           input.put("noise_reduction", nr);
                       }
 
-                      // V300: STT átállítva gpt-4o-transcribe modellre.
+                      // V302: STT átállítva gpt-4o-transcribe modellre.
                       // A teljes lánc változatlan marad: mikrofon -> Realtime input audio -> transcript -> gpt-realtime-2 fordítás.
                       // Nem állítunk fix language mezőt, mert ugyanabban a munkamenetben TOP és BOTTOM nyelv is megszólalhat.
                       // A 4o-transcribe támogat promptot, ezért a kiválasztott nyelvpárt és a szó szerinti STT-fegyelmet itt is megadjuk.
@@ -1174,15 +1174,17 @@ jobs:
               String manualBlockInstructions() {
                   String top = code(topLang);
                   String bottom = code(bottomLang);
-                  return "Every word must be output in full. Never replace letters with asterisks or symbols. Never mask, redact, soften, sanitize, euphemize, hide, or partially replace any profanity, insult, slang, vulgar, sexual, rude, or emotional wording. If such wording appears in the input or is required by the translation, write the complete word exactly in the target language. " + "You are a translation engine for the FULL edited window text. " +
+                  return "Every word must be output in full. Never replace letters with asterisks or symbols. Never mask, redact, soften, sanitize, euphemize, hide, or partially replace any profanity, insult, slang, vulgar, sexual, rude, or emotional wording. If such wording appears in the input or is required by the translation, write the complete word exactly in the target language. " +
+                    "You are a full-window speech-transcript repair and translation engine. " +
                     "The user message contains SOURCE_LANG, TARGET_LANG and TEXT fields. " +
-                    "Translate the entire TEXT from SOURCE_LANG to TARGET_LANG. " +
-                    "The selected languages are " + top + " and " + bottom + ". " +
-                    "Return ONLY the translated full text. Preserve paragraphs and line breaks where reasonable. " +
-                    "Never include labels such as SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT or TRANSLATION. " +
+                    "First interpret the entire TEXT as one complete speech/monologue from the active window. Use the full text to understand who is speaking to whom, the situation, purpose, tone and relationship before translating. " +
+                    "Selected context profile: " + clipboardContextPrompt() +
+                    "Silently turn the rough transcript into clear, coherent source-language meaning before translation. You may gently repair obvious speech-recognition errors, broken word forms, misplaced fragments and awkward spoken structure when the intended meaning is clear from the whole text, the selected language pair " + top + "/" + bottom + ", and the selected context profile. " +
+                    "Then translate the complete repaired meaning from SOURCE_LANG to TARGET_LANG as one coherent, native-sounding text. Translate meaning and communicative intent, not word order. Use the natural conventions, idioms, forms of address, time expressions and sentence structure of the TARGET_LANG, as a native speaker would in the same situation. " +
+                    "Keep the original facts and intent unchanged. Preserve paragraphs and line breaks where reasonable. " +
+                    "Return ONLY the translated full text. Never include labels such as SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT or TRANSLATION. " +
                     "Every word must be output in full. Never replace letters with asterisks or symbols. Do not mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording. Preserve their meaning directly in the translation. Never output square-bracket category placeholders or asterisk-masked words. " +
-                    "No markdown, no quotes, no explanation. " +
-                    "Keep meaning, context and tone. " + modePrompt();
+                    "No markdown, no quotes, no explanation. Keep meaning, context, speaker relationship and tone. " + modePrompt();
               }
 
               String liveBlockInstructions(boolean ignoredSourceIsTop) {
@@ -1483,7 +1485,7 @@ jobs:
 
               long audioCommitWindowStartedAtMs = 0L;
               long audioCommitWindowBytes = 0L;
-              static final long AUDIO_COMMIT_WINDOW_MS = 4000L;
+              static final long AUDIO_COMMIT_WINDOW_MS = 5000L;
 
               void commitCurrentAudioWindow() throws Exception {
                   if(ws == null || audioCommitWindowBytes <= 0L) return;
@@ -1505,7 +1507,7 @@ jobs:
                   ws.send(evt.toString());
                   audioCommitWindowBytes += chunk.length;
 
-                  // V300: valódi audio-oldali 2 mp-es határ.
+                  // V302: valódi audio-oldali 2 mp-es határ.
                   // A Realtime bemeneti puffert commitoljuk, nem a később érkező transcriptet próbáljuk feldarabolni.
                   if(now - audioCommitWindowStartedAtMs >= AUDIO_COMMIT_WINDOW_MS) {
                       commitCurrentAudioWindow();
@@ -1831,7 +1833,7 @@ jobs:
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
                           if(msg.contains("response in progress")) {
                               responseInProgress = true;
-                              // V300: ez nem felhasználói hiba, hanem túl gyors blokkérkezés.
+                              // V302: ez nem felhasználói hiba, hanem túl gyors blokkérkezés.
                               // A blokk nem veszhet el és nem kell Toasttal zajongani: vissza a sor elejére,
                               // majd a következő response.done indítja újra a fordítást.
                               if(liveTranslateMode && pendingLiveBlockId >= 0) {
@@ -1865,6 +1867,14 @@ jobs:
 
               void manualTranslate() {
                   if(uiLockedForLive || finalizingStop) return;
+
+                  // V302: a FORDÍT gomb külön üzemmód.
+                  // Először lezárjuk a mikrofont/live sort, utána az aktív ablak teljes szövegét
+                  // egyetlen nagy, kontextusos kézi fordításként kezeljük.
+                  if(streaming) {
+                      stop();
+                  }
+
                   EditText source = manualTopSource ? topBox : bottomBox;
                   source.clearFocus();
                   try {
@@ -1948,7 +1958,7 @@ jobs:
                   if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
                   liveTranscriptBuffer += delta;
 
-                  // V300: a részleges STT delta még javulhat a completed eseményig.
+                  // V302: a részleges STT delta még javulhat a completed eseményig.
                   // Normál esetben nem adjuk ki korán, mert ezzel elveszne a modell későbbi
                   // önjavítása és a teljes mondat kontextusa. Csak a 8 s abszolút blokkmaximum
                   // kényszeríthet ki delta közbeni vágást.
@@ -1956,7 +1966,7 @@ jobs:
                   long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
                   long age = started > 0L ? now - started : 0L;
                   if(age >= MAX_CONTINUOUS_LIVE_BLOCK_MS) {
-                      // V300: valódi 2 mp-es folyamatos blokkkiadás.
+                      // V302: valódi 2 mp-es folyamatos blokkkiadás.
                       // Nem a régi mondat/vessző/karakter okoskodó útvonalat hívjuk,
                       // hanem szóhatáron levágjuk a puffer kiadható elejét és azonnal fordítási sorba tesszük.
                       released = forceFlushTimedLivePrefix();
@@ -1989,7 +1999,7 @@ jobs:
                   if(transcript != null && transcript.trim().length() > 0) {
                       completedIsOnlyAlreadyReleased = isAlreadyReleasedTranscript(transcript);
 
-                      // V300: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
+                      // V302: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
                       // a completed szöveg felülírja a részleges delta puffert. Ez őrzi meg
                       // a transcribe modell végső javítását és a teljes mondat kontextusát.
                       if(!completedIsOnlyAlreadyReleased && !liveDeltaReleasedSinceLastCompleted) {
@@ -2446,7 +2456,7 @@ jobs:
                   String t = s.trim();
                   if(t.length() == 0) return -1;
 
-                  // V300: egyszerű blokkhatár-döntés.
+                  // V302: egyszerű blokkhatár-döntés.
                   // Ha van kész mondatvég, azonnal zár.
                   // Ha nincs, 2 mp folyamatos puffer után szóhatáron zár.
                   // Nincs karakter-, vessző-, szótár- vagy többágú monológlogika.
@@ -4970,14 +4980,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V300.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V300.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V302.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V302.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V300
+          name: V302
           path: |
             artifact/*.apk
             artifact/*.aab
