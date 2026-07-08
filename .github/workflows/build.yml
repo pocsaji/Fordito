@@ -1489,35 +1489,13 @@ jobs:
                   return vadIsSpeechOn16k(downsample24kTo16kPcm16(data, len));
               }
 
-              long audioCommitWindowStartedAtMs = 0L;
-              long audioCommitWindowBytes = 0L;
-              static final long AUDIO_COMMIT_WINDOW_MS = 5000L;
-
-              void commitCurrentAudioWindow() throws Exception {
-                  if(ws == null || audioCommitWindowBytes <= 0L) return;
-                  JSONObject evt = new JSONObject();
-                  evt.put("type", "input_audio_buffer.commit");
-                  ws.send(evt.toString());
-                  audioCommitWindowStartedAtMs = 0L;
-                  audioCommitWindowBytes = 0L;
-              }
-
               void sendAudioChunk(byte[] chunk) throws Exception {
                   if(chunk == null || chunk.length == 0 || ws == null) return;
-                  long now = System.currentTimeMillis();
-                  if(audioCommitWindowStartedAtMs == 0L) audioCommitWindowStartedAtMs = now;
 
                   JSONObject evt = new JSONObject();
                   evt.put("type", "input_audio_buffer.append");
                   evt.put("audio", Base64.encodeToString(chunk, Base64.NO_WRAP));
                   ws.send(evt.toString());
-                  audioCommitWindowBytes += chunk.length;
-
-                  // V312: valódi audio-oldali 2 mp-es határ.
-                  // A Realtime bemeneti puffert commitoljuk, nem a később érkező transcriptet próbáljuk feldarabolni.
-                  if(now - audioCommitWindowStartedAtMs >= AUDIO_COMMIT_WINDOW_MS) {
-                      commitCurrentAudioWindow();
-                  }
               }
 
               byte[] prepareTrailingSilenceChunk(byte[] data, int len) {
@@ -1655,8 +1633,6 @@ jobs:
                       voiceSendActive = false;
                       trailingSilenceOpen = false;
                       lastVoiceChunkSentAtMs = 0L;
-                      audioCommitWindowStartedAtMs = 0L;
-                      audioCommitWindowBytes = 0L;
                       while(streaming && connected && ws != null && rec != null) {
                           int read = rec.read(buf, 0, buf.length);
                           if(read > 0) {
@@ -1738,8 +1714,6 @@ jobs:
                   connected = false;
                   ttsMuteUntilMs = 0L;
                   lastVoiceChunkSentAtMs = 0L;
-                  audioCommitWindowStartedAtMs = 0L;
-                  audioCommitWindowBytes = 0L;
                   trailingSilenceOpen = false;
                   voiceSendActive = false;
                   pendingAudioStartAfterSessionUpdate = false;
