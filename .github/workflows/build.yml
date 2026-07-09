@@ -1105,14 +1105,12 @@ jobs:
                   try {
                       JSONObject session = new JSONObject();
                       session.put("type", "realtime");
-                      session.put("model", model);
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
 
                       // V318: hanglánc-próba: Android hangforrás + Android effektek + OpenAI zajszűrés menüből állítható.
                       // Tapasztalat: kamionfülkében a túl szigorú helyi kapu levágta a beszéd elejét.
-                      // Ezért az alapérték érzékenyebb: a beszéd sértetlenül menjen át, az OpenAI VAD dönt.
-                      session.put("turn_detection", JSONObject.NULL);
+                      // Ezért az alapérték érzékenyebb: a beszéd sértetlenül menjen át, a helyi Silero VAD dönt.
 
                       // V318: STT átállítva gpt-4o-transcribe modellre.
                       // A teljes lánc változatlan marad: mikrofon -> Realtime input audio -> transcript -> gpt-realtime-2 fordítás.
@@ -1124,6 +1122,7 @@ jobs:
                       tr.put("prompt", liveTranscriptionPrompt());
                       JSONObject input = new JSONObject();
                       input.put("transcription", tr);
+                      input.put("turn_detection", JSONObject.NULL);
 
                       JSONObject audio = new JSONObject();
                       audio.put("input", input);
