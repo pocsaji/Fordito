@@ -1,4 +1,4 @@
-name: Build Android APK V332
+name: Build Android APK V335
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 332; versionName = "33.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 335; versionName = "33.5" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V318" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V335" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -265,7 +265,7 @@ jobs:
               static final int BLOCK_OVERLAP_MS = 2000;
               final Object speechAudioWindowLock = new Object();
               ByteArrayOutputStream speechAudioWindow = new ByteArrayOutputStream();
-              String vadEngineMode = "webrtc"; // only: webrtc / silero / pass
+              String vadEngineMode = "webrtc"; // only: webrtc / silero / silero_truck / pass
               Object speechVadInstance = null;
               String speechVadInstanceMode = "";
               ByteArrayOutputStream vadFrameBuffer = new ByteArrayOutputStream();
@@ -405,7 +405,8 @@ jobs:
           
               final String[][] vadEngineModes = {
                   {"WebRTC VAD", "webrtc"},
-                  {"Silero VAD", "silero"},
+                  {"Silero VAD – csendes", "silero"},
+                  {"Silero VAD – kamion", "silero_truck"},
                   {"Passz / nincs zajkapu", "pass"}
               };
           
@@ -446,7 +447,7 @@ jobs:
                   vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "xhigh");
                   vadEngineMode = sp.getString("vadEngineMode", "webrtc");
-                  if(!"webrtc".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"pass".equals(vadEngineMode)) vadEngineMode = "webrtc";
+                  if(!"webrtc".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode) && !"pass".equals(vadEngineMode)) vadEngineMode = "webrtc";
                   audioSourceMode = sp.getString("audioSourceMode", "recognition");
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   lastInterpreterAudioMode = sp.getString("lastInterpreterAudioMode", "headset");
@@ -520,7 +521,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V318");
+                  TextView title = label("Fordito_V335");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1122,13 +1123,18 @@ jobs:
                       b.getClass().getMethod("setSpeechDurationMs", int.class).invoke(b, 50);
                       return b.getClass().getMethod("build").invoke(b);
                   }
-                  if("silero".equals(mode)) {
+                  if("silero".equals(mode) || "silero_truck".equals(mode)) {
                       Class<?> vadClass = Class.forName("com.konovalov.vad.silero.Vad");
                       Object b = vadClass.getMethod("builder").invoke(null);
                       b.getClass().getMethod("setContext", android.content.Context.class).invoke(b, this);
                       b.getClass().getMethod("setSampleRate", Class.forName("com.konovalov.vad.silero.config.SampleRate")).invoke(b, enumConst("com.konovalov.vad.silero.config.SampleRate", "SAMPLE_RATE_16K"));
                       b.getClass().getMethod("setFrameSize", Class.forName("com.konovalov.vad.silero.config.FrameSize")).invoke(b, enumConst("com.konovalov.vad.silero.config.FrameSize", "FRAME_SIZE_512"));
-                      b.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.silero.config.Mode")).invoke(b, enumConst("com.konovalov.vad.silero.config.Mode", "NORMAL"));
+                      // 2026-07-09: Silero két profil.
+                      // silero: csendes/általános környezet, NORMAL mód.
+                      // silero_truck: kamion/zajos környezet, WebRTC-hez közelített, szigorúbb döntés.
+                      // Ha a kamionos Silero túl sok beszédet levág, itt kell visszavenni NORMAL-ra.
+                      String sileroModeName = "silero_truck".equals(mode) ? "AGGRESSIVE" : "NORMAL";
+                      b.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.silero.config.Mode")).invoke(b, enumConst("com.konovalov.vad.silero.config.Mode", sileroModeName));
                       b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, 300);
                       b.getClass().getMethod("setSpeechDurationMs", int.class).invoke(b, 50);
                       return b.getClass().getMethod("build").invoke(b);
@@ -1138,7 +1144,7 @@ jobs:
           
               boolean ensureExternalVadReady() {
                   if("pass".equals(vadEngineMode)) return true;
-                  if(!"webrtc".equals(vadEngineMode) && !"silero".equals(vadEngineMode)) return false;
+                  if(!"webrtc".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode)) return false;
                   if(speechVadInstance != null && vadEngineMode.equals(speechVadInstanceMode)) return true;
                   closeExternalVad();
                   try {
@@ -1171,7 +1177,7 @@ jobs:
               boolean vadIsSpeechOn16k(byte[] pcm16k) {
                   if(speechVadInstance == null || pcm16k == null || pcm16k.length == 0) return false;
                   try {
-                      int frameBytes = "silero".equals(vadEngineMode) ? 1024 : 640; // 16 kHz: Silero 512 samples, WebRTC 320 samples
+                      int frameBytes = (vadEngineMode != null && vadEngineMode.startsWith("silero")) ? 1024 : 640; // 16 kHz: Silero 512 samples, WebRTC 320 samples
                       vadFrameBuffer.write(pcm16k, 0, pcm16k.length);
                       byte[] all = vadFrameBuffer.toByteArray();
                       int pos = 0;
@@ -2326,12 +2332,15 @@ jobs:
                   b.sourceTop = sourceIsTop;
                   b.translatedOk = false;
                   b.pendingSourceText = original == null ? "" : original.trim();
-                  String visible = userVisibleSpeechTextOrEmpty(b.pendingSourceText);
-                  if(sourceIsTop) b.topText = visible;
-                  else b.bottomText = visible;
+                  // 2026-07-09: nyers STT ideiglenes kiírásának tiltása.
+                  // Előtte: a program nyelvi bizonyosság nélkül kirakta a nyers STT-t a becsült oldalra,
+                  // majd hibás/eltérő AI-oldaldöntésnél ott maradhatott rossz oldalon.
+                  // Most: amíg nincs AI válasz SOURCE_LANG / ORIGINAL / TRANSLATION adattal,
+                  // egyik ablakba sem írunk nyers ideiglenes szöveget. A szöveg pendingSourceText-ben vár.
+                  // Ha később mégis kell az azonnali nyers kijelzés, itt kell visszatenni a visible/topText/bottomText írást.
+                  b.topText = "";
+                  b.bottomText = "";
                   textBlocks.add(b);
-                  // Csak valódi felhasználói beszédet mutatunk azonnal. Ha a szöveg technikai/prompt/meta
-                  // gyanús, pendingSourceText-ben marad fordításra/újrapróbálásra, de nem szivárog a két ablakba.
                   renderBlocksKeepView();
                   return textBlocks.size() - 1;
               }
@@ -3879,7 +3888,8 @@ jobs:
 
 
               String vadEngineLabel() {
-                  if("silero".equals(vadEngineMode)) return "Silero VAD";
+                  if("silero_truck".equals(vadEngineMode)) return "Silero VAD – kamion";
+                  if("silero".equals(vadEngineMode)) return "Silero VAD – csendes";
                   if("pass".equals(vadEngineMode)) return "Passz / nincs zajkapu";
                   return "WebRTC VAD";
               }
@@ -4194,14 +4204,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V318.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V318.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V335.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V335.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V318
+          name: V335
           path: |
             artifact/*.apk
             artifact/*.aab
