@@ -1,4 +1,4 @@
-name: Build Android APK V337
+name: Build Android APK V338
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 337; versionName = "33.7" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 338; versionName = "33.8" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V337" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V338" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -521,7 +521,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V337");
+                  TextView title = label("Fordito_V338");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2295,7 +2295,7 @@ jobs:
                   String s = sourceLang.trim().toLowerCase(Locale.ROOT);
                   s = s.replace("source_lang:", "").replace("lang:", "").trim();
                   s = s.replace("_", "-");
-                  s = s.replaceAll("[^a-z\-áéíóöőúüűàâæçèéêëîïôœùûüÿñ]", " ").replaceAll("\s+", " ").trim();
+                  s = s.replaceAll("[^a-záéíóöőúüűàâæçèéêëîïôœùûüÿñ-]", " ").replaceAll("\\s+", " ").trim();
 
                   // 2026-07-09: szigorú két nyelvre zárás retry-lassítás nélkül.
                   // Nem engedünk harmadik nyelvet, de a kiválasztott két nyelv névváltozatait elfogadjuk.
@@ -4229,14 +4229,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V337.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V337.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V338.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V338.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V337
+          name: V338
           path: |
             artifact/*.apk
             artifact/*.aab
