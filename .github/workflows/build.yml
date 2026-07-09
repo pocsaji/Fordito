@@ -1,4 +1,4 @@
-name: Build Android APK V336
+name: Build Android APK V337
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 336; versionName = "33.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 337; versionName = "33.7" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V336" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V337" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -521,7 +521,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V336");
+                  TextView title = label("Fordito_V337");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2289,21 +2289,36 @@ jobs:
                   // A két nyelvre zárást a speechBlockInstructions/pairRules és a SOURCE_LANG feldolgozás végzi.
                   return false;
               }
-          
-              boolean isSelectedSourceLang(String sourceLang) {
-                  if(sourceLang == null) return false;
+
+              String normalizeAiSourceLangCode(String sourceLang) {
+                  if(sourceLang == null) return "";
                   String s = sourceLang.trim().toLowerCase(Locale.ROOT);
+                  s = s.replace("source_lang:", "").replace("lang:", "").trim();
+                  s = s.replace("_", "-");
+                  s = s.replaceAll("[^a-z\-áéíóöőúüűàâæçèéêëîïôœùûüÿñ]", " ").replaceAll("\s+", " ").trim();
+
+                  // 2026-07-09: szigorú két nyelvre zárás retry-lassítás nélkül.
+                  // Nem engedünk harmadik nyelvet, de a kiválasztott két nyelv névváltozatait elfogadjuk.
+                  // Példa: HU/HUN/HU-HU/Hungarian/magyar mind HU-ra normalizálódhat,
+                  // FR/FRA/FR-FR/French/français mind FR-re normalizálódhat.
+                  // Így nem fut felesleges második AI-kört csak címkeformátum miatt.
+                  if(s.equals("hu") || s.equals("hun") || s.equals("hu-hu") || s.equals("hungarian") || s.equals("magyar")) return "hu";
+                  if(s.equals("fr") || s.equals("fra") || s.equals("fre") || s.equals("fr-fr") || s.equals("french") || s.equals("francais") || s.equals("français")) return "fr";
+                  if(s.equals("de") || s.equals("deu") || s.equals("ger") || s.equals("de-de") || s.equals("german") || s.equals("német") || s.equals("nemet") || s.equals("deutsch")) return "de";
+                  if(s.equals("en") || s.equals("eng") || s.equals("en-us") || s.equals("en-gb") || s.equals("english") || s.equals("angol")) return "en";
+                  return "";
+              }
+
+              boolean isSelectedSourceLang(String sourceLang) {
+                  String normalized = normalizeAiSourceLangCode(sourceLang);
+                  if(normalized.length() == 0) return false;
                   String top = code(topLang).toLowerCase(Locale.ROOT);
                   String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
-                  return s.equals(top) || s.equals(bottom);
+                  return normalized.equals(top) || normalized.equals(bottom);
               }
-          
+
               boolean isUsableSpeechTriple(String[] trp) {
                   if(trp == null || trp.length < 3) return false;
-                  // 2026-07-09: nyelvi oldaldöntés szigorítása.
-                  // Korábban SOURCE_LANG hiányánál a program a becsült ideiglenes oldalra hagyatkozott,
-                  // ezért magyar eredeti ragadhatott a felső/FR ablakban. Most amíg nincs kiválasztott
-                  // nyelvpárba eső SOURCE_LANG, a blokk nem írható ki véglegesként egyik ablakba sem.
                   String source = trp[0] == null ? "" : trp[0].trim();
                   if(!isSelectedSourceLang(source)) return false;
                   String original = trp[1] == null ? "" : cleanTranscriptForSelectedPair(trp[1]).trim();
@@ -2314,14 +2329,14 @@ jobs:
                   if(no.length() >= 12 && no.equals(nt)) return false;
                   return true;
               }
-          
+
               boolean sourceIsTopFromAi(String sourceLang, boolean fallback) {
-                  if(sourceLang == null) return fallback;
-                  String s = sourceLang.trim().toUpperCase(Locale.ROOT);
-                  String top = code(topLang).toUpperCase(Locale.ROOT);
-                  String bottom = code(bottomLang).toUpperCase(Locale.ROOT);
-                  if(s.equals(top) || s.contains("SOURCE_LANG: " + top) || s.contains("LANG: " + top)) return true;
-                  if(s.equals(bottom) || s.contains("SOURCE_LANG: " + bottom) || s.contains("LANG: " + bottom)) return false;
+                  String normalized = normalizeAiSourceLangCode(sourceLang);
+                  if(normalized.length() == 0) return fallback;
+                  String top = code(topLang).toLowerCase(Locale.ROOT);
+                  String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
+                  if(normalized.equals(top)) return true;
+                  if(normalized.equals(bottom)) return false;
                   return fallback;
               }
           
@@ -4214,14 +4229,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V336.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V336.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V337.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V337.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V336
+          name: V337
           path: |
             artifact/*.apk
             artifact/*.aab
