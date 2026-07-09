@@ -1,4 +1,4 @@
-name: Build Android APK V335
+name: Build Android APK V336
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 335; versionName = "33.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 336; versionName = "33.6" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V335" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V336" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -521,7 +521,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V335");
+                  TextView title = label("Fordito_V336");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2300,8 +2300,12 @@ jobs:
           
               boolean isUsableSpeechTriple(String[] trp) {
                   if(trp == null || trp.length < 3) return false;
-                  // V318: SOURCE_LANG hiánya vagy pontatlan címkéje nem dobhatja el a fordítást.
-                  // A forrásoldal ilyenkor a meglévő blokk oldala marad.
+                  // 2026-07-09: nyelvi oldaldöntés szigorítása.
+                  // Korábban SOURCE_LANG hiányánál a program a becsült ideiglenes oldalra hagyatkozott,
+                  // ezért magyar eredeti ragadhatott a felső/FR ablakban. Most amíg nincs kiválasztott
+                  // nyelvpárba eső SOURCE_LANG, a blokk nem írható ki véglegesként egyik ablakba sem.
+                  String source = trp[0] == null ? "" : trp[0].trim();
+                  if(!isSelectedSourceLang(source)) return false;
                   String original = trp[1] == null ? "" : cleanTranscriptForSelectedPair(trp[1]).trim();
                   String translation = trp[2] == null ? "" : cleanTranscriptForSelectedPair(cleanOneBlockTranslation(trp[2])).trim();
                   if(original.length() == 0 || translation.length() == 0) return false;
@@ -2530,6 +2534,12 @@ jobs:
           
                       b.sourceTop = sourceIsTop;
                       b.pendingSourceText = "";
+                      // 2026-07-09: csak az aktuális blokk saját ideiglenes maradványát takarítjuk.
+                      // Nem nyúlunk más blokkokhoz és nem törlünk teljes ablakot. Előbb ürítjük ennek
+                      // a TextBlocknak mindkét oldalát, majd az AI által eldöntött SOURCE_LANG szerint
+                      // azonnal visszaírjuk az eredetit és a fordítást a helyes két oldalra.
+                      b.topText = "";
+                      b.bottomText = "";
                       if(sourceIsTop) {
                           b.topText = original;
                           b.bottomText = translation;
@@ -4204,14 +4214,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V335.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V335.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V336.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V336.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V335
+          name: V336
           path: |
             artifact/*.apk
             artifact/*.aab
