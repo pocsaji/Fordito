@@ -1,4 +1,4 @@
-name: Build Android APK V335
+name: Build Android APK V337
 
 on:
   workflow_dispatch:
@@ -11,7 +11,9 @@ jobs:
     steps:
       - name: Create Android project
         run: |
-          mkdir -p app/src/main/java/com/attila/forditokonzol app/src/main/res/values app/src/main/res/drawable
+          mkdir -p app/src/main/java/com/attila/forditokonzol
+          mkdir -p app/src/main/assets
+          curl -L --fail --retry 3 https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx -o app/src/main/assets/silero_vad.onnx app/src/main/res/values app/src/main/res/drawable
 
           cat > settings.gradle.kts <<'EOF'
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
@@ -38,7 +40,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 335; versionName = "33.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 337; versionName = "33.7" }
 
               signingConfigs {
                   create("release") {
@@ -60,7 +62,7 @@ jobs:
           dependencies {
               implementation("com.squareup.okhttp3:okhttp:4.12.0")
               implementation("org.json:json:20240303")
-              implementation("com.github.gkonovalov.android-vad:webrtc:2.0.6")
+              implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.2")
           }
           EOF
 
@@ -103,7 +105,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V335" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V337" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -198,6 +200,7 @@ jobs:
           import android.view.inputmethod.InputMethodManager;
           import android.widget.*;
           import org.json.*;
+          import ai.onnxruntime.*;
           import java.util.*;
           import java.util.concurrent.*;
           import java.io.*;
@@ -248,7 +251,7 @@ jobs:
               // 8 s folyamatos beszédnél vágunk blokkot akkor is, ha nincs csend.
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 40;
               static final int MAX_LIVE_SILENCE_MS = 1000;
-              // V335: KŐKEMÉNY 8 mp-es felső határ.
+              // V337: KŐKEMÉNY 8 mp-es felső határ.
               // 8 másodperc az 8 másodperc: nem completed-re, nem idle-ra, nem írásjelre vár.
               // Ha a puffer 8000 ms-os, kötelező vágás és azonnali fordítási sorba adás.
               static final int MAX_CONTINUOUS_LIVE_BLOCK_MS = 8000;
@@ -264,6 +267,20 @@ jobs:
               Object liveVadInstance = null;
               String liveVadInstanceMode = "";
               ByteArrayOutputStream vadFrameBuffer = new ByteArrayOutputStream();
+              OrtEnvironment sileroEnv;
+              OrtSession sileroSession;
+              float[][][] sileroState = new float[2][1][128];
+              final ByteArrayOutputStream sileroInput16k = new ByteArrayOutputStream();
+              final ByteArrayOutputStream sileroSegment24k = new ByteArrayOutputStream();
+              boolean sileroTriggered = false;
+              long sileroSpeechMs = 0L;
+              long sileroSilenceMs = 0L;
+              static final float SILERO_THRESHOLD = 0.50f;
+              static final float SILERO_NEG_THRESHOLD = 0.35f;
+              static final int SILERO_WINDOW_SAMPLES = 512;
+              static final int SILERO_MIN_SPEECH_MS = 250;
+              static final int SILERO_MIN_SILENCE_MS = 300;
+              static final int SILERO_MAX_SPEECH_MS = 30000;
               boolean mirrorBottomMode = false;
               boolean backgroundScreenAllowed = false;
               boolean floatingTranslatorEnabled = false;
@@ -294,7 +311,7 @@ jobs:
               boolean responseInProgress = false;
               long sessionStart = 0L;
               String pendingOutput = "";
-              // V335: egyetlen, audio-oldali szegmentáló modul.
+              // V337: egyetlen, audio-oldali szegmentáló modul.
               // A blokkhatárt a kliens dönti el még az STT előtt: 1 s csend VAGY 8 s hard maximum.
               volatile boolean speechSegmentOpen = false;
               volatile long speechSegmentStartedAtMs = 0L;
@@ -380,9 +397,7 @@ jobs:
                   {"Kamion – tartány","truck_tank"},
                   {"Logisztika / rakodás","logistics"},
                   {"Vám / határ","customs"},
-                  {"Orvos","medical"},
-                  {"Gyógyszertár","pharmacy"},
-                  {"Bank","bank"},
+                          {"Bank","bank"},
                   {"Hivatal","office"},
                   {"Rendőrség","police"},
                   {"Közösségi média / chat","social_media"},
@@ -445,7 +460,7 @@ jobs:
                   interpreterMode = false;
                   interpreterAudioMode = "off";
                   openAiNoiseMode = sp.getString("openAiNoiseMode", "off");
-                  applyV335StableDefaultsOnce();
+                  applyV337StableDefaultsOnce();
                   ui();
                   reqMic();
                   reqNotifications();
@@ -456,11 +471,11 @@ jobs:
               void load() {
                   apiKey = sp.getString("apiKey", "");
                   model = sp.getString("model", "gpt-realtime-2");
-                  // V335: ehhez a kétirányú FR/HU tolmács-logikához maradunk a standard /v1/realtime + gpt-realtime-2 útvonalon.
+                  // V337: ehhez a kétirányú FR/HU tolmács-logikához maradunk a standard /v1/realtime + gpt-realtime-2 útvonalon.
                   // A gpt-realtime-translate külön /v1/realtime/translations végpontot és egyirányú target output nyelvet várna,
                   // ezért itt nem engedjük visszatölteni régi mentésből sem.
                   if(!"gpt-realtime-2".equals(model)) model = "gpt-realtime-2";
-                  profile = sp.getString("profile", "general");
+                  profile = "general";
                   soundProfile = sp.getString("soundProfile", "general");
                   mode = sp.getString("mode", "natural");
                   vadMode = sp.getString("vadMode", "medium");
@@ -491,8 +506,8 @@ jobs:
                   applyInputProfileValues();
               }
 
-              void applyV335StableDefaultsOnce() {
-                  // V335: telepítés/frissítés után egyszer visszaállítjuk az élő hanglánc ajánlott alapját.
+              void applyV337StableDefaultsOnce() {
+                  // V337: telepítés/frissítés után egyszer visszaállítjuk az élő hanglánc ajánlott alapját.
                   // API kulcsot, kiválasztott nyelvpárt és korábbi beszélgetést nem törlünk.
                   int last = sp.getInt("stableDefaultsVersion", 0);
                   if(last < 282) {
@@ -545,7 +560,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V335");
+                  TextView title = label("Fordito_V337");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -579,7 +594,7 @@ jobs:
                   controls.addView(menuBtn, new LinearLayout.LayoutParams(0,85,1));
                   root.addView(controls);
 
-                  // V335: sima kattintás / fókuszváltás ne állítsa le a mikrofont.
+                  // V337: sima kattintás / fókuszváltás ne állítsa le a mikrofont.
                   // Az aktív oldalt továbbra is átállítjuk, de live munkát nem törlünk.
                   topBox.setOnClickListener(v -> selectActiveBox(true));
                   bottomBox.setOnClickListener(v -> selectActiveBox(false));
@@ -703,7 +718,7 @@ jobs:
                       }
                       public void afterTextChanged(Editable e) {
                           if(programmaticChange) return;
-                                  // V335: nincs kézi blokkállapot.
+                                  // V337: nincs kézi blokkállapot.
                           // Gépelés közben nem bontjuk újra a blokkokat.
                           // FORDÍT gombnál a teljes aktív ablak fordul újra a másik ablakba.
                           updateButtons();
@@ -723,7 +738,7 @@ jobs:
                   manualTopSource = top;
                   topActive = top;
 
-                  // V335: kattintás, fókusz és gépelés miatt nem állítjuk le a mikrofont.
+                  // V337: kattintás, fókusz és gépelés miatt nem állítjuk le a mikrofont.
                   // Kézi FORDÍT gombnál külön útvonal dolgozik, ezért nem kell itt élő
                   // mikrofon-stop. Csak a régi kézi válasz maradékát takarítjuk, ha volt.
                   if(!streaming) {
@@ -835,7 +850,7 @@ jobs:
               }
 
               void renderBlocksKeepView() {
-                  // V335: élő fordítás alatt ne őrizze meg a régi scroll pozíciót,
+                  // V337: élő fordítás alatt ne őrizze meg a régi scroll pozíciót,
                   // mert ettől nem megy le az ablak az új sorokra.
                   // Kézi/készenléti módban marad a régi nézetmegőrzés.
                   renderBlocks(!(streaming || uiLockedForLive || finalizingStop));
@@ -1098,7 +1113,7 @@ jobs:
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
 
-                      // V335: hanglánc-próba: Android hangforrás + Android effektek + OpenAI zajszűrés menüből állítható.
+                      // V337: hanglánc-próba: Android hangforrás + Android effektek + OpenAI zajszűrés menüből állítható.
                       // Tapasztalat: kamionfülkében a túl szigorú helyi kapu levágta a beszéd elejét.
                       // Ezért az alapérték érzékenyebb: a beszéd sértetlenül menjen át, az OpenAI VAD dönt.
                       JSONObject input = new JSONObject();
@@ -1106,11 +1121,11 @@ jobs:
                       format.put("type", "audio/pcm");
                       format.put("rate", 24000);
                       input.put("format", format);
-                      // V335: nincs szerveres turn-detection. A kliens audio-oldalon commitol.
+                      // V337: nincs szerveres turn-detection. A kliens audio-oldalon commitol.
                       // Így sem delta, sem completed, sem API-VAD nem hosszabbíthatja a blokkot.
                       input.put("turn_detection", JSONObject.NULL);
 
-                      // V335: OpenAI Realtime oldali zajszűrés menüből.
+                      // V337: OpenAI Realtime oldali zajszűrés menüből.
                       // near_field: telefon/headset közeli beszéd. far_field: távolabb lévő mikrofon.
                       if(!"off".equals(openAiNoiseMode)) {
                           JSONObject nr = new JSONObject();
@@ -1118,7 +1133,7 @@ jobs:
                           input.put("noise_reduction", nr);
                       }
 
-                      // V335: STT átállítva gpt-4o-transcribe modellre.
+                      // V337: STT átállítva gpt-4o-transcribe modellre.
                       // A teljes lánc változatlan marad: mikrofon -> Realtime input audio -> transcript -> gpt-realtime-2 fordítás.
                       // Nem állítunk fix language mezőt, mert ugyanabban a munkamenetben TOP és BOTTOM nyelv is megszólalhat.
                       // A 4o-transcribe támogat promptot, ezért a kiválasztott nyelvpárt és a szó szerinti STT-fegyelmet itt is megadjuk.
@@ -1272,13 +1287,13 @@ jobs:
 
               double vadThreshold() {
                   if("high".equals(vadMode)) return 0.50;     // gyors/érzékeny: halk beszédnél könnyebben indul
-                  if("medium".equals(vadMode)) return 0.58;   // V335 alap: kamionban is ne kelljen ordítani
+                  if("medium".equals(vadMode)) return 0.58;   // V337 alap: kamionban is ne kelljen ordítani
                   if("auto".equals(vadMode)) return 0.58;
                   return 0.64;                                // várakozó: hosszabb, óvatosabb blokkzárás
               }
 
               int vadSilenceMs() {
-                  // V335: a szerver VAD mondatzárása sehol nem várhat tovább 500 ms-nál,
+                  // V337: a szerver VAD mondatzárása sehol nem várhat tovább 500 ms-nál,
                   // mert a helyi küldési kapu legfeljebb 600 ms lezáró csendet enged fel.
                   if("high".equals(vadMode)) return 450;
                   if("medium".equals(vadMode)) return 650;
@@ -1287,7 +1302,7 @@ jobs:
               }
 
               int micGateThreshold() {
-                  // V335: a kapu már nem csak nulláz, hanem üresjáratban a küldést is megfogja.
+                  // V337: a kapu már nem csak nulláz, hanem üresjáratban a küldést is megfogja.
                   // sensitive = kikapcsolva: minden hangcsomag megy, a régi folyamatos stream viselkedéshez.
                   if("sensitive".equals(micGateMode)) return 0;
                   if("gate_low".equals(micGateMode)) return 100;
@@ -1311,168 +1326,103 @@ jobs:
                   return (int)(sum / samples);
               }
 
-              void clearPreRollAudio() {
-                  synchronized(preRollAudioChunks) {
-                      preRollAudioChunks.clear();
-                      preRollAudioBytes = 0;
-                  }
-              }
-
-              void rememberPreRollAudio(byte[] data, int len) {
-                  if(data == null || len <= 0) return;
-                  byte[] copy = Arrays.copyOf(data, len);
-                  int maxBytes = Math.max(1, 24000 * 2 * PRE_ROLL_AUDIO_MS / 1000);
-                  synchronized(preRollAudioChunks) {
-                      preRollAudioChunks.add(copy);
-                      preRollAudioBytes += copy.length;
-                      while(preRollAudioBytes > maxBytes && !preRollAudioChunks.isEmpty()) {
-                          byte[] old = preRollAudioChunks.poll();
-                          if(old != null) preRollAudioBytes -= old.length;
-                      }
-                  }
-              }
-
-              ArrayList<byte[]> takePreRollAudio() {
-                  ArrayList<byte[]> out = new ArrayList<>();
-                  synchronized(preRollAudioChunks) {
-                      while(!preRollAudioChunks.isEmpty()) {
-                          byte[] b = preRollAudioChunks.poll();
-                          if(b != null) out.add(b);
-                      }
-                      preRollAudioBytes = 0;
-                  }
-                  return out;
-              }
-
-              int pcm16Mono24kMs(int bytes) {
-                  if(bytes <= 0) return 0;
-                  return Math.max(1, (int)Math.round(bytes * 1000.0 / (24000.0 * 2.0)));
-              }
-
-              void clearPendingSpeechAudio() {
-                  synchronized(pendingSpeechAudioChunks) {
-                      pendingSpeechAudioChunks.clear();
-                      pendingSpeechAudioMs = 0;
-                  }
-              }
-
-              void rememberPendingSpeechAudio(byte[] data, int len) {
-                  if(data == null || len <= 0) return;
-                  synchronized(pendingSpeechAudioChunks) {
-                      pendingSpeechAudioChunks.add(Arrays.copyOf(data, len));
-                      pendingSpeechAudioMs += pcm16Mono24kMs(len);
-                  }
-              }
-
-              int pendingSpeechAudioDurationMs() {
-                  synchronized(pendingSpeechAudioChunks) { return pendingSpeechAudioMs; }
-              }
-
-              ArrayList<byte[]> takePendingSpeechAudio() {
-                  ArrayList<byte[]> out = new ArrayList<>();
-                  synchronized(pendingSpeechAudioChunks) {
-                      while(!pendingSpeechAudioChunks.isEmpty()) {
-                          byte[] b = pendingSpeechAudioChunks.poll();
-                          if(b != null) out.add(b);
-                      }
-                      pendingSpeechAudioMs = 0;
-                  }
-                  return out;
-              }
-
               void closeExternalVad() {
-                  try {
-                      if(liveVadInstance instanceof AutoCloseable) ((AutoCloseable)liveVadInstance).close();
-                      else if(liveVadInstance != null) liveVadInstance.getClass().getMethod("close").invoke(liveVadInstance);
-                  } catch(Exception ignored) {}
-                  liveVadInstance = null;
-                  liveVadInstanceMode = "";
-                  vadFrameBuffer.reset();
+                  try { if(sileroSession != null) sileroSession.close(); } catch(Exception ignored) {}
+                  sileroSession = null;
+                  resetSileroVad();
               }
 
-              Object enumConst(String cls, String name) throws Exception {
-                  Class<?> c = Class.forName(cls);
-                  return Enum.valueOf((Class<Enum>)c.asSubclass(Enum.class), name);
-              }
-
-              Object buildVadByReflection(String mode) throws Exception {
-                  Class<?> vadClass = Class.forName("com.konovalov.vad.webrtc.Vad");
-                  Object b = vadClass.getMethod("builder").invoke(null);
-                  b.getClass().getMethod("setSampleRate", Class.forName("com.konovalov.vad.webrtc.config.SampleRate")).invoke(b, enumConst("com.konovalov.vad.webrtc.config.SampleRate", "SAMPLE_RATE_16K"));
-                  b.getClass().getMethod("setFrameSize", Class.forName("com.konovalov.vad.webrtc.config.FrameSize")).invoke(b, enumConst("com.konovalov.vad.webrtc.config.FrameSize", "FRAME_SIZE_320"));
-                  b.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.webrtc.config.Mode")).invoke(b, enumConst("com.konovalov.vad.webrtc.config.Mode", "VERY_AGGRESSIVE"));
-                  b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, 300);
-                  b.getClass().getMethod("setSpeechDurationMs", int.class).invoke(b, 50);
-                  return b.getClass().getMethod("build").invoke(b);
+              void resetSileroVad() {
+                  sileroState = new float[2][1][128];
+                  sileroInput16k.reset();
+                  sileroSegment24k.reset();
+                  sileroTriggered = false;
+                  sileroSpeechMs = 0L;
+                  sileroSilenceMs = 0L;
               }
 
               boolean ensureExternalVadReady() {
-                  vadEngineMode = "webrtc";
-                  if(liveVadInstance != null && "webrtc".equals(liveVadInstanceMode)) return true;
-                  closeExternalVad();
+                  if(sileroSession != null) return true;
                   try {
-                      liveVadInstance = buildVadByReflection("webrtc");
-                      liveVadInstanceMode = "webrtc";
-                      return liveVadInstance != null;
+                      sileroEnv = OrtEnvironment.getEnvironment();
+                      byte[] model;
+                      try(InputStream in = getAssets().open("silero_vad.onnx"); ByteArrayOutputStream bos = new ByteArrayOutputStream()) {
+                          byte[] b = new byte[8192]; int n;
+                          while((n = in.read(b)) > 0) bos.write(b, 0, n);
+                          model = bos.toByteArray();
+                      }
+                      OrtSession.SessionOptions opt = new OrtSession.SessionOptions();
+                      opt.setIntraOpNumThreads(1);
+                      sileroSession = sileroEnv.createSession(model, opt);
+                      resetSileroVad();
+                      return true;
                   } catch(Exception e) {
-                      runOnUiThread(() -> state.setText("WebRTC VAD nem indult"));
+                      runOnUiThread(() -> state.setText("Silero VAD hiba"));
                       return false;
                   }
               }
 
               byte[] downsample24kTo16kPcm16(byte[] data, int len) {
                   if(data == null || len < 6) return new byte[0];
-                  int inSamples = len / 2;
-                  int outSamples = (inSamples * 2) / 3;
+                  int outSamples = ((len / 2) * 2) / 3;
                   byte[] out = new byte[outSamples * 2];
                   for(int i=0;i<outSamples;i++) {
-                      int srcSample = (i * 3) / 2;
-                      int si = srcSample * 2;
-                      int oi = i * 2;
+                      int si = ((i * 3) / 2) * 2, oi = i * 2;
                       if(si + 1 >= len) break;
-                      out[oi] = data[si];
-                      out[oi+1] = data[si+1];
+                      out[oi]=data[si]; out[oi+1]=data[si+1];
                   }
                   return out;
               }
 
-              boolean vadIsSpeechOn16k(byte[] pcm16k) {
-                  if(liveVadInstance == null || pcm16k == null || pcm16k.length == 0) return false;
-                  try {
-                      int frameBytes = 640; // 16 kHz: WebRTC 512 samples, WebRTC 320 samples
-                      vadFrameBuffer.write(pcm16k, 0, pcm16k.length);
-                      byte[] all = vadFrameBuffer.toByteArray();
-                      int pos = 0;
-                      boolean speech = false;
-                      while(pos + frameBytes <= all.length) {
-                          byte[] frame = Arrays.copyOfRange(all, pos, pos + frameBytes);
-                          Object r;
-                          try {
-                              r = liveVadInstance.getClass().getMethod("isSpeech", byte[].class).invoke(liveVadInstance, (Object)frame);
-                          } catch(NoSuchMethodException nsme) {
-                              short[] sf = new short[frame.length / 2];
-                              for(int i=0;i<sf.length;i++) {
-                                  int lo = frame[i*2] & 0xff;
-                                  int hi = frame[i*2+1];
-                                  sf[i] = (short)((hi << 8) | lo);
-                              }
-                              r = liveVadInstance.getClass().getMethod("isSpeech", short[].class).invoke(liveVadInstance, (Object)sf);
-                          }
-                          if(Boolean.TRUE.equals(r)) speech = true;
-                          pos += frameBytes;
+              float sileroProbability(float[] samples) throws Exception {
+                  try(OnnxTensor input = OnnxTensor.createTensor(sileroEnv, FloatBuffer.wrap(samples), new long[]{1,512});
+                      OnnxTensor st = OnnxTensor.createTensor(sileroEnv, sileroState);
+                      OnnxTensor sr = OnnxTensor.createTensor(sileroEnv, LongBuffer.wrap(new long[]{16000}), new long[]{1})) {
+                      Map<String,OnnxTensor> in = new HashMap<>();
+                      in.put("input",input); in.put("state",st); in.put("sr",sr);
+                      try(OrtSession.Result r = sileroSession.run(in)) {
+                          float[][] p=(float[][])r.get(0).getValue();
+                          sileroState=(float[][][])r.get(1).getValue();
+                          return p[0][0];
                       }
-                      vadFrameBuffer.reset();
-                      if(pos < all.length) vadFrameBuffer.write(all, pos, all.length - pos);
-                      return speech;
-                  } catch(Exception e) {
-                      return false;
                   }
               }
 
-              boolean externalVadOverGate(byte[] data, int len) {
-                  if(data == null || len <= 0) return false;
-                  if(!ensureExternalVadReady()) return avgAbsPcm16(data, len) >= micGateThreshold();
-                  return vadIsSpeechOn16k(downsample24kTo16kPcm16(data, len));
+              void commitSileroSegment() {
+                  try {
+                      if(sileroSegment24k.size()>0 && ws!=null) {
+                          sendAudioChunk(sileroSegment24k.toByteArray());
+                          JSONObject e=new JSONObject(); e.put("type","input_audio_buffer.commit"); ws.send(e.toString());
+                      }
+                  } catch(Exception ignored) {}
+                  resetSileroVad();
+              }
+
+              void processSileroAudio(byte[] pcm24k, int len) throws Exception {
+                  if(pcm24k==null || len<=0 || !ensureExternalVadReady()) return;
+                  sileroSegment24k.write(pcm24k,0,len);
+                  byte[] p16=downsample24kTo16kPcm16(pcm24k,len);
+                  sileroInput16k.write(p16,0,p16.length);
+                  byte[] all=sileroInput16k.toByteArray();
+                  int pos=0, frameBytes=1024;
+                  while(pos+frameBytes<=all.length) {
+                      float[] f=new float[512];
+                      for(int i=0;i<512;i++) {
+                          int lo=all[pos+i*2]&255, hi=all[pos+i*2+1];
+                          f[i]=(short)((hi<<8)|lo)/32768.0f;
+                      }
+                      pos+=frameBytes;
+                      float p=sileroProbability(f);
+                      if(p>=SILERO_THRESHOLD) {
+                          sileroTriggered=true; sileroSpeechMs+=32; sileroSilenceMs=0;
+                      } else if(sileroTriggered && p<SILERO_NEG_THRESHOLD) {
+                          sileroSilenceMs+=32;
+                          if(sileroSilenceMs>=SILERO_MIN_SILENCE_MS && sileroSpeechMs>=SILERO_MIN_SPEECH_MS) { commitSileroSegment(); return; }
+                      }
+                      if(sileroTriggered && sileroSpeechMs+sileroSilenceMs>=SILERO_MAX_SPEECH_MS) { commitSileroSegment(); return; }
+                  }
+                  sileroInput16k.reset();
+                  if(pos<all.length) sileroInput16k.write(all,pos,all.length-pos);
               }
 
               void sendAudioChunk(byte[] chunk) throws Exception {
@@ -1647,78 +1597,23 @@ jobs:
               }
 
               void audioLoop() {
-                  int sr = 24000;
-                  int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-                  int bs = Math.max(min, 4800);
-
-                  // V335: 24 kHz PCM16 mono marad. Buffer cél kb. 100 ms.
-                  // Hangforrás és Android/OpenAI zajszűrés menüből tesztelhető.
-                  rec = makeBestAudioRecord(sr, bs);
-                  if(rec == null) { runOnUiThread(() -> state.setText("mikrofon hiba")); return; }
+                  int sr=24000;
+                  int min=AudioRecord.getMinBufferSize(sr,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT);
+                  int bs=Math.max(min,4800);
+                  rec=makeBestAudioRecord(sr,bs);
+                  if(rec==null){ runOnUiThread(() -> state.setText("mikrofon hiba")); return; }
                   enableAndroidAudioEffects();
-                  streaming = true;
-                  setLiveUiLocked(false);
-                  rec.startRecording();
-                  runOnUiThread(() -> state.setText("mikrofon aktív"));
-                  updateButtons();
-
+                  if(!ensureExternalVadReady()) return;
+                  streaming=true; setLiveUiLocked(false); rec.startRecording();
+                  runOnUiThread(() -> state.setText("mikrofon aktív")); updateButtons();
                   audioExec.submit(() -> {
-                      byte[] buf = new byte[bs];
-                      clearPreRollAudio();
-                      voiceSendActive = false;
-                      trailingSilenceOpen = false;
-                      lastVoiceChunkSentAtMs = 0L;
-                      while(streaming && connected && ws != null && rec != null) {
-                          int read = rec.read(buf, 0, buf.length);
-                          if(read > 0) {
-                              try {
-                                  // Tolmács mód nem módosíthatja a bemeneti beszédfelismerést.
-                                  // Egyetlen kivétel: kihangosított telefon módnál TTS közben a mikrofon nem küld hangot,
-                                  // hogy a saját felolvasott fordítás ne kerüljön vissza bemenetként.
-                                  // A pre-rollt nem töröljük, és TTS alatti hangot sem pufferezzük,
-                                  // így a saját felolvasás nem kerülhet vissza később bemenetként.
-                                  if(shouldMuteMicForSpeakerTts()) {
-                                      trailingSilenceOpen = false;
-                                      voiceSendActive = false;
-                                      continue;
-                                  }
-
-                                  long now = System.currentTimeMillis();
-
-                                  // V335: a hard 8 s határt minden audio-iteráció elején ellenőrizzük.
-                                  // Ha lejárt, az előző buffer commitolódik; az aktuális hang már új szegmensbe kerül.
-                                  commitSpeechSegmentIfDue(now);
-
-                                  boolean overGate = externalVadOverGate(buf, read);
-                                  if(overGate) {
-                                      if(!voiceSendActive) {
-                                          rememberPendingSpeechAudio(buf, read);
-                                          if(pendingSpeechAudioDurationMs() < MIN_TRUE_SPEECH_AUDIO_MS) continue;
-
-                                          for(byte[] pr : takePreRollAudio()) appendSpeechSegmentAudio(pr, now, false);
-                                          for(byte[] ps : takePendingSpeechAudio()) appendSpeechSegmentAudio(ps, now, true);
-                                      } else {
-                                          appendSpeechSegmentAudio(Arrays.copyOf(buf, read), now, true);
-                                      }
-                                      voiceSendActive = true;
-                                      trailingSilenceOpen = true;
-                                      lastVoiceChunkSentAtMs = now;
-
-                                      // A chunk elküldése után is ellenőrzünk, így a 8 s nem csúszhat egy teljes ciklussal.
-                                      commitSpeechSegmentIfDue(System.currentTimeMillis());
-                                      continue;
-                                  }
-
-                                  // Csendet nem küldünk az API-nak. Csak az időt használjuk lezárásra.
-                                  if(commitSpeechSegmentIfDue(now)) {
-                                      rememberPreRollAudio(buf, read);
-                                      continue;
-                                  }
-
-                                  clearPendingSpeechAudio();
-                                  rememberPreRollAudio(buf, read);
-                              } catch(Exception ignored) {}
-                          }
+                      byte[] buf=new byte[bs]; resetSileroVad();
+                      while(streaming && connected && ws!=null && rec!=null) {
+                          int read=rec.read(buf,0,buf.length);
+                          if(read>0) try {
+                              if(shouldMuteMicForSpeakerTts()) continue;
+                              processSileroAudio(Arrays.copyOf(buf,read),read);
+                          } catch(Exception e) { runOnUiThread(() -> state.setText("Silero feldolgozási hiba")); }
                       }
                   });
               }
@@ -1726,7 +1621,7 @@ jobs:
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
 
-                  // V335: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+                  // V337: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
                   if(clipboardResponseMode) {
                       clipboardResponseMode = false;
                       pendingClipboardText = "";
@@ -1735,7 +1630,7 @@ jobs:
                       return;
                   }
 
-                  // V335: kézi fordításnál nincs blokkállapot. Hiba esetén nem írunk semmit az ablakokba.
+                  // V337: kézi fordításnál nincs blokkállapot. Hiba esetén nem írunk semmit az ablakokba.
                   if(manualResponseMode) {
                       manualResponseMode = false;
                       pendingManualText = "";
@@ -1809,7 +1704,7 @@ jobs:
 
                       if(type.equals("response.done")) {
                           responseInProgress = false;
-                          // V335: ha egy live fordítás válasz nélkül zárult, a blokk nem veszhet el.
+                          // V337: ha egy live fordítás válasz nélkül zárult, a blokk nem veszhet el.
                           // Korlátozottan újrapróbáljuk, különben marad újrafordíthatóként.
                           if(liveTranslateMode && pendingLiveBlockId >= 0 && pendingOutput.trim().length() == 0) {
                               int missId = pendingLiveBlockId;
@@ -1817,7 +1712,7 @@ jobs:
                               liveTranslateMode = false;
                               runOnUiThread(() -> retryLiveBlockOrRender(missId));
                           }
-                          // V335: élő fordítási sor csak akkor induljon tovább,
+                          // V337: élő fordítási sor csak akkor induljon tovább,
                           // amikor az előző response ténylegesen lezárult a szerver szerint.
                           // Különben a következő response.create könnyen "response in progress" hibára fut,
                           // és a fordítás az első blokk után megáll.
@@ -1854,7 +1749,7 @@ jobs:
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
                           if(msg.contains("response in progress")) {
                               responseInProgress = true;
-                              // V335: ez nem felhasználói hiba, hanem túl gyors blokkérkezés.
+                              // V337: ez nem felhasználói hiba, hanem túl gyors blokkérkezés.
                               // A blokk nem veszhet el és nem kell Toasttal zajongani: vissza a sor elejére,
                               // majd a következő response.done indítja újra a fordítást.
                               if(liveTranslateMode && pendingLiveBlockId >= 0) {
@@ -1889,7 +1784,7 @@ jobs:
               void manualTranslate() {
                   if(uiLockedForLive || finalizingStop) return;
 
-                  // V335: a FORDÍT gomb külön üzemmód.
+                  // V337: a FORDÍT gomb külön üzemmód.
                   // Először lezárjuk a mikrofont/live sort, utána az aktív ablak teljes szövegét
                   // egyetlen nagy, kontextusos kézi fordításként kezeljük.
                   if(streaming) {
@@ -2040,7 +1935,7 @@ jobs:
 
               String cleanTranscriptForSelectedPair(String text) {
                   if(text == null) return "";
-                  // V335: ez továbbra sem saját nagy nyelvfelismerő. Csak biztonsági tisztítás:
+                  // V337: ez továbbra sem saját nagy nyelvfelismerő. Csak biztonsági tisztítás:
                   // idegen írásrendszeres STT-szemét nem kerülhet ki az ablakokba vagy fordításba.
                   String x = text.replaceAll("[^A-Za-z0-9\\u00C0-\\u024F\\p{Punct}\\s]", " ");
                   return x.replaceAll("\\s+", " ").trim();
@@ -2052,7 +1947,7 @@ jobs:
               }
 
               boolean looksLikeObviousThirdLanguageNoise(String text) {
-                  // V335: harmadik nyelv szótáras tiltólista kikapcsolva az élő fordításban.
+                  // V337: harmadik nyelv szótáras tiltólista kikapcsolva az élő fordításban.
                   // A két nyelvre zárást a liveBlockInstructions/pairRules és a SOURCE_LANG feldolgozás végzi.
                   return false;
               }
@@ -2067,7 +1962,7 @@ jobs:
 
               boolean isUsableLiveTriple(String[] trp) {
                   if(trp == null || trp.length < 3) return false;
-                  // V335: SOURCE_LANG hiánya vagy pontatlan címkéje nem dobhatja el a fordítást.
+                  // V337: SOURCE_LANG hiánya vagy pontatlan címkéje nem dobhatja el a fordítást.
                   // A forrásoldal ilyenkor a meglévő blokk oldala marad.
                   String original = trp[1] == null ? "" : cleanTranscriptForSelectedPair(trp[1]).trim();
                   String translation = trp[2] == null ? "" : cleanTranscriptForSelectedPair(cleanOneBlockTranslation(trp[2])).trim();
@@ -2114,7 +2009,7 @@ jobs:
               }
               
               boolean sourceIsTopBySelectedPair(String text, boolean fallback) {
-                  // V335: nincs drága nyelvdetektálás a blokkzárás előtt.
+                  // V337: nincs drága nyelvdetektálás a blokkzárás előtt.
                   // Az AI válasz SOURCE_LANG mezője később pontosíthatja az oldalt.
                   return fallback;
               }
@@ -2130,7 +2025,7 @@ jobs:
               }
 
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
-                  // V335: gyors visszajelzés. A nyers STT azonnal látható az aktuális oldalon,
+                  // V337: gyors visszajelzés. A nyers STT azonnal látható az aktuális oldalon,
                   // ugyanakkor pendingSourceText-ben is megmarad, hogy a valid AI-válasz után
                   // a blokk átkerülhessen a valódi SOURCE_LANG szerinti oldalra.
                   if(isRecentlyDisplayedSourceDuplicate(sourceIsTop, original)) return -1;
@@ -2192,7 +2087,7 @@ jobs:
 
                       int min = Math.min(h.length(), oh.length());
                       int max = Math.max(h.length(), oh.length());
-                      // V335: csak majdnem teljes azonosságot fogunk meg.
+                      // V337: csak majdnem teljes azonosságot fogunk meg.
                       // A hasonló, de eltérő blokk ne essen ki, mert az beszédvesztéshez vezetett.
                       if(min >= 24 && (h.contains(oh) || oh.contains(h)) && (min * 100 / Math.max(1, max)) >= 92) return true;
                   }
@@ -2290,7 +2185,7 @@ jobs:
                           translation = trp[2] == null ? "" : trp[2];
                           sourceIsTop = sourceIsTopFromAi(sourceLang, b.sourceTop);
                       } else {
-                          // V335: nincs nyers AI-válasz fallback.
+                          // V337: nincs nyers AI-válasz fallback.
                           // Ha a live fordító nem ad szabályos SOURCE_LANG / ORIGINAL / TRANSLATION hármast,
                           // a blokk hibásként újrapróbálható vagy kiesik, de prompt/meta szöveg nem kerülhet ablakba.
                           retryLiveBlockOrRender(id);
@@ -2343,7 +2238,7 @@ jobs:
                   }
                   pendingLiveBlockId = -1;
                   liveTranslateMode = false;
-                  // V335: nem indítjuk azonnal a következő live fordítást itt.
+                  // V337: nem indítjuk azonnal a következő live fordítást itt.
                   // Megvárjuk a response.done eseményt, mert a text.done után
                   // a szerver oldalon még lehet aktív válasz, és a következő
                   // response.create különben megakaszthatja a sort.
@@ -2369,7 +2264,7 @@ jobs:
                       return;
                   }
 
-                  // V335: állapot nélküli / késve érkező AI-válasz nem hibaüzenet a felhasználónak.
+                  // V337: állapot nélküli / késve érkező AI-válasz nem hibaüzenet a felhasználónak.
                   // Nem hozunk létre belőle új blokkot, de nem is zavarjuk meg az aktív mikrofonos munkát toasttal.
                   android.util.Log.w("Fordito", "Állapot nélküli AI-válasz figyelmen kívül hagyva: " + out);
                   if(streaming) state.setText("mikrofon aktív");
@@ -2624,7 +2519,7 @@ jobs:
                   String text = title + "\n" + sub;
                   SpannableString ss = new SpannableString(text);
 
-                  // V335: olvashatóbb tolmács mód gomb.
+                  // V337: olvashatóbb tolmács mód gomb.
                   // A felső sor kisebb, az állapot nagyobb és félkövér.
                   ss.setSpan(new AbsoluteSizeSpan(13, true), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   ss.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
@@ -2916,7 +2811,7 @@ jobs:
               }
 
               void pasteClipboardToLanguageBox() {
-                  // V335: Android háttérben futó overlayből sok készüléken nem engedi a vágólap olvasását.
+                  // V337: Android háttérben futó overlayből sok készüléken nem engedi a vágólap olvasását.
                   // Ezért előbb előtérbe hozzuk a Forditót, és csak utána, kis késleltetéssel olvassuk ki.
                   bringAppToFrontForClipboardRead();
                   new Handler().postDelayed(() -> pasteClipboardToLanguageBoxAfterForeground(), 260);
@@ -3198,12 +3093,12 @@ jobs:
               }
 
               void stopClipboardSystemSpeech(boolean toast) {
-                  // V335: a régi háromablakos/vágólapos diktálási ág ki van szerelve.
+                  // V337: a régi háromablakos/vágólapos diktálási ág ki van szerelve.
                   // Ez csak kompatibilitási lezáró csonk a régi lifecycle/menu hivatkozásokhoz.
               }
 
               void applyClipboardTranslation(String out) {
-                  // V335: a régi háromablakos vágólapfordító ág ki van szerelve.
+                  // V337: a régi háromablakos vágólapfordító ág ki van szerelve.
                   // Késve érkező régi válasz nem kerülhet ablakba vagy vágólapra.
                   clipboardResponseMode = false;
               }
@@ -3230,7 +3125,6 @@ jobs:
                   if(uiLockedForLive || finalizingStop) return;
                   CharSequence[] items = {
                       menuItem("AI modell", modelLabel(), false),
-                      menuItem("Beszélgetési profil", profileLabel(), false),
                       menuItem("Fordítás stílusa", modeLabel(), false),
                       menuItem("Hangprofil", soundProfileLabel(), false)
                   };
@@ -3500,7 +3394,7 @@ jobs:
               }
 
               void applyInputProfileValues() {
-                  // V335: egyetlen valódi hanglánc-blokk.
+                  // V337: egyetlen valódi hanglánc-blokk.
                   // A mikrofon/STT értékeket nem több külön menü és nem régi mentés darabjai vezérlik,
                   // hanem a kiválasztott hangprofil. Így nincs placebo-érzés és nincs egymás ellen dolgozó beállítás.
                   if("truck_noisy".equals(soundProfile)) {
@@ -3659,7 +3553,7 @@ jobs:
                   showCenteredMenu(top ? "Felső nyelv" : "Alsó nyelv", labels, (d,w) -> {
                       if(top) topLang = langs[w][2];
                       else bottomLang = langs[w][2];
-                      // V335: nyelvválasztás nem jelent forrásablak-választást.
+                      // V337: nyelvválasztás nem jelent forrásablak-választást.
                       // A beszéd következő transcript blokkjánál automatikusan döntünk a felismert nyelv alapján.
                       topBox.clearFocus();
                       bottomBox.clearFocus();
@@ -3739,7 +3633,7 @@ jobs:
               }
 
               void setLiveUiLocked(boolean locked) {
-                  // V335: élő mikrofon alatt nem zárjuk a kezelőfelületet.
+                  // V337: élő mikrofon alatt nem zárjuk a kezelőfelületet.
                   // A háttérmód miatt a véletlen nyomkodás elleni régi védelemre nincs szükség;
                   // csak a mikrofon gomb színe/szövege jelzi az aktív állapotot.
                   uiLockedForLive = false;
@@ -3783,7 +3677,7 @@ jobs:
               }
 
               void stopWithFinalizeDelay() {
-                  // V335: a mikrofon leállítása nem tartja lezárva a menüt/fordítás gombot.
+                  // V337: a mikrofon leállítása nem tartja lezárva a menüt/fordítás gombot.
                   // Meghagyjuk kompatibilitásból, de hosszú 1.8 mp várakozás nélkül.
                   try { stop(); } catch(Exception ignored) {}
                   finalizingStop = false;
@@ -3962,14 +3856,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V335.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V335.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V337.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V337.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V335
+          name: V337
           path: |
             artifact/*.apk
             artifact/*.aab
