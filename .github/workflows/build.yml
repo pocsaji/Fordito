@@ -3600,15 +3600,87 @@ jobs:
               int interpreterFloatingX = 24;
               int interpreterFloatingY = -140;
 
+              class InterpreterFloatingButton extends View {
+                  int bgColor = Color.rgb(150,45,45);
+                  boolean bluetoothIcon = false;
+
+                  final android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+
+                  InterpreterFloatingButton(Context c) {
+                      super(c);
+                      setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+                  }
+
+                  void setState(boolean active, boolean bluetooth) {
+                      bluetoothIcon = bluetooth;
+                      bgColor = active ? Color.rgb(30,135,70) : Color.rgb(150,45,45);
+                      invalidate();
+                  }
+
+                  @Override protected void onDraw(android.graphics.Canvas canvas) {
+                      super.onDraw(canvas);
+                      float w = getWidth();
+                      float h = getHeight();
+                      float cx = w / 2f;
+                      float cy = h / 2f;
+                      float r = Math.min(w, h) * 0.47f;
+
+                      paint.setStyle(android.graphics.Paint.Style.FILL);
+                      paint.setColor(bgColor);
+                      canvas.drawCircle(cx, cy, r, paint);
+
+                      paint.setColor(Color.WHITE);
+                      paint.setStyle(android.graphics.Paint.Style.STROKE);
+                      paint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
+                      paint.setStrokeJoin(android.graphics.Paint.Join.ROUND);
+                      paint.setStrokeWidth(Math.max(5f, w * 0.065f));
+
+                      if(bluetoothIcon) drawBluetoothIcon(canvas, cx, cy, r);
+                      else drawSpeakerIcon(canvas, cx, cy, r);
+                  }
+
+                  void drawBluetoothIcon(android.graphics.Canvas canvas, float cx, float cy, float r) {
+                      float top = cy - r * 0.55f;
+                      float bottom = cy + r * 0.55f;
+                      float left = cx - r * 0.32f;
+                      float right = cx + r * 0.34f;
+                      float mid = cy;
+
+                      canvas.drawLine(cx, top, cx, bottom, paint);
+                      canvas.drawLine(cx, top, right, cy - r * 0.18f, paint);
+                      canvas.drawLine(right, cy - r * 0.18f, left, mid, paint);
+                      canvas.drawLine(left, mid, right, cy + r * 0.18f, paint);
+                      canvas.drawLine(right, cy + r * 0.18f, cx, bottom, paint);
+                  }
+
+                  void drawSpeakerIcon(android.graphics.Canvas canvas, float cx, float cy, float r) {
+                      android.graphics.Path cone = new android.graphics.Path();
+                      cone.moveTo(cx - r * 0.55f, cy - r * 0.20f);
+                      cone.lineTo(cx - r * 0.30f, cy - r * 0.20f);
+                      cone.lineTo(cx + r * 0.02f, cy - r * 0.48f);
+                      cone.lineTo(cx + r * 0.02f, cy + r * 0.48f);
+                      cone.lineTo(cx - r * 0.30f, cy + r * 0.20f);
+                      cone.lineTo(cx - r * 0.55f, cy + r * 0.20f);
+                      cone.close();
+
+                      paint.setStyle(android.graphics.Paint.Style.FILL);
+                      canvas.drawPath(cone, paint);
+
+                      paint.setStyle(android.graphics.Paint.Style.STROKE);
+                      paint.setStrokeWidth(Math.max(4f, r * 0.10f));
+                      canvas.drawArc(new android.graphics.RectF(cx - r * 0.02f, cy - r * 0.38f, cx + r * 0.62f, cy + r * 0.38f), -35, 70, false, paint);
+                      canvas.drawArc(new android.graphics.RectF(cx + r * 0.12f, cy - r * 0.62f, cx + r * 0.92f, cy + r * 0.62f), -35, 70, false, paint);
+                  }
+              }
+
               void ensureInterpreterFloatingButton() {
                   if(!interpreterMode) { hideInterpreterFloatingButton(); return; }
                   if(!canDrawOverlayNow()) { requestOverlayPermission(); return; }
                   if(interpreterFloatingView != null) { refreshInterpreterFloatingButton(); return; }
                   try {
                       if(floatingWindowManager == null) floatingWindowManager=(android.view.WindowManager)getSystemService(WINDOW_SERVICE);
-                      Button b=btn("🔊");
-                      b.setTextSize(24);
-                      final android.view.WindowManager.LayoutParams lp=floatingParams(96,96,Gravity.LEFT|Gravity.CENTER_VERTICAL);
+                      InterpreterFloatingButton b = new InterpreterFloatingButton(this);
+                      final android.view.WindowManager.LayoutParams lp=floatingParams(106,106,Gravity.LEFT|Gravity.CENTER_VERTICAL);
                       lp.x=interpreterFloatingX; lp.y=interpreterFloatingY;
                       b.setOnClickListener(v -> toggleInterpreterFloatingRun());
                       final int[] down=new int[4]; final boolean[] moved=new boolean[1];
@@ -3637,19 +3709,9 @@ jobs:
               }
 
               void refreshInterpreterFloatingButton() {
-                  if(!(interpreterFloatingView instanceof Button)) return;
-                  Button b=(Button)interpreterFloatingView;
-                  if(!streaming) {
-                      b.setText("🔊");
-                      b.setBackgroundColor(Color.rgb(150,45,45));
-                  } else if("headset".equals(interpreterAudioMode)) {
-                      b.setText("BT");
-                      b.setTextSize(18);
-                      b.setBackgroundColor(Color.rgb(35,105,175));
-                  } else {
-                      b.setText("🔊");
-                      b.setBackgroundColor(Color.rgb(30,135,70));
-                  }
+                  if(!(interpreterFloatingView instanceof InterpreterFloatingButton)) return;
+                  InterpreterFloatingButton b=(InterpreterFloatingButton)interpreterFloatingView;
+                  b.setState(streaming, "headset".equals(interpreterAudioMode));
               }
 
               void toggleInterpreterFloatingRun() {
