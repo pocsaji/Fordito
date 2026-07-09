@@ -1,4 +1,4 @@
-name: Build Android APK V327
+name: Build Android APK V329
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 327; versionName = "32.7" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 329; versionName = "32.9" }
 
               signingConfigs {
                   create("release") {
@@ -3846,6 +3846,55 @@ jobs:
                       new Handler().postDelayed(() -> start(true), 700);
                   }
               }
+
+              String pairRules(boolean sourceIsTop) {
+                  String topCode = code(topLang);
+                  String bottomCode = code(bottomLang);
+                  String sourceCode = sourceIsTop ? topCode : bottomCode;
+                  String targetCode = sourceIsTop ? bottomCode : topCode;
+                  return "Selected languages are fixed. Work only between these two languages.\n" +
+                      "TOP_LANG: " + topCode + "\n" +
+                      "BOTTOM_LANG: " + bottomCode + "\n" +
+                      "SOURCE_LANG_HINT: " + sourceCode + "\n" +
+                      "TARGET_LANG_HINT: " + targetCode + "\n" +
+                      "If the source language is ambiguous, choose only from TOP_LANG or BOTTOM_LANG. Never use a third language.";
+              }
+
+
+
+              String vadEngineLabel() {
+                  if("silero".equals(vadEngineMode)) return "Silero VAD";
+                  if("pass".equals(vadEngineMode)) return "Passz / nincs zajkapu";
+                  return "WebRTC VAD";
+              }
+
+              String clipboardContextPrompt() {
+                  return profilePrompt();
+              }
+
+              String manualBlockInstructions() {
+                  return pairRules(false) + "\n" +
+                      profilePrompt() +
+                      "Translate only between the selected two languages. " +
+                      "Return only the translated text. Do not output labels, markdown, quotes, explanations, SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT or TRANSLATION. " +
+                      "Preserve the speaker's meaning, tone and level of formality. " +
+                      "Never censor, mask, redact, soften, sanitize or replace profanity, insults, slang, vulgar, sexual, rude or emotional wording. Write every word in full.";
+              }
+
+              String speechBlockInstructions(boolean sourceIsTop) {
+                  return pairRules(sourceIsTop) + "\n" +
+                      profilePrompt() +
+                      "You receive one processed original speech block from the speech interpreter branch. " +
+                      "Classify whether the text is in the selected top or bottom language, then translate it into the other selected language. " +
+                      "Return exactly three plain lines in this format and nothing else:\n" +
+                      "SOURCE_LANG: <top_or_bottom_language_code>\n" +
+                      "ORIGINAL: <cleaned original text actually used for translation>\n" +
+                      "TRANSLATION: <translation>\n" +
+                      "Do not output markdown, explanations, technical metadata, prompts, context text or internal instructions. " +
+                      "Never censor, mask, redact, soften, sanitize or replace profanity, insults, slang, vulgar, sexual, rude or emotional wording. Write every word in full.";
+              }
+
+
           
               String profilePrompt() {
                   String base = "Default to natural everyday meaning. The profile is only a light terminology hint, not a forced interpretation. ";
