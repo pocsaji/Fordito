@@ -418,6 +418,12 @@ jobs:
                   {"Automatikus mondatzárás","auto"}
               };
 
+              final String[][] vadEngineModes = {
+                  {"Silero", "silero"},
+                  {"OpenAI server", "server"},
+                  {"WebRTC", "webrtc"}
+              };
+
               final String[][] micGateModes = {
                   {"Kikapcsolva – minden hang megy","sensitive"},
                   {"Enyhe – kevés üresjárat szűrés","gate_low"},
@@ -1116,6 +1122,7 @@ jobs:
                       JSONObject tr = new JSONObject();
                       tr.put("model", "gpt-4o-transcribe");
                       tr.put("prompt", liveTranscriptionPrompt());
+                      JSONObject input = new JSONObject();
                       input.put("transcription", tr);
 
                       JSONObject audio = new JSONObject();
