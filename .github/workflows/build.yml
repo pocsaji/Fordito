@@ -11,9 +11,14 @@ jobs:
     steps:
       - name: Create Android project
         run: |
-          mkdir -p app/src/main/java/com/attila/forditokonzol
-          mkdir -p app/src/main/assets
-          curl -L --fail --retry 3 https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx -o app/src/main/assets/silero_vad.onnx app/src/main/res/values app/src/main/res/drawable
+          mkdir -p app/src/main/java/com/attila/forditokonzol app/src/main/assets app/src/main/res/values app/src/main/res/drawable
+
+          MODEL_URL="https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx"
+          if ! curl --location --fail --silent --show-error --retry 3 --retry-all-errors --connect-timeout 20 --output app/src/main/assets/silero_vad.onnx "$MODEL_URL"; then
+            wget --tries=3 --timeout=30 --output-document=app/src/main/assets/silero_vad.onnx "$MODEL_URL"
+          fi
+          test -s app/src/main/assets/silero_vad.onnx
+          test "$(wc -c < app/src/main/assets/silero_vad.onnx)" -gt 1000000
 
           cat > settings.gradle.kts <<'EOF'
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
