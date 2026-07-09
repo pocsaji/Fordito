@@ -1,4 +1,4 @@
-name: Build Android APK V318
+name: Build Android APK V324
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 318; versionName = "31.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 324; versionName = "32.4" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V318" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V324" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -256,11 +256,11 @@ jobs:
               // 150 ms valódi beszéd alatt zajnak tekintjük, 1.5 s csendnél zárunk,
               // 8 s folyamatos beszédnél vágunk blokkot akkor is, ha nincs csend.
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
-              static final int MAX_LIVE_SILENCE_MS = 1200;
-              // V318: egyszerű folyamatos tolmácslogika.
-              // Nem karaktert, vesszőt vagy szótárat számolunk: legfeljebb 2 mp beszédpuffer után
-              // szóhatáron kiadjuk a kész elejét, a felismerő/fordító végzi a nyelvi munkát.
-              static final int MAX_CONTINUOUS_LIVE_BLOCK_MS = 2000;
+              static final int MAX_LIVE_SILENCE_MS = 1000;
+              // V324: KŐKEMÉNY 8 mp-es felső határ.
+              // 8 másodperc az 8 másodperc: nem completed-re, nem idle-ra, nem írásjelre vár.
+              // Ha a puffer 8000 ms-os, kötelező vágás és azonnali fordítási sorba adás.
+              static final int MAX_CONTINUOUS_LIVE_BLOCK_MS = 8000;
               volatile long lastVoiceChunkSentAtMs = 0L;
               volatile boolean trailingSilenceOpen = false;
               volatile boolean voiceSendActive = false;
@@ -308,9 +308,15 @@ jobs:
               boolean liveHadTranscriptDelta = false;
               long firstSpeechHeardAt = 0L;
               long liveBufferStartedAt = 0L;
+              // V324: abszolút blokkóra. Ezt completed esemény nem nullázhatja újra.
+              // Csak akkor indul újra, amikor tényleg kivágtunk egy blokkot.
+              long liveHardBlockStartedAt = 0L;
               long liveLastTranscriptDeltaAt = 0L;
+              // V324: független hard-deadline watchdog. Nem delta-, completed-, idle- vagy VAD-esemény vezérli.
+              boolean liveHardDeadlineArmed = false;
+              int liveHardDeadlineGeneration = 0;
               int liveIdleFlushToken = 0;
-              // V318: eseménysorrend-védelem. Nem várakoztat, csak megjegyzi,
+              // V324: eseménysorrend-védelem. Nem várakoztat, csak megjegyzi,
               // hogy a delta útvonal már adott ki blokkot, ezért a közvetlen completed/idle
               // nem zárhatja le ugyanazt még egyszer.
               long lastLiveBlockReleasedAt = 0L;
@@ -458,7 +464,7 @@ jobs:
                   interpreterMode = false;
                   interpreterAudioMode = "off";
                   openAiNoiseMode = sp.getString("openAiNoiseMode", "off");
-                  applyV318StableDefaultsOnce();
+                  applyV324StableDefaultsOnce();
                   ui();
                   reqMic();
                   reqNotifications();
@@ -469,7 +475,7 @@ jobs:
               void load() {
                   apiKey = sp.getString("apiKey", "");
                   model = sp.getString("model", "gpt-realtime-2");
-                  // V318: ehhez a kétirányú FR/HU tolmács-logikához maradunk a standard /v1/realtime + gpt-realtime-2 útvonalon.
+                  // V324: ehhez a kétirányú FR/HU tolmács-logikához maradunk a standard /v1/realtime + gpt-realtime-2 útvonalon.
                   // A gpt-realtime-translate külön /v1/realtime/translations végpontot és egyirányú target output nyelvet várna,
                   // ezért itt nem engedjük visszatölteni régi mentésből sem.
                   if(!"gpt-realtime-2".equals(model)) model = "gpt-realtime-2";
@@ -505,8 +511,8 @@ jobs:
                   applyInputProfileValues();
               }
 
-              void applyV318StableDefaultsOnce() {
-                  // V318: telepítés/frissítés után egyszer visszaállítjuk az élő hanglánc ajánlott alapját.
+              void applyV324StableDefaultsOnce() {
+                  // V324: telepítés/frissítés után egyszer visszaállítjuk az élő hanglánc ajánlott alapját.
                   // API kulcsot, kiválasztott nyelvpárt és korábbi beszélgetést nem törlünk.
                   int last = sp.getInt("stableDefaultsVersion", 0);
                   if(last < 282) {
@@ -559,7 +565,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V318");
+                  TextView title = label("Fordito_V324");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -593,7 +599,7 @@ jobs:
                   controls.addView(menuBtn, new LinearLayout.LayoutParams(0,85,1));
                   root.addView(controls);
 
-                  // V318: sima kattintás / fókuszváltás ne állítsa le a mikrofont.
+                  // V324: sima kattintás / fókuszváltás ne állítsa le a mikrofont.
                   // Az aktív oldalt továbbra is átállítjuk, de live munkát nem törlünk.
                   topBox.setOnClickListener(v -> selectActiveBox(true));
                   bottomBox.setOnClickListener(v -> selectActiveBox(false));
@@ -717,7 +723,7 @@ jobs:
                       }
                       public void afterTextChanged(Editable e) {
                           if(programmaticChange) return;
-                                  // V318: nincs kézi blokkállapot.
+                                  // V324: nincs kézi blokkállapot.
                           // Gépelés közben nem bontjuk újra a blokkokat.
                           // FORDÍT gombnál a teljes aktív ablak fordul újra a másik ablakba.
                           updateButtons();
@@ -737,7 +743,7 @@ jobs:
                   manualTopSource = top;
                   topActive = top;
 
-                  // V318: kattintás, fókusz és gépelés miatt nem állítjuk le a mikrofont.
+                  // V324: kattintás, fókusz és gépelés miatt nem állítjuk le a mikrofont.
                   // Kézi FORDÍT gombnál külön útvonal dolgozik, ezért nem kell itt élő
                   // mikrofon-stop. Csak a régi kézi válasz maradékát takarítjuk, ha volt.
                   if(!streaming) {
@@ -849,7 +855,7 @@ jobs:
               }
 
               void renderBlocksKeepView() {
-                  // V318: élő fordítás alatt ne őrizze meg a régi scroll pozíciót,
+                  // V324: élő fordítás alatt ne őrizze meg a régi scroll pozíciót,
                   // mert ettől nem megy le az ablak az új sorokra.
                   // Kézi/készenléti módban marad a régi nézetmegőrzés.
                   renderBlocks(!(streaming || uiLockedForLive || finalizingStop));
@@ -1112,7 +1118,7 @@ jobs:
                       session.put("instructions", instructions());
                       session.put("output_modalities", new JSONArray().put("text"));
 
-                      // V318: hanglánc-próba: Android hangforrás + Android effektek + OpenAI zajszűrés menüből állítható.
+                      // V324: hanglánc-próba: Android hangforrás + Android effektek + OpenAI zajszűrés menüből állítható.
                       // Tapasztalat: kamionfülkében a túl szigorú helyi kapu levágta a beszéd elejét.
                       // Ezért az alapérték érzékenyebb: a beszéd sértetlenül menjen át, az OpenAI VAD dönt.
                       JSONObject vad = new JSONObject();
@@ -1130,7 +1136,7 @@ jobs:
                       input.put("format", format);
                       input.put("turn_detection", vad);
 
-                      // V318: OpenAI Realtime oldali zajszűrés menüből.
+                      // V324: OpenAI Realtime oldali zajszűrés menüből.
                       // near_field: telefon/headset közeli beszéd. far_field: távolabb lévő mikrofon.
                       if(!"off".equals(openAiNoiseMode)) {
                           JSONObject nr = new JSONObject();
@@ -1138,7 +1144,7 @@ jobs:
                           input.put("noise_reduction", nr);
                       }
 
-                      // V318: STT átállítva gpt-4o-transcribe modellre.
+                      // V324: STT átállítva gpt-4o-transcribe modellre.
                       // A teljes lánc változatlan marad: mikrofon -> Realtime input audio -> transcript -> gpt-realtime-2 fordítás.
                       // Nem állítunk fix language mezőt, mert ugyanabban a munkamenetben TOP és BOTTOM nyelv is megszólalhat.
                       // A 4o-transcribe támogat promptot, ezért a kiválasztott nyelvpárt és a szó szerinti STT-fegyelmet itt is megadjuk.
@@ -1292,13 +1298,13 @@ jobs:
 
               double vadThreshold() {
                   if("high".equals(vadMode)) return 0.50;     // gyors/érzékeny: halk beszédnél könnyebben indul
-                  if("medium".equals(vadMode)) return 0.58;   // V318 alap: kamionban is ne kelljen ordítani
+                  if("medium".equals(vadMode)) return 0.58;   // V324 alap: kamionban is ne kelljen ordítani
                   if("auto".equals(vadMode)) return 0.58;
                   return 0.64;                                // várakozó: hosszabb, óvatosabb blokkzárás
               }
 
               int vadSilenceMs() {
-                  // V318: a szerver VAD mondatzárása sehol nem várhat tovább 500 ms-nál,
+                  // V324: a szerver VAD mondatzárása sehol nem várhat tovább 500 ms-nál,
                   // mert a helyi küldési kapu legfeljebb 600 ms lezáró csendet enged fel.
                   if("high".equals(vadMode)) return 450;
                   if("medium".equals(vadMode)) return 650;
@@ -1307,7 +1313,7 @@ jobs:
               }
 
               int micGateThreshold() {
-                  // V318: a kapu már nem csak nulláz, hanem üresjáratban a küldést is megfogja.
+                  // V324: a kapu már nem csak nulláz, hanem üresjáratban a küldést is megfogja.
                   // sensitive = kikapcsolva: minden hangcsomag megy, a régi folyamatos stream viselkedéshez.
                   if("sensitive".equals(micGateMode)) return 0;
                   if("gate_low".equals(micGateMode)) return 100;
@@ -1642,7 +1648,7 @@ jobs:
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4800);
 
-                  // V318: 24 kHz PCM16 mono marad. Buffer cél kb. 100 ms.
+                  // V324: 24 kHz PCM16 mono marad. Buffer cél kb. 100 ms.
                   // Hangforrás és Android/OpenAI zajszűrés menüből tesztelhető.
                   rec = makeBestAudioRecord(sr, bs);
                   if(rec == null) { runOnUiThread(() -> state.setText("mikrofon hiba")); return; }
@@ -1712,7 +1718,7 @@ jobs:
               void handleConnectionFailure(Throwable t) {
                   String msg = t == null ? "ismeretlen hiba" : String.valueOf(t.getMessage());
 
-                  // V318: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
+                  // V324: lebegő vágólap-fordításnál nincs blokkállapot, csak mini ablak/toast.
                   if(clipboardResponseMode) {
                       clipboardResponseMode = false;
                       pendingClipboardText = "";
@@ -1721,7 +1727,7 @@ jobs:
                       return;
                   }
 
-                  // V318: kézi fordításnál nincs blokkállapot. Hiba esetén nem írunk semmit az ablakokba.
+                  // V324: kézi fordításnál nincs blokkállapot. Hiba esetén nem írunk semmit az ablakokba.
                   if(manualResponseMode) {
                       manualResponseMode = false;
                       pendingManualText = "";
@@ -1752,7 +1758,10 @@ jobs:
                   liveHadTranscriptDelta = false;
                   firstSpeechHeardAt = 0L;
                   liveBufferStartedAt = 0L;
+                  liveHardBlockStartedAt = 0L;
                   liveLastTranscriptDeltaAt = 0L;
+                  liveHardDeadlineArmed = false;
+                  liveHardDeadlineGeneration++;
                   liveIdleFlushToken++;
                   lastLiveBlockReleasedAt = 0L;
                   liveDeltaReleasedSinceLastCompleted = false;
@@ -1796,7 +1805,7 @@ jobs:
 
                       if(type.equals("response.done")) {
                           responseInProgress = false;
-                          // V318: ha egy live fordítás válasz nélkül zárult, a blokk nem veszhet el.
+                          // V324: ha egy live fordítás válasz nélkül zárult, a blokk nem veszhet el.
                           // Korlátozottan újrapróbáljuk, különben marad újrafordíthatóként.
                           if(liveTranslateMode && pendingLiveBlockId >= 0 && pendingOutput.trim().length() == 0) {
                               int missId = pendingLiveBlockId;
@@ -1804,7 +1813,7 @@ jobs:
                               liveTranslateMode = false;
                               runOnUiThread(() -> retryLiveBlockOrRender(missId));
                           }
-                          // V318: élő fordítási sor csak akkor induljon tovább,
+                          // V324: élő fordítási sor csak akkor induljon tovább,
                           // amikor az előző response ténylegesen lezárult a szerver szerint.
                           // Különben a következő response.create könnyen "response in progress" hibára fut,
                           // és a fordítás az első blokk után megáll.
@@ -1839,7 +1848,7 @@ jobs:
                           String msg = er == null ? o.toString() : er.optString("message", er.toString());
                           if(msg.contains("response in progress")) {
                               responseInProgress = true;
-                              // V318: ez nem felhasználói hiba, hanem túl gyors blokkérkezés.
+                              // V324: ez nem felhasználói hiba, hanem túl gyors blokkérkezés.
                               // A blokk nem veszhet el és nem kell Toasttal zajongani: vissza a sor elejére,
                               // majd a következő response.done indítja újra a fordítást.
                               if(liveTranslateMode && pendingLiveBlockId >= 0) {
@@ -1874,7 +1883,7 @@ jobs:
               void manualTranslate() {
                   if(uiLockedForLive || finalizingStop) return;
 
-                  // V318: a FORDÍT gomb külön üzemmód.
+                  // V324: a FORDÍT gomb külön üzemmód.
                   // Először lezárjuk a mikrofont/live sort, utána az aktív ablak teljes szövegét
                   // egyetlen nagy, kontextusos kézi fordításként kezeljük.
                   if(streaming) {
@@ -1957,76 +1966,145 @@ jobs:
 
               void handleTranscriptDelta(String delta) {
                   if(delta == null || delta.length() == 0) return;
-                  liveHadTranscriptDelta = true;
+                  if(!streaming) return;
+
                   long now = System.currentTimeMillis();
+                  liveHadTranscriptDelta = true;
                   liveLastTranscriptDeltaAt = now;
                   if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = now;
-                  if(liveTranscriptBuffer.trim().length() == 0) liveBufferStartedAt = now;
+
+                  // V324: EGYETLEN blokkóra. Csak üres pufferből indulhat.
+                  // Új delta, completed, idle, VAD nem nullázhatja.
+                  if(liveTranscriptBuffer == null) liveTranscriptBuffer = "";
+                  if(liveTranscriptBuffer.trim().length() == 0) {
+                      liveBufferStartedAt = now;
+                      liveHardBlockStartedAt = now;
+                      armLiveHardDeadlineWatchdog();
+                  }
+
                   liveTranscriptBuffer += delta;
 
-                  // V318: a részleges STT delta még javulhat a completed eseményig.
-                  // Normál esetben nem adjuk ki korán, mert ezzel elveszne a modell későbbi
-                  // önjavítása és a teljes mondat kontextusa. Csak a 8 s abszolút blokkmaximum
-                  // kényszeríthet ki delta közbeni vágást.
-                  int released = 0;
-                  long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
-                  long age = started > 0L ? now - started : 0L;
-                  if(age >= MAX_CONTINUOUS_LIVE_BLOCK_MS) {
-                      // V318: valódi 2 mp-es folyamatos blokkkiadás.
-                      // Nem a régi mondat/vessző/karakter okoskodó útvonalat hívjuk,
-                      // hanem szóhatáron levágjuk a puffer kiadható elejét és azonnal fordítási sorba tesszük.
-                      released = forceFlushTimedLivePrefix();
-                      if(released == 0) released = flushReadyTranscriptBlocks(false);
+                  // V324: ha a delta pont a 8 mp után érkezik, azonnal vág.
+                  if(hardFlushExpiredLiveBuffer("after_delta") > 0) return;
+
+                  // V324: 1 mp csend = fordítás. Ez csak rövidíthet, nem hosszabbíthat.
+                  final int token = ++liveIdleFlushToken;
+                  topBox.postDelayed(() -> {
+                      if(token != liveIdleFlushToken) return;
+                      if(!streaming) return;
+                      if(liveTranscriptBuffer == null || liveTranscriptBuffer.trim().length() == 0) return;
+                      if(hardFlushExpiredLiveBuffer("idle_deadline_guard") > 0) return;
+                      forceFlushLiveBufferNow("idle_1000ms");
+                  }, MAX_LIVE_SILENCE_MS);
+              }
+
+              void armLiveHardDeadlineWatchdog() {
+                  if(!streaming) return;
+                  if(liveTranscriptBuffer == null) liveTranscriptBuffer = "";
+                  if(liveHardBlockStartedAt == 0L) liveHardBlockStartedAt = System.currentTimeMillis();
+
+                  // V324: minden új blokk saját generációt kap. A timer nem tolódik el új szóra.
+                  liveHardDeadlineArmed = true;
+                  final int generation = ++liveHardDeadlineGeneration;
+                  final long started = liveHardBlockStartedAt;
+                  final long delay = Math.max(1L, (started + MAX_CONTINUOUS_LIVE_BLOCK_MS) - System.currentTimeMillis());
+                  topBox.postDelayed(() -> {
+                      if(generation != liveHardDeadlineGeneration) return;
+                      if(!streaming) return;
+                      hardFlushExpiredLiveBuffer("watchdog_8000ms");
+                  }, delay);
+              }
+
+              int hardFlushExpiredLiveBuffer(String reason) {
+                  if(!streaming) return 0;
+                  if(liveTranscriptBuffer == null || liveTranscriptBuffer.trim().length() == 0) return 0;
+                  long started = liveHardBlockStartedAt > 0L ? liveHardBlockStartedAt : liveBufferStartedAt;
+                  if(started <= 0L) {
+                      long now = System.currentTimeMillis();
+                      liveBufferStartedAt = now;
+                      liveHardBlockStartedAt = now;
+                      armLiveHardDeadlineWatchdog();
+                      return 0;
                   }
-                  if(released > 0) {
-                      liveDeltaReleasedSinceLastCompleted = true;
+                  long age = System.currentTimeMillis() - started;
+                  if(age < MAX_CONTINUOUS_LIVE_BLOCK_MS) return 0;
+                  return forceFlushLiveBufferNow(reason);
+              }
+
+              int forceFlushLiveBufferNow(String reason) {
+                  String b = liveTranscriptBuffer == null ? "" : liveTranscriptBuffer.trim();
+                  if(b.length() == 0) {
+                      liveTranscriptBuffer = "";
+                      liveBufferStartedAt = 0L;
+                      liveHardBlockStartedAt = 0L;
+                      liveHardDeadlineArmed = false;
+                      liveHardDeadlineGeneration++;
                       liveIdleFlushToken++;
+                      return 0;
                   }
 
-                  // V318: csak akkor ütemezünk utóflush-t, ha tényleg maradt pufferben szöveg.
-                  // Ez nem lassítás: nincs plusz várakozás, csak a régi tokenek érvénytelenítése.
-                  if(liveTranscriptBuffer.trim().length() > 0) {
+                  // V324: előbb leválasztunk, aztán fordítunk. Így semmilyen callback nem tudja visszatolni az órát.
+                  liveTranscriptBuffer = "";
+                  liveBufferStartedAt = 0L;
+                  liveHardBlockStartedAt = 0L;
+                  liveHardDeadlineArmed = false;
+                  liveHardDeadlineGeneration++;
+                  liveIdleFlushToken++;
+
+                  return releaseLiveTextBlock(b);
+              }
+
+              int releaseLiveTextBlock(String raw) {
+                  try {
+                      String b = raw == null ? "" : raw.trim();
+                      if(b.length() == 0) return 0;
+                      b = normalizeAndDeduplicateLiveBlock(b);
+                      if(b.length() == 0) return 0;
+                      boolean sourceGuessTop = sourceIsTopBySelectedPair(b, topActive);
+                      int id = addSourceOnlyBlock(sourceGuessTop, b);
+                      if(id < 0) return 0;
+                      firstSpeechBlockReleased = true;
+                      liveDeltaReleasedSinceLastCompleted = true;
+                      liveTranslateQueue.add(id);
+                      lastLiveBlockReleasedAt = System.currentTimeMillis();
+                      processNextLiveTranslation();
+                      return 1;
+                  } catch(Exception ignored) {
+                      return 0;
+                  }
+              }
+
+              int forceFlushEntireLiveBufferAtDeadline() {
+                  return forceFlushLiveBufferNow("compat_deadline");
+              }
+
+              void handleTranscriptCompleted(String transcript) {
+                  if(!streaming) return;
+
+                  // V324: a completed esemény NEM zár blokkot és NEM indít új órát.
+                  // A blokkot kizárólag az 1 mp csend vagy a 8000 ms hard timer zárja.
+                  // Csak akkor használjuk tartalékként a teljes transcriptet, ha egyetlen delta sem érkezett.
+                  String t = transcript == null ? "" : transcript.trim();
+                  if((liveTranscriptBuffer == null || liveTranscriptBuffer.trim().length() == 0)
+                          && !liveHadTranscriptDelta && t.length() > 0 && !isAlreadyReleasedTranscript(t)) {
+                      long now = System.currentTimeMillis();
+                      liveTranscriptBuffer = t;
+                      liveBufferStartedAt = now;
+                      liveHardBlockStartedAt = now;
+                      armLiveHardDeadlineWatchdog();
+
                       final int token = ++liveIdleFlushToken;
                       topBox.postDelayed(() -> {
-                          if(token == liveIdleFlushToken && streaming && liveTranscriptBuffer.trim().length() > 0) {
-                              flushReadyTranscriptBlocks(true);
-                          }
+                          if(token != liveIdleFlushToken) return;
+                          if(!streaming) return;
+                          if(hardFlushExpiredLiveBuffer("completed_fallback_deadline_guard") > 0) return;
+                          forceFlushLiveBufferNow("completed_fallback_idle_1000ms");
                       }, MAX_LIVE_SILENCE_MS);
                   }
               }
 
-              void handleTranscriptCompleted(String transcript) {
-                  // V318 duplázás-javítás:
-                  // A completed esemény sokszor ugyanazt a teljes mondatot küldi újra,
-                  // amit a delta eseményekből már kiírtunk és fordítottunk.
-                  // Ha volt delta ebben a körben, NEM töltjük vissza a teljes transcriptet,
-                  // csak a bufferben maradt befejezetlen részt zárjuk le.
-                  boolean completedIsOnlyAlreadyReleased = false;
-                  if(transcript != null && transcript.trim().length() > 0) {
-                      completedIsOnlyAlreadyReleased = isAlreadyReleasedTranscript(transcript);
-
-                      // V318: ha ebből az STT körből még nem adtunk ki 8 s-os kényszervágást,
-                      // a completed szöveg felülírja a részleges delta puffert. Ez őrzi meg
-                      // a transcribe modell végső javítását és a teljes mondat kontextusát.
-                      if(!completedIsOnlyAlreadyReleased && !liveDeltaReleasedSinceLastCompleted) {
-                          liveBufferStartedAt = System.currentTimeMillis();
-                          liveTranscriptBuffer = transcript;
-                      } else if(!liveHadTranscriptDelta && liveTranscriptBuffer.trim().length() == 0 && !completedIsOnlyAlreadyReleased) {
-                          liveBufferStartedAt = System.currentTimeMillis();
-                          liveTranscriptBuffer = transcript;
-                      }
-                  }
-                  // V318: completed nem írhatja ki újra azt, amit a delta útvonal már kiadott.
-                  // Ha viszont valódi maradék van a pufferben, azonnal kiengedjük; nincs lassítás.
-                  int released = completedIsOnlyAlreadyReleased ? 0 : flushReadyTranscriptBlocks(true);
-                  if(released > 0) lastLiveBlockReleasedAt = System.currentTimeMillis();
-                  liveIdleFlushToken++;
-                  liveHadTranscriptDelta = false;
-                  liveDeltaReleasedSinceLastCompleted = false;
-              }
-
               void resetLiveRecognitionTimingState() {
-                  // V318: beszédfelismerési időzítés váltásakor nem várunk és nem építünk új kaput.
+                  // V324: beszédfelismerési időzítés váltásakor nem várunk és nem építünk új kaput.
                   // Csak az élő, még le nem zárt transcript állapotot nullázzuk, hogy a régi mód
                   // puffer/időzítője ne zárhasson rá az új mód szabályaira. A már kiadott blokkok
                   // dedupe-cache-e szándékosan megmarad, így egy későn érkező régi completed esemény
@@ -2035,7 +2113,10 @@ jobs:
                   liveHadTranscriptDelta = false;
                   firstSpeechHeardAt = 0L;
                   liveBufferStartedAt = 0L;
+                  liveHardBlockStartedAt = 0L;
                   liveLastTranscriptDeltaAt = 0L;
+                  liveHardDeadlineArmed = false;
+                  liveHardDeadlineGeneration++;
                   liveIdleFlushToken++;
                   lastLiveBlockReleasedAt = 0L;
                   liveDeltaReleasedSinceLastCompleted = false;
@@ -2047,394 +2128,37 @@ jobs:
               }
 
               int flushReadyTranscriptBlocks(boolean flushAll) {
-                  int releasedCount = 0;
-                  // V318: az első élő blokkot nem engedjük ki azonnal 1-2 bizonytalan szóból.
-                  // Ez szűri a kezdő "Microfoonprobe / Kazakhstan / UFO" jellegű félrehallást,
-                  // de nem nyúl az audiohoz és nem épít új nyelvfelismerőt.
-                  if(!firstSpeechBlockReleased && !initialSpeechGateOpen()) return 0;
-                  while(true) {
-                      String b = popReadySpeechBlock(flushAll);
-                      if(b == null || b.trim().length() == 0) break;
+                  if(liveTranscriptBuffer == null || liveTranscriptBuffer.trim().length() == 0) return 0;
+                  if(hardFlushExpiredLiveBuffer("flush_ready_guard") > 0) return 1;
+                  if(flushAll) return forceFlushLiveBufferNow("flush_all");
 
-                      // V318: egyetlen beviteli normalizáló blokk.
-                      // Itt történik a tisztítás, a közvetlen ismétlés összehúzása,
-                      // az előző blokk végével való átfedés levágása és a biztos duplázás kiszűrése.
-                      // Alapelv: ha bizonytalan, átengedjük, nem nyeljük el a beszédet.
-                      b = normalizeAndDeduplicateLiveBlock(b);
-                      if(b.length() == 0) continue;
-                      // V318: valódi tolmács mód. A nyers STT blokkot nem zárjuk magyarra és
-                      // nem dobjuk el helyi nyelvi kapuval. A TOP/BOTTOM forrásnyelvet a meglévő
-                      // AI osztályozó + eredeti nyelvű helyreállító + fordító lépés dönti el.
-                      // A helyi oldalbecslés csak ideiglenes kijelzési hely, az AI válasz után
-                      // a blokk a tényleges SOURCE_LANG szerinti oldalra kerül.
-                      boolean sourceGuessTop = sourceIsTopBySelectedPair(b, topActive);
-                      int id = addSourceOnlyBlock(sourceGuessTop, b);
-                      if(id < 0) continue;
-                      firstSpeechBlockReleased = true;
-                      liveTranslateQueue.add(id);
-                      releasedCount++;
-                      lastLiveBlockReleasedAt = System.currentTimeMillis();
+                  int cut = firstHardSentenceEnd(liveTranscriptBuffer);
+                  if(cut < 0) cut = smartLinguisticCut(liveTranscriptBuffer);
+                  if(cut < 0) return 0;
+
+                  String s = liveTranscriptBuffer;
+                  String b = s.substring(0, Math.min(cut, s.length())).trim();
+                  liveTranscriptBuffer = s.substring(Math.min(cut, s.length())).trim();
+                  if(liveTranscriptBuffer.length() == 0) {
+                      liveBufferStartedAt = 0L;
+                      liveHardBlockStartedAt = 0L;
+                      liveHardDeadlineArmed = false;
+                      liveHardDeadlineGeneration++;
+                  } else {
+                      long now = System.currentTimeMillis();
+                      liveBufferStartedAt = now;
+                      liveHardBlockStartedAt = now;
+                      armLiveHardDeadlineWatchdog();
                   }
-                  if(releasedCount > 0) {
-                      // V318: sikeres kiírás után a régi idle flush már nem zárhat ugyanarra.
-                      liveIdleFlushToken++;
-                  }
-                  // V318: a blokkok sorrendben kerülnek a meglévő egyetlen live fordítási sorba.
-                  // Egyszerre csak egy blokk fordul; a kézi FORDÍT lehetőség változatlanul megmarad.
-                  if(releasedCount > 0) processNextLiveTranslation();
-                  return releasedCount;
+                  return releaseLiveTextBlock(b);
               }
 
               boolean initialSpeechGateOpen() {
-                  String s = liveTranscriptBuffer == null ? "" : liveTranscriptBuffer.trim();
-                  if(s.length() == 0) return false;
-                  int words = s.split("\\s+").length;
-                  long age = firstSpeechHeardAt > 0L ? System.currentTimeMillis() - firstSpeechHeardAt : 0L;
-
-                  // V318: nincs külön szótáras nyelvkapu az első blokknál.
-                  // Rövid válasz is beszéd. Csak minimális stabilizálást várunk, hogy ne fél karakter menjen fordításra.
-                  if(age >= MIN_TRUE_SPEECH_AUDIO_MS && s.length() >= 2 && words >= 1) return true;
-                  if(firstHardSentenceEnd(s) >= 0 && words >= 1) return true;
-                  if(s.length() >= 18 && words >= 2) return true;
-                  return false;
+                  return liveTranscriptBuffer != null && liveTranscriptBuffer.trim().length() > 0;
               }
 
               int forceFlushTimedLivePrefix() {
-                  try {
-                      if(!firstSpeechBlockReleased && !initialSpeechGateOpen()) return 0;
-                      String s = liveTranscriptBuffer == null ? "" : liveTranscriptBuffer;
-                      String t = s.trim();
-                      if(t.length() == 0) return 0;
-
-                      int cut = safeWholeBufferFlushCut(s);
-                      if(cut <= 0 || cut > s.length()) cut = s.length();
-
-                      String b = s.substring(0, cut).trim();
-                      liveTranscriptBuffer = s.substring(cut).trim();
-                      liveBufferStartedAt = liveTranscriptBuffer.length() > 0 ? System.currentTimeMillis() : 0L;
-
-                      b = normalizeAndDeduplicateLiveBlock(b);
-                      if(b.length() == 0) return 0;
-
-                      boolean sourceGuessTop = sourceIsTopBySelectedPair(b, topActive);
-                      int id = addSourceOnlyBlock(sourceGuessTop, b);
-                      if(id < 0) return 0;
-
-                      firstSpeechBlockReleased = true;
-                      liveTranslateQueue.add(id);
-                      lastLiveBlockReleasedAt = System.currentTimeMillis();
-                      processNextLiveTranslation();
-                      return 1;
-                  } catch(Exception ignored) {
-                      return 0;
-                  }
-              }
-
-              boolean isAlreadyReleasedTranscript(String transcript) {
-                  if(transcript == null) return false;
-                  String b = cleanTranscriptForSelectedPair(transcript);
-                  b = collapseAdjacentRepeatedPhrase(b);
-                  b = finalizeSpeechBlockText(b);
-                  b = applyTinyHungarianTermFixes(b);
-                  b = b.trim().replaceAll("\\s+", " ");
-                  if(b.length() == 0) return false;
-                  String h = normalizeLiveBlockHash(b);
-                  if(h.length() < 8) return false;
-                  return matchesVeryRecentReleasedBlock(h);
-              }
-
-              boolean matchesVeryRecentReleasedBlock(String h) {
-                  if(h == null || h.length() < 8) return false;
-                  if(recentLiveBlockHashes.contains(h)) return true;
-                  int checked = 0;
-                  Iterator<String> it = recentLiveBlockHashOrder.descendingIterator();
-                  while(it.hasNext() && checked < 8) {
-                      String old = it.next();
-                      checked++;
-                      if(old == null || old.length() < 8) continue;
-                      int min = Math.min(h.length(), old.length());
-                      int max = Math.max(h.length(), old.length());
-                      if(min >= 18 && (h.contains(old) || old.contains(h)) && (min * 100 / Math.max(1, max)) >= 82) return true;
-                  }
-                  return false;
-              }
-
-              String normalizeAndDeduplicateLiveBlock(String raw) {
-                  if(raw == null) return "";
-                  String b = cleanTranscriptForSelectedPair(raw);
-
-                  // V318: egyetlen beviteli normalizáló lánc, nem új kapu.
-                  // Előbb a blokkon belüli közvetlen ismétlést húzzuk össze bárhol,
-                  // nem csak a blokk elején. Ez fogja meg a mondat közepén jelentkező
-                  // közvetlen ismétlést is.
-                  b = collapseAdjacentRepeatedPhrase(b);
-                  b = finalizeSpeechBlockText(b);
-                  b = applyTinyHungarianTermFixes(b);
-
-                  // Utána csak az előző kész blokk végéből az új blokk elejére átcsúszó
-                  // biztos átfedést vágjuk le. Ha bizonytalan, átengedjük.
-                  b = trimRecentLiveBlockOverlap(b);
-                  if(b == null) return "";
-                  b = b.trim().replaceAll("\\s+", " ");
-                  if(b.length() == 0) return "";
-
-                  String h = normalizeLiveBlockHash(b);
-                  if(h.length() < 3) return "";
-
-                  // V318: legutolsó lépésként, minden tisztítás után hasonlítunk a közvetlenül
-                  // frissen kiadott blokkokhoz. Nem új kapu: ugyanennek a normalizáló blokknak
-                  // a vége. Csak teljes vagy majdnem teljes ismétlést dobunk el.
-                  if(matchesVeryRecentReleasedBlock(h)) return "";
-
-                  rememberLiveBlockHash(h);
-                  return b;
-              }
-
-              String collapseAdjacentRepeatedPhrase(String raw) {
-                  if(raw == null) return "";
-                  String t = raw.trim().replaceAll("\\s+", " ");
-                  if(t.length() == 0) return t;
-                  String[] w = t.split("\\s+");
-                  if(w.length < 6) return t;
-
-                  ArrayList<String> out = new ArrayList<>();
-                  int i = 0;
-                  while(i < w.length) {
-                      boolean collapsed = false;
-                      int maxN = Math.min(10, (w.length - i) / 2);
-                      for(int n=maxN; n>=3; n--) {
-                          boolean same = true;
-                          for(int j=0; j<n; j++) {
-                              String a = normalizeLiveBlockHash(w[i+j]);
-                              String b = normalizeLiveBlockHash(w[i+n+j]);
-                              if(a.length() == 0 || !a.equals(b)) { same = false; break; }
-                          }
-                          if(same) {
-                              for(int j=0; j<n; j++) out.add(w[i+j]);
-                              i += n * 2;
-                              collapsed = true;
-                              break;
-                          }
-                      }
-                      if(!collapsed) {
-                          out.add(w[i]);
-                          i++;
-                      }
-                  }
-
-                  StringBuilder sb = new StringBuilder();
-                  for(String x : out) {
-                      if(sb.length() > 0) sb.append(' ');
-                      sb.append(x);
-                  }
-                  return sb.toString().trim();
-              }
-
-              void rememberLiveBlockHash(String h) {
-                  if(h == null || h.length() < 3) return;
-                  recentLiveBlockHashes.add(h);
-                  recentLiveBlockHashOrder.add(h);
-                  while(recentLiveBlockHashOrder.size() > 80) {
-                      String old = recentLiveBlockHashOrder.poll();
-                      if(old != null) recentLiveBlockHashes.remove(old);
-                  }
-              }
-
-              String finalizeSpeechBlockText(String raw) {
-                  if(raw == null) return "";
-                  String t = raw.trim().replaceAll("\\s+", " ");
-                  while(t.startsWith(",") || t.startsWith(";") || t.startsWith(":")) t = t.substring(1).trim();
-                  if(t.length() == 0) return "";
-                  // V318: vesszőből / pontosvesszőből / kettőspontból nem gyártunk pontot.
-                  // Ezek sokszor folytatást jelölnek, a hamis pont pedig rossz blokk- és
-                  // nagybetűs mondatkezdést okozott.
-                  return t;
-              }
-
-              boolean isAllowedShortReply(String text) {
-                  if(text == null) return false;
-                  String x = text.toLowerCase(Locale.ROOT)
-                      .replaceAll("[^a-z0-9áéíóöőúüűàâçèéêëîïôùûüÿñæœß\\s]", " ")
-                      .replaceAll("\\s+", " ").trim();
-                  if(x.length() == 0) return false;
-                  if(isClipboardSystemMessage(x)) return false;
-
-                  String[] one = {
-                      "igen","nem","jó","jo","ok","oké","oke","rendben","persze","talán","talan",
-                      "ma","holnap","tegnap","reggel","este","itt","ott","köszönöm","koszonom",
-                      "oui","non","bon","merci","demain","hier","matin","soir",
-                      "yes","no","okay","thanks","tomorrow","yesterday"
-                  };
-                  for(String w: one) if(x.equals(w)) return true;
-
-                  String[] two = {
-                      "nem tudom","jó lesz","jo lesz","ma este","holnap reggel","holnap este",
-                      "igen köszönöm","igen koszonom","nem köszönöm","nem koszonom",
-                      "oui merci","non merci","d accord","daccord","yes thanks","no thanks"
-                  };
-                  for(String w: two) if(x.equals(w)) return true;
-                  return false;
-              }
-
-              String applyTinyHungarianTermFixes(String raw) {
-                  if(raw == null) return "";
-                  String x = raw.trim().replaceAll("\\s+", " ");
-                  if(x.length() == 0) return x;
-
-                  // V318: NEM általános szótár. Csak pár, tesztben sokszor félrehallott fix kifejezés.
-                  x = x.replaceAll("(?iu)\\bblu\\s*t[uú]+t[h]?\\b", "Bluetooth");
-                  x = x.replaceAll("(?iu)\\bbluetooth[- ]?ot\\b", "Bluetoothot");
-                  x = x.replaceAll("(?iu)\\bbluetooth[- ]?on\\b", "Bluetoothon");
-                  x = x.replaceAll("(?iu)\\bblutus\\b", "Bluetooth");
-                  x = x.replaceAll("(?iu)\\bblut[uú]sz\\b", "Bluetooth");
-                  x = x.replaceAll("(?iu)\\bblue\\s*tooth\\b", "Bluetooth");
-
-                  x = x.replaceAll("(?iu)\\bs[íi]r[íi]\\s+csend\\b", "síri csend");
-                  x = x.replaceAll("(?iu)\\bs[íi]li\\s+csend\\b", "síri csend");
-                  x = x.replaceAll("(?iu)\\bs[íi]r[íi]ts?en\\b", "síri csend");
-                  x = x.replaceAll("(?iu)\\bs[íi]ri\\s+csendes\\b", "síri csendes");
-
-                  return x.trim().replaceAll("\\s+", " ");
-              }
-
-              boolean passesSelectedPairInputGate(String block) {
-                  if(block == null) return false;
-                  String t = cleanTranscriptForSelectedPair(block).trim();
-                  if(t.length() == 0) return false;
-                  if(isClipboardSystemMessage(t.toLowerCase(Locale.ROOT))) return false;
-
-                  // V318: a korábbi szótáras TOP/BOTTOM nyelvdetektor és harmadiknyelv-tiltó kapuk kikerültek
-                  // az élő mikrofonos útból. Ezek rövid FR/HU válaszokat dobtak el.
-                  // Itt csak azt döntjük el, hogy van-e emberi szövegnek látszó beviteli blokk.
-                  // A két kiválasztott nyelv közötti döntést a fordítómodell végzi a pairRules() alapján.
-                  return t.length() >= 1;
-              }
-
-              boolean sourceIsTopBySelectedPair(String text, boolean fallback) {
-                  // V318: előzetes szótáras nyelvdöntés nincs.
-                  // A nyers blokk ideiglenesen az aktuális oldalra kerül, majd az AI SOURCE_LANG alapján átkerülhet.
-                  return fallback;
-              }
-
-              String selectedPairLanguageCode(String text) {
-                  return "";
-              }
-
-              int scoreShortReplyForSelectedLang(String text, String lang) { return 0; }
-              int scoreTextForSelectedLang(String text, String lang) { return 0; }
-              boolean looksLikeNonFrHuNoise(String text) { return false; }
-
-              boolean isLikelyNoisyTranscriptBlock(String block) {
-                  if(block == null) return true;
-                  String t = cleanTranscriptForSelectedPair(block).trim();
-                  if(t.length() == 0) return true;
-                  // V318: nincs idegen nyelves tiltólista az élő útban.
-                  return false;
-              }
-
-              String trimRecentLiveBlockOverlap(String block) {
-                  if(block == null) return "";
-                  String raw = block.trim().replaceAll("\\s+", " ");
-                  String h = normalizeLiveBlockHash(raw);
-                  if(h.length() < 8) return raw;
-                  String[] nw = h.split("\\s+");
-                  String[] rawWords = raw.split("\\s+");
-
-                  for(String old : recentLiveBlockHashOrder) {
-                      if(old == null || old.length() < 8) continue;
-                      String[] ow = old.split("\\s+");
-                      if(ow.length < 2 || nw.length < 2) continue;
-
-                      // Ha a régi blokk teljes egészében az új blokk elején ismétlődik,
-                      // csak ezt az eleji ismétlést vágjuk le, az új folytatást megtartjuk.
-                      int fullOld = Math.min(ow.length, nw.length);
-                      if(fullOld >= 3) {
-                          boolean oldAtStart = true;
-                          for(int i=0; i<fullOld; i++) {
-                              if(!ow[i].equals(nw[i])) { oldAtStart = false; break; }
-                          }
-                          if(oldAtStart && fullOld < rawWords.length) {
-                              StringBuilder sb = new StringBuilder();
-                              for(int i=fullOld; i<rawWords.length; i++) {
-                                  if(sb.length() > 0) sb.append(' ');
-                                  sb.append(rawWords[i]);
-                              }
-                              return sb.toString().trim();
-                          }
-                      }
-
-                      int maxN = Math.min(10, Math.min(ow.length, nw.length));
-                      for(int n=maxN; n>=2; n--) {
-                          boolean suffixPrefix = true;
-                          for(int i=0; i<n; i++) {
-                              if(!ow[ow.length-n+i].equals(nw[i])) { suffixPrefix = false; break; }
-                          }
-                          if(suffixPrefix) {
-                              if(n >= rawWords.length) return "";
-                              StringBuilder sb = new StringBuilder();
-                              for(int i=n; i<rawWords.length; i++) {
-                                  if(sb.length() > 0) sb.append(' ');
-                                  sb.append(rawWords[i]);
-                              }
-                              return sb.toString().trim();
-                          }
-                      }
-                  }
-                  return raw;
-              }
-
-              boolean markLiveBlockQueued(String block) {
-                  String h = normalizeLiveBlockHash(block);
-                  if(h.length() < 3) return false;
-                  if(recentLiveBlockHashes.contains(h)) return false;
-                  rememberLiveBlockHash(h);
-                  return true;
-              }
-
-              boolean isRecentlySimilarLiveBlock(String h) {
-                  if(h == null || h.length() < 8) return false;
-                  String[] a = h.split("\\s+");
-
-                  for(String old : recentLiveBlockHashOrder) {
-                      if(old == null || old.length() < 8) continue;
-                      int min = Math.min(h.length(), old.length());
-                      int max = Math.max(h.length(), old.length());
-
-                      // V318: gyors mondatzárásnál a delta és a completed/flush sokszor átfedő blokkot ad.
-                      // Nem hanghoz nyúlunk, csak az utolsó blokkokkal való szöveg-átfedést fogjuk meg.
-                      if(min >= 10 && (h.contains(old) || old.contains(h)) && (min * 100 / Math.max(1, max)) >= 58) return true;
-
-                      String[] b = old.split("\\s+");
-
-                      // Az új blokk eleje sokszor az előző blokk vége. Ez tipikus duplázási minta.
-                      if(a.length >= 2 && b.length >= 2) {
-                          int maxN = Math.min(5, Math.min(a.length, b.length));
-                          for(int n=maxN; n>=2; n--) {
-                              boolean suffixPrefix = true;
-                              for(int i=0; i<n; i++) {
-                                  if(!b[b.length-n+i].equals(a[i])) { suffixPrefix = false; break; }
-                              }
-                              if(suffixPrefix) continue;
-
-                              boolean prefixSuffix = true;
-                              for(int i=0; i<n; i++) {
-                                  if(!a[a.length-n+i].equals(b[i])) { prefixSuffix = false; break; }
-                              }
-                              if(prefixSuffix) return true;
-                          }
-                      }
-
-                      if(a.length >= 3 && b.length >= 3) {
-                          HashSet<String> sa = new HashSet<>(Arrays.asList(a));
-                          HashSet<String> sb = new HashSet<>(Arrays.asList(b));
-                          int common = 0;
-                          for(String w : sa) if(sb.contains(w)) common++;
-                          int small = Math.min(sa.size(), sb.size());
-                          int large = Math.max(sa.size(), sb.size());
-                          if(small >= 3 && common * 100 / Math.max(1, small) >= 80 && small * 100 / Math.max(1, large) >= 65) return true;
-                      }
-                  }
-                  return false;
+                  return forceFlushLiveBufferNow("timed_prefix_compat");
               }
 
               String normalizeLiveBlockHash(String block) {
@@ -2445,69 +2169,31 @@ jobs:
               }
 
               String popReadySpeechBlock(boolean flushAll) {
-                  String s = liveTranscriptBuffer == null ? "" : liveTranscriptBuffer;
-                  if(s.trim().length() == 0) { liveTranscriptBuffer = ""; return null; }
-
-                  int cut = findLiveBlockCut(s, flushAll);
-                  if(cut < 0) return null;
-
-                  String out = s.substring(0, cut).trim();
-                  liveTranscriptBuffer = s.substring(cut).trim();
-                  liveBufferStartedAt = liveTranscriptBuffer.length() > 0 ? System.currentTimeMillis() : 0L;
-                  return out;
+                  String s = liveTranscriptBuffer == null ? "" : liveTranscriptBuffer.trim();
+                  if(s.length() == 0) return null;
+                  if(!flushAll && hardFlushExpiredLiveBuffer("pop_guard") == 0) return null;
+                  liveTranscriptBuffer = "";
+                  liveBufferStartedAt = 0L;
+                  liveHardBlockStartedAt = 0L;
+                  liveHardDeadlineArmed = false;
+                  liveHardDeadlineGeneration++;
+                  return s;
               }
 
               int findLiveBlockCut(String s, boolean flushAll) {
-                  if(s == null) return -1;
-                  String t = s.trim();
-                  if(t.length() == 0) return -1;
-
-                  // V318: egyszerű blokkhatár-döntés.
-                  // Ha van kész mondatvég, azonnal zár.
-                  // Ha nincs, 2 mp folyamatos puffer után szóhatáron zár.
-                  // Nincs karakter-, vessző-, szótár- vagy többágú monológlogika.
+                  if(s == null || s.trim().length() == 0) return -1;
+                  if(flushAll) return s.length();
                   int cut = firstHardSentenceEnd(s);
                   if(cut >= 0) return cut;
-
                   cut = smartLinguisticCut(s);
                   if(cut >= 0) return cut;
-
-                  long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
-                  long age = started > 0L ? System.currentTimeMillis() - started : 0L;
-                  if(age >= MAX_CONTINUOUS_LIVE_BLOCK_MS) {
-                      int forced = safeWholeBufferFlushCut(s);
-                      return forced >= 0 ? forced : s.length();
-                  }
-
-                  if(flushAll) return safeWholeBufferFlushCut(s);
-
+                  long started = liveHardBlockStartedAt > 0L ? liveHardBlockStartedAt : liveBufferStartedAt;
+                  if(started > 0L && System.currentTimeMillis() - started >= MAX_CONTINUOUS_LIVE_BLOCK_MS) return s.length();
                   return -1;
               }
 
               int safeWholeBufferFlushCut(String s) {
-                  if(s == null) return -1;
-                  String t = s.trim();
-                  if(t.length() == 0) return -1;
-
-                  int words = t.split("\\s+").length;
-                  long sinceDelta = liveLastTranscriptDeltaAt > 0L ? System.currentTimeMillis() - liveLastTranscriptDeltaAt : 99999L;
-
-                  // V318: 1-5 szavas puffer esetén nincs szótár, nincs nyelvtani kapu,
-                  // nincs "hátha majd mondat lesz" várakozás. A meglévő completed/idle esemény
-                  // kiadja, ami bent van. Ez javítja az igen/nem/működik jellegű beragadást.
-                  if(words <= 5) return s.length();
-
-                  // Hosszabb blokknál maradhat az utolsó friss token védelme, de csak itt.
-                  // Így a fél szó elleni védelem nem fogja meg a rövid válaszokat.
-                  if(sinceDelta <= 700 && hasPossiblyUnstableTrailingToken(t)) {
-                      int cut2 = lastWhitespaceBeforeLastToken(s);
-                      if(cut2 > 0) {
-                          String prefix = s.substring(0, cut2).trim();
-                          int prefixWords = prefix.length() == 0 ? 0 : prefix.split("\\s+").length;
-                          if(prefixWords >= 3) return cut2;
-                          return -1;
-                      }
-                  }
+                  if(s == null || s.trim().length() == 0) return -1;
                   return s.length();
               }
 
@@ -2538,20 +2224,20 @@ jobs:
               }
 
               boolean shouldFlushShortIdleBlock(String s) {
-                  // V318: kompatibilitási segédfüggvény. A blokkzárás fő döntése már a
+                  // V324: kompatibilitási segédfüggvény. A blokkzárás fő döntése már a
                   // findLiveBlockCut(flushAll) ágban történik, ezért itt nincs szótár és nincs
                   // nyelvtani visszatartás. Rövid puffer idle esetén kiadható.
                   if(s == null) return false;
                   String t = s.trim();
                   if(t.length() == 0) return false;
                   int words = t.split("\\s+").length;
-                  long started = liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt;
+                  long started = liveHardBlockStartedAt > 0L ? liveHardBlockStartedAt : (liveBufferStartedAt > 0L ? liveBufferStartedAt : firstSpeechHeardAt);
                   long age = started > 0L ? System.currentTimeMillis() - started : 0L;
                   return age >= 1000 && words <= 5;
               }
 
               boolean shouldForceFlushWholeBuffer(String s) {
-                  // V318: nincs külön nyelvtani kapu. Completed/idle esetén a központi
+                  // V324: nincs külön nyelvtani kapu. Completed/idle esetén a központi
                   // safeWholeBufferFlushCut dönt, ezért ez csak régi hívásokhoz marad egyszerűen.
                   return s != null && s.trim().length() > 0;
               }
@@ -2591,7 +2277,7 @@ jobs:
                   int preferredEnd = Math.min(len, 185);
                   int preferredStart = Math.min(len, 75);
 
-                  // V318: V318 alap, de kevésbé engedékeny hosszú blokkoknál.
+                  // V324: V324 alap, de kevésbé engedékeny hosszú blokkoknál.
                   // Nem audio, nem VAD, nem időzítő. Csak a már beérkezett szöveg stabil elejét vágjuk le,
                   // hogy hosszú folyamatos beszédnél se legyen egyetlen óriás blokk.
 
@@ -2602,7 +2288,7 @@ jobs:
                   });
                   if(cut > 0) return cut;
 
-                  // 2) Feltételes / következő gondolat kezdete. V318-höz képest kicsit bátrabb,
+                  // 2) Feltételes / következő gondolat kezdete. V324-höz képest kicsit bátrabb,
                   // mert a beszélt nyelvben sokszor nincs pont, csak új gondolat kezdődik.
                   cut = lastConnectorCut(lower, 90, preferredEnd, new String[]{
                           ", és akkor ", ", akkor ", ", hogyha ", ", ha ", ", amikor ",
@@ -2672,7 +2358,7 @@ jobs:
 
               String cleanTranscriptForSelectedPair(String text) {
                   if(text == null) return "";
-                  // V318: ez továbbra sem saját nagy nyelvfelismerő. Csak biztonsági tisztítás:
+                  // V324: ez továbbra sem saját nagy nyelvfelismerő. Csak biztonsági tisztítás:
                   // idegen írásrendszeres STT-szemét nem kerülhet ki az ablakokba vagy fordításba.
                   String x = text.replaceAll("[^A-Za-z0-9\\u00C0-\\u024F\\p{Punct}\\s]", " ");
                   return x.replaceAll("\\s+", " ").trim();
@@ -2684,7 +2370,7 @@ jobs:
               }
 
               boolean looksLikeObviousThirdLanguageNoise(String text) {
-                  // V318: harmadik nyelv szótáras tiltólista kikapcsolva az élő fordításban.
+                  // V324: harmadik nyelv szótáras tiltólista kikapcsolva az élő fordításban.
                   // A két nyelvre zárást a liveBlockInstructions/pairRules és a SOURCE_LANG feldolgozás végzi.
                   return false;
               }
@@ -2699,7 +2385,7 @@ jobs:
 
               boolean isUsableLiveTriple(String[] trp) {
                   if(trp == null || trp.length < 3) return false;
-                  // V318: SOURCE_LANG hiánya vagy pontatlan címkéje nem dobhatja el a fordítást.
+                  // V324: SOURCE_LANG hiánya vagy pontatlan címkéje nem dobhatja el a fordítást.
                   // A forrásoldal ilyenkor a meglévő blokk oldala marad.
                   String original = trp[1] == null ? "" : cleanTranscriptForSelectedPair(trp[1]).trim();
                   String translation = trp[2] == null ? "" : cleanTranscriptForSelectedPair(cleanOneBlockTranslation(trp[2])).trim();
@@ -2721,7 +2407,7 @@ jobs:
               }
 
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
-                  // V318: gyors visszajelzés. A nyers STT azonnal látható az aktuális oldalon,
+                  // V324: gyors visszajelzés. A nyers STT azonnal látható az aktuális oldalon,
                   // ugyanakkor pendingSourceText-ben is megmarad, hogy a valid AI-válasz után
                   // a blokk átkerülhessen a valódi SOURCE_LANG szerinti oldalra.
                   if(isRecentlyDisplayedSourceDuplicate(sourceIsTop, original)) return -1;
@@ -2783,7 +2469,7 @@ jobs:
 
                       int min = Math.min(h.length(), oh.length());
                       int max = Math.max(h.length(), oh.length());
-                      // V318: csak majdnem teljes azonosságot fogunk meg.
+                      // V324: csak majdnem teljes azonosságot fogunk meg.
                       // A hasonló, de eltérő blokk ne essen ki, mert az beszédvesztéshez vezetett.
                       if(min >= 24 && (h.contains(oh) || oh.contains(h)) && (min * 100 / Math.max(1, max)) >= 92) return true;
                   }
@@ -2881,7 +2567,7 @@ jobs:
                           translation = trp[2] == null ? "" : trp[2];
                           sourceIsTop = sourceIsTopFromAi(sourceLang, b.sourceTop);
                       } else {
-                          // V318: nincs nyers AI-válasz fallback.
+                          // V324: nincs nyers AI-válasz fallback.
                           // Ha a live fordító nem ad szabályos SOURCE_LANG / ORIGINAL / TRANSLATION hármast,
                           // a blokk hibásként újrapróbálható vagy kiesik, de prompt/meta szöveg nem kerülhet ablakba.
                           retryLiveBlockOrRender(id);
@@ -2934,7 +2620,7 @@ jobs:
                   }
                   pendingLiveBlockId = -1;
                   liveTranslateMode = false;
-                  // V318: nem indítjuk azonnal a következő live fordítást itt.
+                  // V324: nem indítjuk azonnal a következő live fordítást itt.
                   // Megvárjuk a response.done eseményt, mert a text.done után
                   // a szerver oldalon még lehet aktív válasz, és a következő
                   // response.create különben megakaszthatja a sort.
@@ -2960,7 +2646,7 @@ jobs:
                       return;
                   }
 
-                  // V318: állapot nélküli / késve érkező AI-válasz nem hibaüzenet a felhasználónak.
+                  // V324: állapot nélküli / késve érkező AI-válasz nem hibaüzenet a felhasználónak.
                   // Nem hozunk létre belőle új blokkot, de nem is zavarjuk meg az aktív mikrofonos munkát toasttal.
                   android.util.Log.w("Fordito", "Állapot nélküli AI-válasz figyelmen kívül hagyva: " + out);
                   if(streaming) state.setText("mikrofon aktív");
@@ -3216,7 +2902,7 @@ jobs:
                   String text = title + "\n" + sub;
                   SpannableString ss = new SpannableString(text);
 
-                  // V318: olvashatóbb tolmács mód gomb.
+                  // V324: olvashatóbb tolmács mód gomb.
                   // A felső sor kisebb, az állapot nagyobb és félkövér.
                   ss.setSpan(new AbsoluteSizeSpan(13, true), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   ss.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
@@ -3399,14 +3085,14 @@ jobs:
 
                       Button paste = overlayBtn("BEILLESZT", Color.rgb(30,120,75), 12);
                       Button copy = overlayBtn("MÁSOL\nRENDEZ", Color.rgb(45,95,150), 11);
-                      LinearLayout.LayoutParams pasteLp = new LinearLayout.LayoutParams(200,108);
+                      LinearLayout.LayoutParams pasteLp = new LinearLayout.LayoutParams(210,108);
                       pasteLp.setMargins(0,0,0,4);
-                      LinearLayout.LayoutParams copyLp = new LinearLayout.LayoutParams(200,108);
+                      LinearLayout.LayoutParams copyLp = new LinearLayout.LayoutParams(210,108);
                       copyLp.setMargins(0,4,0,0);
                       group.addView(paste, pasteLp);
                       group.addView(copy, copyLp);
 
-                      final android.view.WindowManager.LayoutParams lp = floatingParams(200, 224, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+                      final android.view.WindowManager.LayoutParams lp = floatingParams(210, 224, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
                       lp.x = floatingButtonX;
                       lp.y = floatingButtonY;
 
@@ -3508,7 +3194,7 @@ jobs:
               }
 
               void pasteClipboardToLanguageBox() {
-                  // V318: Android háttérben futó overlayből sok készüléken nem engedi a vágólap olvasását.
+                  // V324: Android háttérben futó overlayből sok készüléken nem engedi a vágólap olvasását.
                   // Ezért előbb előtérbe hozzuk a Forditót, és csak utána, kis késleltetéssel olvassuk ki.
                   bringAppToFrontForClipboardRead();
                   new Handler().postDelayed(() -> pasteClipboardToLanguageBoxAfterForeground(), 260);
@@ -3790,12 +3476,12 @@ jobs:
               }
 
               void stopClipboardSystemSpeech(boolean toast) {
-                  // V318: a régi háromablakos/vágólapos diktálási ág ki van szerelve.
+                  // V324: a régi háromablakos/vágólapos diktálási ág ki van szerelve.
                   // Ez csak kompatibilitási lezáró csonk a régi lifecycle/menu hivatkozásokhoz.
               }
 
               void applyClipboardTranslation(String out) {
-                  // V318: a régi háromablakos vágólapfordító ág ki van szerelve.
+                  // V324: a régi háromablakos vágólapfordító ág ki van szerelve.
                   // Késve érkező régi válasz nem kerülhet ablakba vagy vágólapra.
                   clipboardResponseMode = false;
               }
@@ -4092,7 +3778,7 @@ jobs:
               }
 
               void applyInputProfileValues() {
-                  // V318: egyetlen valódi hanglánc-blokk.
+                  // V324: egyetlen valódi hanglánc-blokk.
                   // A mikrofon/STT értékeket nem több külön menü és nem régi mentés darabjai vezérlik,
                   // hanem a kiválasztott hangprofil. Így nincs placebo-érzés és nincs egymás ellen dolgozó beállítás.
                   if("truck_noisy".equals(soundProfile)) {
@@ -4252,7 +3938,7 @@ jobs:
                   showCenteredMenu(top ? "Felső nyelv" : "Alsó nyelv", labels, (d,w) -> {
                       if(top) topLang = langs[w][2];
                       else bottomLang = langs[w][2];
-                      // V318: nyelvválasztás nem jelent forrásablak-választást.
+                      // V324: nyelvválasztás nem jelent forrásablak-választást.
                       // A beszéd következő transcript blokkjánál automatikusan döntünk a felismert nyelv alapján.
                       topBox.clearFocus();
                       bottomBox.clearFocus();
@@ -4332,7 +4018,7 @@ jobs:
               }
 
               void setLiveUiLocked(boolean locked) {
-                  // V318: élő mikrofon alatt nem zárjuk a kezelőfelületet.
+                  // V324: élő mikrofon alatt nem zárjuk a kezelőfelületet.
                   // A háttérmód miatt a véletlen nyomkodás elleni régi védelemre nincs szükség;
                   // csak a mikrofon gomb színe/szövege jelzi az aktív állapotot.
                   uiLockedForLive = false;
@@ -4376,7 +4062,7 @@ jobs:
               }
 
               void stopWithFinalizeDelay() {
-                  // V318: a mikrofon leállítása nem tartja lezárva a menüt/fordítás gombot.
+                  // V324: a mikrofon leállítása nem tartja lezárva a menüt/fordítás gombot.
                   // Meghagyjuk kompatibilitásból, de hosszú 1.8 mp várakozás nélkül.
                   try { stop(); } catch(Exception ignored) {}
                   finalizingStop = false;
@@ -4555,14 +4241,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V318.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V318.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V324.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V324.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V318
+          name: V324
           path: |
             artifact/*.apk
             artifact/*.aab
