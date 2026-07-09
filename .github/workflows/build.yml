@@ -1,4 +1,4 @@
-name: Build Android APK V330
+name: Build Android APK V331
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 330; versionName = "33.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 331; versionName = "33.1" }
 
               signingConfigs {
                   create("release") {
@@ -2431,13 +2431,19 @@ jobs:
                           }
                       });
                   } catch(Exception e) {
-                      speechTranslateMode = false;
-                      pendingSpeechBlockId = -1;
-                      responseInProgress = false;
+                      retrySpeechBlockOrRender(id);
                   }
               }
           
               void retrySpeechBlockOrRender(int id) {
+                  // A hibás/szabálytalan válasz után a jelenlegi fordítási tulajdonost mindig feloldjuk.
+                  // Enélkül a processNextSpeechTranslation() saját foglaltsági kapuja megállítja a retry-t
+                  // és az egész fordítási sor végleg beragad.
+                  responseInProgress = false;
+                  speechTranslateMode = false;
+                  pendingSpeechBlockId = -1;
+                  pendingOutput = "";
+
                   if(id >= 0 && id < textBlocks.size()) {
                       TextBlock b = textBlocks.get(id);
                       b.translatedOk = false;
@@ -2448,9 +2454,11 @@ jobs:
                           return;
                       }
                   }
-                  // Ha az újrapróbálás elfogyott, nem írjuk ki a nyers STT-t rossz oldalra,
-                  // de a pendingSourceText megmarad, hogy a blokk később még újrafordítható legyen.
+
+                  // Ha ennek a blokknak elfogyott az újrapróbálása, a sor nem állhat meg:
+                  // a pendingSourceText megmarad, a következő várakozó blokk pedig továbbfordul.
                   renderBlocksKeepView();
+                  if(!speechTranslateQueue.isEmpty()) processNextSpeechTranslation();
               }
           
               void applySpeechTranslation(String out) {
@@ -2927,16 +2935,16 @@ jobs:
                       floatingClipboardCollapsed = true;
           
                       Button mini = btn("⇄");
-                      mini.setTextSize(18);
+                      mini.setTextSize(20);
                       mini.setTextColor(Color.WHITE);
                       mini.setGravity(Gravity.CENTER);
                       mini.setIncludeFontPadding(false);
                       mini.setPadding(0,0,0,0);
-                      mini.setTranslationY(-3f);
+                      mini.setTranslationY(-6f);
                       mini.setBackground(roundBg(Color.rgb(30,140,75)));
                       if(android.os.Build.VERSION.SDK_INT >= 21) mini.setBackgroundTintList(null);
           
-                      final android.view.WindowManager.LayoutParams lp = floatingParams(67, 67, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+                      final android.view.WindowManager.LayoutParams lp = floatingParams(72, 72, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
                       lp.x = floatingButtonX;
                       lp.y = floatingButtonY;
           
