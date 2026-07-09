@@ -1,4 +1,4 @@
-name: Build Android APK V329
+name: Build Android APK V330
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 329; versionName = "32.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 330; versionName = "33.0" }
 
               signingConfigs {
                   create("release") {
@@ -245,13 +245,13 @@ jobs:
               String interpreterAudioMode = "off";
               String lastInterpreterAudioMode = "headset";
               volatile long ttsMuteUntilMs = 0L;
-              static final int MAX_TRAILING_SILENCE_SEND_MS = 600;
+              static final int MAX_TRAILING_SILENCE_SEND_MS = 400;
               static final int PRE_ROLL_AUDIO_MS = 500;
               // Élő tolmács blokkzárás - egy központi időlogika:
               // 150 ms valódi beszéd alatt zajnak tekintjük, 1.2 s csendnél zárunk,
               // 10 s folyamatos beszédnél szóhatáron vágunk akkor is, ha nincs csend.
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
-              static final int MAX_SPEECH_SILENCE_MS = 1200;
+              static final int MAX_SPEECH_SILENCE_MS = 800;
               static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 10000;
               volatile long lastVoiceChunkSentAtMs = 0L;
               volatile boolean trailingSilenceOpen = false;
@@ -2930,7 +2930,9 @@ jobs:
                       mini.setTextSize(18);
                       mini.setTextColor(Color.WHITE);
                       mini.setGravity(Gravity.CENTER);
+                      mini.setIncludeFontPadding(false);
                       mini.setPadding(0,0,0,0);
+                      mini.setTranslationY(-3f);
                       mini.setBackground(roundBg(Color.rgb(30,140,75)));
                       if(android.os.Build.VERSION.SDK_INT >= 21) mini.setBackgroundTintList(null);
           
@@ -2986,8 +2988,8 @@ jobs:
                       LinearLayout group = new LinearLayout(this);
                       group.setOrientation(LinearLayout.VERTICAL);
           
-                      Button paste = overlayBtn("BEILLESZT", Color.rgb(30,120,75), 12);
-                      Button copy = overlayBtn("MÁSOL\nRENDEZ", Color.rgb(45,95,150), 11);
+                      Button paste = overlayBtn("BEILLESZT", Color.rgb(30,120,75), 11);
+                      Button copy = overlayBtn("MÁSOL\nRENDEZ", Color.rgb(45,95,150), 10);
                       LinearLayout.LayoutParams pasteLp = new LinearLayout.LayoutParams(200,108);
                       pasteLp.setMargins(0,0,0,4);
                       LinearLayout.LayoutParams copyLp = new LinearLayout.LayoutParams(200,108);
