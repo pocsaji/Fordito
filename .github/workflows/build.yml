@@ -1,4 +1,4 @@
-name: Build Android APK V331
+name: Build Android APK V332
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 331; versionName = "33.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 332; versionName = "33.2" }
 
               signingConfigs {
                   create("release") {
@@ -1451,7 +1451,13 @@ jobs:
                                           sendAudioChunk(tail);
                                           continue;
                                       } else {
-                                          flushSpeechAudioWindow(false);
+                                      // 2026-07-09: csend utáni STT-küldés gyorsítása.
+                                      // Előtte: flushSpeechAudioWindow(false) futott, ami 1200 ms minimum audioablakot kért.
+                                      // Tünet: beszéd befejezése után kb. 2-3 mp késéssel jelent meg a felismert szöveg.
+                                      // Most: true -> 400 ms minimum audioablak elég, ezért hamarabb küldjük STT-re.
+                                      // Ha később túl korai vágás, rövid töredék vagy rosszabb felismerés jelentkezik,
+                                      // ezt az egy sort kell visszaállítani false értékre.
+                                      flushSpeechAudioWindow(true);
                                       }
                                   }
           
