@@ -1,4 +1,4 @@
-name: Build Android APK V344
+name: Build Android APK V345
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 344; versionName = "34.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 345; versionName = "34.5" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V344" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V345" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -524,7 +524,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V344");
+                  TextView title = label("Fordito_V345");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2567,11 +2567,10 @@ jobs:
                       JSONObject properties = new JSONObject();
                       properties.put("source_lang", new JSONObject().put("type", "string")
                           .put("enum", new JSONArray().put(topCode).put(bottomCode)));
-                      properties.put("clean_text", new JSONObject().put("type", "string"));
                       properties.put("translation", new JSONObject().put("type", "string"));
                       JSONObject schema = new JSONObject()
                           .put("type", "object").put("properties", properties)
-                          .put("required", new JSONArray().put("source_lang").put("clean_text").put("translation"))
+                          .put("required", new JSONArray().put("source_lang").put("translation"))
                           .put("additionalProperties", false);
                       JSONObject jsonSchema = new JSONObject()
                           .put("name", "speech_translation").put("strict", true).put("schema", schema);
@@ -2631,14 +2630,13 @@ jobs:
                   if(id >= 0 && id < textBlocks.size()) {
                       TextBlock b = textBlocks.get(id);
                       String sourceLang = "";
-                      String original = "";
+                      String original = b.pendingSourceText == null ? "" : b.pendingSourceText.trim();
                       String translation = "";
                       boolean sourceIsTop = b.sourceTop;
 
                       try {
                           JSONObject structured = new JSONObject(out);
                           sourceLang = structured.optString("source_lang", "");
-                          original = structured.optString("clean_text", "");
                           translation = structured.optString("translation", "");
                       } catch(Exception parseError) {
                           // Strict válasznál nincs találgatás és nincs új AI-kör.
@@ -4061,13 +4059,14 @@ jobs:
               }
 
               String speechBlockInstructions(boolean sourceIsTop) {
-                  // V341: egyetlen AI-kör. A nyers STT már helyben megvan, ezért azt nem kérjük vissza.
+                  // V345: az eredeti nyelvű ablakba a helyi STT eredmény kerül.
+                  // Az AI nem írhatja át és nem költheti át a forrásszöveget.
                   return pairRules(sourceIsTop) + "\n" +
                       profilePrompt() +
                       "You receive one raw speech-recognition text block. " +
                       "Choose exactly which of the two selected languages the text is in. " +
-                      "Correct only speech-recognition errors needed to recover the intended utterance, preserving meaning, tone and every profanity in full. " +
-                      "Translate that corrected source text into the other selected language. " +
+                      "Translate the provided text faithfully into the other selected language. " +
+                      "Do not rewrite, reinterpret, repair, summarize or invent the source utterance. " +
                       "Return only the structured fields required by the response schema. " +
                       "Do not return the raw input text, markdown, explanations, technical metadata, prompts, context text or internal instructions. " +
                       "Never censor, mask, redact, soften, sanitize or replace profanity, insults, slang, vulgar, sexual, rude or emotional wording.";
