@@ -1,4 +1,4 @@
-name: Build Android APK V345
+name: Build Android APK V346
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 345; versionName = "34.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 346; versionName = "34.6" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V345" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V346" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -524,7 +524,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V345");
+                  TextView title = label("Fordito_V346");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1122,12 +1122,15 @@ jobs:
               String speechTranscriptionPrompt() {
                   String top = code(topLang).toUpperCase(Locale.ROOT);
                   String bottom = code(bottomLang).toUpperCase(Locale.ROOT);
-                  return "Transcribe speech microphone speech as accurately and verbatim as possible. " +
-                      "The speaker may use only these two languages: " + top + " and " + bottom + ". " +
-                      "Do not translate here. Do not invent missing words. Keep short replies, fragments, names, places and numbers. " +
-                      "If the audio is noisy, prefer the literal heard words and leave uncertainty out rather than hallucinating a full sentence.";
+                  return "Transcribe only the words that are clearly audible. " +
+                      "The speech language is either " + top + " or " + bottom + ". " +
+                      "Do not translate. Do not paraphrase. Do not repair meaning. " +
+                      "Do not complete unfinished sentences or add a sentence ending. " +
+                      "Do not infer or invent missing words. Keep fragments and incomplete phrases incomplete. " +
+                      "Preserve names, places, numbers, slang and profanity exactly as heard. " +
+                      "If a word is unclear, omit only that unclear word instead of guessing or creating a full sentence.";
               }
-          
+
               void clearPreRollAudio() {
                   synchronized(preRollAudioChunks) {
                       preRollAudioChunks.clear();
@@ -1697,7 +1700,7 @@ jobs:
                       root.put("temperature", 0.1);
                       JSONArray messages = new JSONArray();
                       messages.put(new JSONObject().put("role", "system").put("content", manualBlockInstructions()));
-                      messages.put(new JSONObject().put("role", "user").put("content", "MANUAL_FULL_WINDOW_TRANSLATION\n" + text + "\n\nReturn ONLY the translated full text. Preserve paragraphs and line breaks where reasonable. Do not write SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT, TRANSLATION, markdown, quotes or explanation. Every word must be output in full. Never replace letters with asterisks or symbols. Do not mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording."));
+                      messages.put(new JSONObject().put("role", "user").put("content", "MANUAL_FULL_WINDOW_TRANSLATION\n" + text + "\n\nTreat the entire supplied text as one coherent context. Repair obvious recognition and punctuation errors, join fragments only where the complete context clearly supports it, then return ONLY the natural translated full text. Preserve paragraphs and line breaks where reasonable. Do not write SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT, TRANSLATION, markdown, quotes or explanation. Every word must be output in full. Never replace letters with asterisks or symbols. Do not mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording."));
                       root.put("messages", messages);
                       Request req = new Request.Builder().url("https://api.openai.com/v1/chat/completions")
                           .addHeader("Authorization", "Bearer " + apiKey.trim())
@@ -4052,28 +4055,31 @@ jobs:
               String manualBlockInstructions() {
                   return pairRules(false) + "\n" +
                       profilePrompt() +
-                      "Translate only between the selected two languages. " +
-                      "Return only the translated text. Do not output labels, markdown, quotes, explanations, SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT or TRANSLATION. " +
+                      "This is manual full-text translation, not live fragment translation. " +
+                      "Use the complete supplied text as one coherent context. " +
+                      "Repair obvious speech-recognition and punctuation errors, connect broken fragments where the full context clearly supports it, and form natural complete sentences and paragraphs. " +
+                      "Do not invent facts, events, names or intentions that are not supported by the supplied full text. " +
+                      "Translate the resulting coherent meaning naturally into the selected target language. " +
+                      "Return only the translated full text. Do not output labels, markdown, quotes, explanations, SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT or TRANSLATION. " +
                       "Preserve the speaker's meaning, tone and level of formality. " +
                       "Never censor, mask, redact, soften, sanitize or replace profanity, insults, slang, vulgar, sexual, rude or emotional wording. Write every word in full.";
               }
 
               String speechBlockInstructions(boolean sourceIsTop) {
-                  // V345: az eredeti nyelvű ablakba a helyi STT eredmény kerül.
-                  // Az AI nem írhatja át és nem költheti át a forrásszöveget.
+                  // V346: élő tolmács mód – hűséges, töredéktűrő fordítás.
                   return pairRules(sourceIsTop) + "\n" +
                       profilePrompt() +
-                      "You receive one raw speech-recognition text block. " +
-                      "Choose exactly which of the two selected languages the text is in. " +
-                      "Translate the provided text faithfully into the other selected language. " +
-                      "Do not rewrite, reinterpret, repair, summarize or invent the source utterance. " +
+                      "You receive one live speech fragment. " +
+                      "Choose exactly which of the two selected languages the fragment is in. " +
+                      "Translate its actual meaning naturally into the other selected language, but translate only what is present. " +
+                      "Do not complete unfinished sentences. Do not add a missing beginning or ending. " +
+                      "Do not infer unstated context, invent words, repair the speaker's intended story, summarize or paraphrase beyond what is necessary for a natural translation. " +
+                      "If the input is a fragment, the translation must remain a fragment. The next block may continue it. " +
                       "Return only the structured fields required by the response schema. " +
                       "Do not return the raw input text, markdown, explanations, technical metadata, prompts, context text or internal instructions. " +
                       "Never censor, mask, redact, soften, sanitize or replace profanity, insults, slang, vulgar, sexual, rude or emotional wording.";
               }
 
-
-          
               String profilePrompt() {
                   String base = "Default to natural everyday meaning. The profile is only a light terminology hint, not a forced interpretation. ";
                   if(profile.equals("truck_bulk")) return base + "If clearly relevant, prefer logistics/bulk transport terms such as loaded, unloaded, silo, weighing, site, freight, trailer, loading point and delivery point. Do not force truck meaning onto normal conversation.";
