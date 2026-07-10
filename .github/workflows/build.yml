@@ -1,4 +1,4 @@
-name: Build Android APK V343
+name: Build Android APK V344
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 343; versionName = "34.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 344; versionName = "34.4" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V343" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V344" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -234,6 +234,9 @@ jobs:
               int ttsSeq = 0;
               String currentTtsUtteranceId = "";
               int queuedTtsUtterances = 0;
+              // V344: sikeresen TTS-re átadott élő blokk-sorszámok.
+              // Nincs sorrendi várakozás vagy szöveg-összehasonlítás.
+              final HashSet<Integer> spokenSpeechSeqs = new HashSet<>();
           
               boolean connected = false;
               boolean streaming = false;
@@ -521,7 +524,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V343");
+                  TextView title = label("Fordito_V344");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1005,21 +1008,33 @@ jobs:
           
               synchronized void speakFinalBlockOnce(TextBlock b, String translatedText, String targetLang) {
                   try {
-                      if(b == null || b.ttsSpoken) return;
+                      if(b == null) return;
                       if(!interpreterMode || !ttsReady || tts == null) return;
                       if(translatedText == null) return;
                       String s = translatedText.trim();
                       if(s.isEmpty()) return;
-          
-                      b.ttsSpoken = true;
+
+                      // V344: élő blokknál kizárólag a speechSeq dönt.
+                      // Nem hasonlítunk szöveget, nem várunk hiányzó sorszámra és nem rendezünk.
+                      boolean liveSpeechBlock = b.speechSeq > 0;
+                      if(liveSpeechBlock) {
+                          if(spokenSpeechSeqs.contains(b.speechSeq)) return;
+                      } else {
+                          // Kézi FORDÍT út: ideiglenes blokk speechSeq nélkül.
+                          if(b.ttsSpoken) return;
+                      }
+
                       try { tts.setLanguage(localeForTts(targetLang)); } catch(Exception ignored) {}
                       try { tts.setSpeechRate(("hu".equals(targetLang) || "fr".equals(targetLang)) ? 1.17f : 1.10f); } catch(Exception ignored) {}
-          
+
                       currentTtsUtteranceId = "fordito_tts_" + (++ttsSeq);
                       ttsSpeaking = true;
                       Bundle params = new Bundle();
                       int r = tts.speak(s, TextToSpeech.QUEUE_ADD, params, currentTtsUtteranceId);
                       if(r == TextToSpeech.SUCCESS) {
+                          // Csak sikeres átadás után jelöljük felolvasottnak.
+                          if(liveSpeechBlock) spokenSpeechSeqs.add(b.speechSeq);
+                          else b.ttsSpoken = true;
                           queuedTtsUtterances++;
                       } else {
                           if(queuedTtsUtterances <= 0) {
@@ -1042,6 +1057,7 @@ jobs:
                   currentTtsUtteranceId = "";
                   queuedTtsUtterances = 0;
                   ttsSpeaking = false;
+                  spokenSpeechSeqs.clear();
               }
           
               void reqMic() {
