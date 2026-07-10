@@ -1,4 +1,4 @@
-name: Build Android APK V349
+name: Build Android APK V350
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 349; versionName = "34.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 350; versionName = "35.0" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V349" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V350" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -222,7 +222,7 @@ jobs:
               String clipboardSpeechCommittedText = "";
               String clipboardSpeechLastPartial = "";
               Button clipboardMicButton;
-              Button micBtn, arrangeBtn, translateBtn, menuBtn, topLangBtn, bottomLangBtn;
+              Button micBtn, arrangeBtn, translateBtn, menuBtn, topLangBtn, centerLangBtn, bottomLangBtn;
               SharedPreferences sp;
               OkHttpClient client;
               AudioRecord rec;
@@ -268,7 +268,7 @@ jobs:
               static final int BLOCK_OVERLAP_MS = 1000;
               final Object speechAudioWindowLock = new Object();
               ByteArrayOutputStream speechAudioWindow = new ByteArrayOutputStream();
-              String vadEngineMode = "webrtc"; // only: webrtc / silero / silero_truck / pass
+              String vadEngineMode = "webrtc"; // WebRTC/Silero: quiet / medium / noisy + pass
               Object speechVadInstance = null;
               String speechVadInstanceMode = "";
               ByteArrayOutputStream vadFrameBuffer = new ByteArrayOutputStream();
@@ -407,9 +407,12 @@ jobs:
               };
           
               final String[][] vadEngineModes = {
-                  {"WebRTC VAD", "webrtc"},
+                  {"WebRTC VAD – csendes", "webrtc_quiet"},
+                  {"WebRTC VAD – közepes", "webrtc_medium"},
+                  {"WebRTC VAD – zajos", "webrtc"},
                   {"Silero VAD – csendes", "silero"},
-                  {"Silero VAD – kamion", "silero_truck"},
+                  {"Silero VAD – közepes", "silero_medium"},
+                  {"Silero VAD – zajos", "silero_truck"},
                   {"Passz / nincs zajkapu", "pass"}
               };
           
@@ -450,7 +453,7 @@ jobs:
                   vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "xhigh");
                   vadEngineMode = sp.getString("vadEngineMode", "webrtc");
-                  if(!"webrtc".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode) && !"pass".equals(vadEngineMode)) vadEngineMode = "webrtc";
+                  if(!"webrtc_quiet".equals(vadEngineMode) && !"webrtc_medium".equals(vadEngineMode) && !"webrtc".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode) && !"pass".equals(vadEngineMode)) vadEngineMode = "webrtc";
                   audioSourceMode = sp.getString("audioSourceMode", "recognition");
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   lastInterpreterAudioMode = sp.getString("lastInterpreterAudioMode", "headset");
@@ -524,7 +527,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V349");
+                  TextView title = label("Fordito_V350");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -533,10 +536,11 @@ jobs:
           
                   LinearLayout langRow = row();
                   topLangBtn = btn("FELSŐ");
-                  
-                                    bottomLangBtn = btn("ALSÓ");
+                  centerLangBtn = btn("");
+                  centerLangBtn.setContentDescription("Későbbi funkció");
+                  bottomLangBtn = btn("ALSÓ");
                   langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,85,1));
-                  
+                  langRow.addView(centerLangBtn, new LinearLayout.LayoutParams(0,85,1));
                   langRow.addView(bottomLangBtn, new LinearLayout.LayoutParams(0,85,1));
                   root.addView(langRow);
           
@@ -570,18 +574,20 @@ jobs:
                   bottomBox.addTextChangedListener(manualWatcher(false));
                   applyDisplayMode();
                   
-                  topLangBtn.setOnClickListener(v -> chooseLang(true));
-                  bottomLangBtn.setOnClickListener(v -> chooseLang(false));
-                  topLangBtn.setOnLongClickListener(v -> { copyBox(true); return true; });
-                  bottomLangBtn.setOnLongClickListener(v -> { copyBox(false); return true; });
+                  topLangBtn.setOnClickListener(v -> { hapticTap(v); chooseLang(true); });
+                  bottomLangBtn.setOnClickListener(v -> { hapticTap(v); chooseLang(false); });
+                  centerLangBtn.setOnClickListener(v -> hapticTap(v));
+                  topLangBtn.setOnLongClickListener(v -> { hapticTap(v); copyBox(true); return true; });
+                  bottomLangBtn.setOnLongClickListener(v -> { hapticTap(v); copyBox(false); return true; });
                   micBtn.setOnClickListener(v -> {
+                      hapticTap(v);
                       if(streaming) stop();
                       else start(true);
                   });
-                  arrangeBtn.setOnClickListener(v -> manualArrange());
-                  translateBtn.setOnClickListener(v -> manualTranslate());
-                  menuBtn.setOnClickListener(v -> menu());
-                  menuBtn.setOnLongClickListener(v -> { clearBothBoxes(); return true; });
+                  arrangeBtn.setOnClickListener(v -> { hapticTap(v); manualArrange(); });
+                  translateBtn.setOnClickListener(v -> { hapticTap(v); manualTranslate(); });
+                  menuBtn.setOnClickListener(v -> { hapticTap(v); menu(); });
+                  menuBtn.setOnLongClickListener(v -> { hapticTap(v); clearBothBoxes(); return true; });
           
                   updateButtons();
               }
@@ -608,7 +614,31 @@ jobs:
                   b.setTextSize(15);
                   b.setSingleLine(true);
                   b.setPadding(4,2,4,2);
+                  b.setMinHeight(0);
+                  b.setMinimumHeight(0);
+                  b.setHapticFeedbackEnabled(true);
+                  if(android.os.Build.VERSION.SDK_INT >= 21) {
+                      b.setStateListAnimator(null);
+                      b.setBackgroundTintList(null);
+                  }
+                  setOvalButtonColor(b, Color.rgb(55,60,70));
                   return b;
+              }
+
+              void setOvalButtonColor(Button b, int color) {
+                  if(b == null) return;
+                  b.setBackground(rectBg(color));
+                  if(android.os.Build.VERSION.SDK_INT >= 21) b.setBackgroundTintList(null);
+              }
+
+              void hapticTap(View v) {
+                  if(v == null) return;
+                  try {
+                      v.performHapticFeedback(
+                          android.view.HapticFeedbackConstants.KEYBOARD_TAP,
+                          android.view.HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
+                      );
+                  } catch(Exception ignored) {}
               }
           
               EditText box(String hint) {
@@ -1219,27 +1249,27 @@ jobs:
               }
           
               Object buildVadByReflection(String mode) throws Exception {
-                  if("webrtc".equals(mode)) {
+                  if("webrtc_quiet".equals(mode) || "webrtc_medium".equals(mode) || "webrtc".equals(mode)) {
                       Class<?> vadClass = Class.forName("com.konovalov.vad.webrtc.Vad");
                       Object b = vadClass.getMethod("builder").invoke(null);
                       b.getClass().getMethod("setSampleRate", Class.forName("com.konovalov.vad.webrtc.config.SampleRate")).invoke(b, enumConst("com.konovalov.vad.webrtc.config.SampleRate", "SAMPLE_RATE_16K"));
                       b.getClass().getMethod("setFrameSize", Class.forName("com.konovalov.vad.webrtc.config.FrameSize")).invoke(b, enumConst("com.konovalov.vad.webrtc.config.FrameSize", "FRAME_SIZE_320"));
-                      b.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.webrtc.config.Mode")).invoke(b, enumConst("com.konovalov.vad.webrtc.config.Mode", "VERY_AGGRESSIVE"));
+                      String webRtcModeName = "webrtc_quiet".equals(mode) ? "NORMAL"
+                          : ("webrtc_medium".equals(mode) ? "AGGRESSIVE" : "VERY_AGGRESSIVE");
+                      b.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.webrtc.config.Mode")).invoke(b, enumConst("com.konovalov.vad.webrtc.config.Mode", webRtcModeName));
                       b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, 300);
                       b.getClass().getMethod("setSpeechDurationMs", int.class).invoke(b, 50);
                       return b.getClass().getMethod("build").invoke(b);
                   }
-                  if("silero".equals(mode) || "silero_truck".equals(mode)) {
+                  if("silero".equals(mode) || "silero_medium".equals(mode) || "silero_truck".equals(mode)) {
                       Class<?> vadClass = Class.forName("com.konovalov.vad.silero.Vad");
                       Object b = vadClass.getMethod("builder").invoke(null);
                       b.getClass().getMethod("setContext", android.content.Context.class).invoke(b, this);
                       b.getClass().getMethod("setSampleRate", Class.forName("com.konovalov.vad.silero.config.SampleRate")).invoke(b, enumConst("com.konovalov.vad.silero.config.SampleRate", "SAMPLE_RATE_16K"));
                       b.getClass().getMethod("setFrameSize", Class.forName("com.konovalov.vad.silero.config.FrameSize")).invoke(b, enumConst("com.konovalov.vad.silero.config.FrameSize", "FRAME_SIZE_512"));
-                      // 2026-07-09: Silero két profil.
-                      // silero: csendes/általános környezet, NORMAL mód.
-                      // silero_truck: kamion/zajos környezet, WebRTC-hez közelített, szigorúbb döntés.
-                      // Ha a kamionos Silero túl sok beszédet levág, itt kell visszavenni NORMAL-ra.
-                      String sileroModeName = "silero_truck".equals(mode) ? "AGGRESSIVE" : "NORMAL";
+                      // V350 tesztprofilok: csendes=NORMAL, közepes=AGGRESSIVE, zajos=VERY_AGGRESSIVE.
+                      String sileroModeName = "silero".equals(mode) ? "NORMAL"
+                          : ("silero_medium".equals(mode) ? "AGGRESSIVE" : "VERY_AGGRESSIVE");
                       b.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.silero.config.Mode")).invoke(b, enumConst("com.konovalov.vad.silero.config.Mode", sileroModeName));
                       b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, 300);
                       b.getClass().getMethod("setSpeechDurationMs", int.class).invoke(b, 50);
@@ -1250,7 +1280,7 @@ jobs:
           
               boolean ensureExternalVadReady() {
                   if("pass".equals(vadEngineMode)) return true;
-                  if(!"webrtc".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode)) return false;
+                  if(!"webrtc_quiet".equals(vadEngineMode) && !"webrtc_medium".equals(vadEngineMode) && !"webrtc".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode)) return false;
                   if(speechVadInstance != null && vadEngineMode.equals(speechVadInstanceMode)) return true;
                   closeExternalVad();
                   try {
@@ -4132,10 +4162,14 @@ jobs:
 
 
               String vadEngineLabel() {
-                  if("silero_truck".equals(vadEngineMode)) return "Silero VAD – kamion";
+                  if("webrtc_quiet".equals(vadEngineMode)) return "WebRTC VAD – csendes";
+                  if("webrtc_medium".equals(vadEngineMode)) return "WebRTC VAD – közepes";
+                  if("webrtc".equals(vadEngineMode)) return "WebRTC VAD – zajos";
                   if("silero".equals(vadEngineMode)) return "Silero VAD – csendes";
+                  if("silero_medium".equals(vadEngineMode)) return "Silero VAD – közepes";
+                  if("silero_truck".equals(vadEngineMode)) return "Silero VAD – zajos";
                   if("pass".equals(vadEngineMode)) return "Passz / nincs zajkapu";
-                  return "WebRTC VAD";
+                  return vadEngineMode;
               }
 
               String clipboardContextPrompt() {
@@ -4262,24 +4296,25 @@ jobs:
                       int red = Color.rgb(150,55,50);
                       int orange = Color.rgb(170,105,30);
           
-                      if(topLangBtn != null) topLangBtn.setBackgroundColor(topActive ? active : inactive);
-                      if(bottomLangBtn != null) bottomLangBtn.setBackgroundColor(!topActive ? active : inactive);
+                      if(topLangBtn != null) setOvalButtonColor(topLangBtn, topActive ? active : inactive);
+                      if(bottomLangBtn != null) setOvalButtonColor(bottomLangBtn, !topActive ? active : inactive);
+                      setOvalButtonColor(centerLangBtn, inactive);
                       
-                      if(arrangeBtn != null) arrangeBtn.setBackgroundColor(inactive);
-                      if(translateBtn != null) translateBtn.setBackgroundColor(inactive);
-                      if(menuBtn != null) menuBtn.setBackgroundColor(inactive);
+                      if(arrangeBtn != null) setOvalButtonColor(arrangeBtn, inactive);
+                      if(translateBtn != null) setOvalButtonColor(translateBtn, inactive);
+                      if(menuBtn != null) setOvalButtonColor(menuBtn, inactive);
           
                       if(micBtn != null) {
                           micBtn.setEnabled(true);
                           if(finalizingStop) {
                               micBtn.setText("VÁRJ");
-                              micBtn.setBackgroundColor(orange);
+                              setOvalButtonColor(micBtn, orange);
                           } else if(streaming) {
                               micBtn.setText("STOP");
-                              micBtn.setBackgroundColor(green);
+                              setOvalButtonColor(micBtn, green);
                           } else {
                               micBtn.setText("MIKROFON");
-                              micBtn.setBackgroundColor(red);
+                              setOvalButtonColor(micBtn, red);
                           }
                       }
                   } catch(Exception ignored) {}
@@ -4296,14 +4331,15 @@ jobs:
           
               void updateButtons() {
                   micBtn.setText(streaming ? "STOP" : "MIKROFON");
-                  micBtn.setBackgroundColor(streaming ? Color.rgb(30,130,70) : Color.rgb(90,50,50));
-                  arrangeBtn.setBackgroundColor(Color.rgb(55,60,70));
-                  translateBtn.setBackgroundColor(Color.rgb(55,60,70));
-                  menuBtn.setBackgroundColor(hasKey() ? Color.rgb(55,60,70) : Color.rgb(140,80,30));
+                  setOvalButtonColor(micBtn, streaming ? Color.rgb(30,130,70) : Color.rgb(90,50,50));
+                  setOvalButtonColor(arrangeBtn, Color.rgb(55,60,70));
+                  setOvalButtonColor(translateBtn, Color.rgb(55,60,70));
+                  setOvalButtonColor(menuBtn, hasKey() ? Color.rgb(55,60,70) : Color.rgb(140,80,30));
                   topLangBtn.setText("FELSŐ: " + code(topLang));
                   bottomLangBtn.setText("ALSÓ: " + code(bottomLang));
-                  topLangBtn.setBackgroundColor(topActive ? Color.rgb(60,95,150) : Color.rgb(55,60,70));
-                  bottomLangBtn.setBackgroundColor(!topActive ? Color.rgb(60,95,150) : Color.rgb(55,60,70));
+                  setOvalButtonColor(topLangBtn, topActive ? Color.rgb(60,95,150) : Color.rgb(55,60,70));
+                  setOvalButtonColor(bottomLangBtn, !topActive ? Color.rgb(60,95,150) : Color.rgb(55,60,70));
+                  setOvalButtonColor(centerLangBtn, Color.rgb(55,60,70));
                   styleUiState();
                   refreshInterpreterFloatingButton();
               }
@@ -4466,14 +4502,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V349.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V349.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V350.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V350.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V349
+          name: V350
           path: |
             artifact/*.apk
             artifact/*.aab
