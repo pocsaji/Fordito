@@ -1,4 +1,4 @@
-name: Build Android APK V341
+name: Build Android APK V342
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 341; versionName = "34.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 342; versionName = "34.2" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V341" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V342" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -252,7 +252,7 @@ jobs:
               // 10 s folyamatos beszédnél szóhatáron vágunk akkor is, ha nincs csend.
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
               static final int MAX_SPEECH_SILENCE_MS = 800;
-              static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 10000;
+              static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 8000;
               volatile long lastVoiceChunkSentAtMs = 0L;
               volatile boolean trailingSilenceOpen = false;
               volatile boolean voiceSendActive = false;
@@ -260,9 +260,9 @@ jobs:
               int preRollAudioBytes = 0;
               final ArrayDeque<byte[]> pendingSpeechAudioChunks = new ArrayDeque<>();
               int pendingSpeechAudioMs = 0;
-              static final int BLOCK_WINDOW_MS = 10000;
+              static final int BLOCK_WINDOW_MS = 8000;
               static final int BLOCK_ACCEPT_MS = 8000;
-              static final int BLOCK_OVERLAP_MS = 2000;
+              static final int BLOCK_OVERLAP_MS = 1000;
               final Object speechAudioWindowLock = new Object();
               ByteArrayOutputStream speechAudioWindow = new ByteArrayOutputStream();
               String vadEngineMode = "webrtc"; // only: webrtc / silero / silero_truck / pass
@@ -521,7 +521,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V341");
+                  TextView title = label("Fordito_V342");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -803,10 +803,94 @@ jobs:
               }
           
               void renderBlocksKeepView() {
-                  // V318: élő fordítás alatt ne őrizze meg a régi scroll pozíciót,
-                  // mert ettől nem megy le az ablak az új sorokra.
-                  // Kézi/készenléti módban marad a régi nézetmegőrzés.
-                  renderBlocks(!(streaming || uiLockedForSpeech || finalizingStop));
+                  // V342: normál élő frissítéskor legfeljebb az utolsó két látható blokk változhat.
+                  // A régebbi stabil előtaghoz nem nyúlunk. Szerkezeti műveleteknél marad a teljes renderBlocks().
+                  renderLastTwoVisibleBlocks(!(streaming || uiLockedForSpeech || finalizingStop));
+              }
+
+              void renderLastTwoVisibleBlocks(boolean keepView) {
+                  ArrayList<TextBlock> visible = new ArrayList<>();
+                  for(TextBlock b : textBlocks) {
+                      if(b == null) continue;
+                      String bt = b.topText == null ? "" : b.topText;
+                      String bb = b.bottomText == null ? "" : b.bottomText;
+                      if(bt.trim().length() == 0 && bb.trim().length() == 0) continue;
+                      visible.add(b);
+                  }
+
+                  if(visible.size() <= 2 || topRanges.size() < visible.size() - 1 || bottomRanges.size() < visible.size() - 1) {
+                      renderBlocks(keepView);
+                      return;
+                  }
+
+                  int firstMutable = visible.size() - 2;
+                  if(firstMutable < 0 || firstMutable >= topRanges.size() || firstMutable >= bottomRanges.size()) {
+                      renderBlocks(keepView);
+                      return;
+                  }
+
+                  int topCut = topRanges.get(firstMutable)[0];
+                  int bottomCut = bottomRanges.get(firstMutable)[0];
+                  if(topCut < 0 || topCut > topBox.getText().length() ||
+                     bottomCut < 0 || bottomCut > bottomBox.getText().length()) {
+                      renderBlocks(keepView);
+                      return;
+                  }
+
+                  StringBuilder topTail = new StringBuilder();
+                  StringBuilder bottomTail = new StringBuilder();
+                  ArrayList<int[]> newTopTailRanges = new ArrayList<>();
+                  ArrayList<int[]> newBottomTailRanges = new ArrayList<>();
+
+                  for(int i=firstMutable; i<visible.size(); i++) {
+                      TextBlock b = visible.get(i);
+                      if(i > firstMutable) {
+                          topTail.append("\n");
+                          bottomTail.append("\n");
+                      }
+                      String bt = b.topText == null ? "" : b.topText;
+                      String bb = b.bottomText == null ? "" : b.bottomText;
+
+                      int ts = topCut + topTail.length();
+                      topTail.append(bt);
+                      newTopTailRanges.add(new int[]{ts, topCut + topTail.length()});
+
+                      int bs = bottomCut + bottomTail.length();
+                      bottomTail.append(bb);
+                      newBottomTailRanges.add(new int[]{bs, bottomCut + bottomTail.length()});
+                  }
+
+                  int topScroll = topBox.getScrollY();
+                  int bottomScroll = bottomBox.getScrollY();
+                  int topSel = Math.max(0, topBox.getSelectionStart());
+                  int bottomSel = Math.max(0, bottomBox.getSelectionStart());
+                  boolean topHadFocus = topBox.hasFocus();
+                  boolean bottomHadFocus = bottomBox.hasFocus();
+
+                  programmaticChange = true;
+                  try {
+                      topBox.getText().replace(topCut, topBox.getText().length(), topTail.toString());
+                      bottomBox.getText().replace(bottomCut, bottomBox.getText().length(), bottomTail.toString());
+
+                      while(topRanges.size() > firstMutable) topRanges.remove(topRanges.size() - 1);
+                      while(bottomRanges.size() > firstMutable) bottomRanges.remove(bottomRanges.size() - 1);
+                      topRanges.addAll(newTopTailRanges);
+                      bottomRanges.addAll(newBottomTailRanges);
+
+                      if(keepView) {
+                          topBox.setSelection(Math.min(topSel, topBox.getText().length()));
+                          bottomBox.setSelection(Math.min(bottomSel, bottomBox.getText().length()));
+                          if(topHadFocus) topBox.requestFocus();
+                          if(bottomHadFocus) bottomBox.requestFocus();
+                          topBox.post(() -> topBox.scrollTo(0, topScroll));
+                          bottomBox.post(() -> bottomBox.scrollTo(0, bottomScroll));
+                      } else {
+                          topBox.setSelection(topBox.getText().length());
+                          bottomBox.setSelection(bottomBox.getText().length());
+                      }
+                  } finally {
+                      programmaticChange = false;
+                  }
               }
           
               void renderBlocks(boolean keepView) {
