@@ -1,4 +1,4 @@
-name: Build Android APK V353
+name: Build Android APK V354
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 353; versionName = "35.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 354; versionName = "35.4" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V353" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V354" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -343,7 +343,6 @@ jobs:
               String apiKey = "";
               String model = "gpt-4o-mini";
               String profile = "general";
-              String soundProfile = "general";
               String mode = "natural";
               String vadMode = "low";
               String delayMode = "medium";
@@ -420,10 +419,7 @@ jobs:
                   {"Alap mikrofon","mic"}
               };
           
-              final String[][] soundProfiles = {
-                  {"Általános – ajánlott","general"},
-                  {"Kamion / zajos környezet","truck_noisy"}
-              };
+
           
               @Override public void onCreate(Bundle b) {
                   super.onCreate(b);
@@ -445,7 +441,6 @@ jobs:
                   model = sp.getString("model", "gpt-4o-mini");
                   if(!"gpt-4o-mini".equals(model) && !"gpt-4o".equals(model)) model = "gpt-4o-mini";
                   profile = sp.getString("profile", "general");
-                  soundProfile = sp.getString("soundProfile", "general");
                   mode = sp.getString("mode", "natural");
                   vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "xhigh");
@@ -470,7 +465,6 @@ jobs:
                   topLang = sp.getString("topLang", "fr");
                   bottomLang = sp.getString("bottomLang", "hu");
                   if("normal".equals(vadMode)) vadMode = "medium";
-                  applyInputProfileValues();
               }
           
               void applyV318StableDefaultsOnce() {
@@ -479,11 +473,9 @@ jobs:
                   int last = sp.getInt("stableDefaultsVersion", 0);
                   if(last < 352) {
                       profile = "general";
-                      soundProfile = "general";
                       mode = "natural";
                       vadEngineMode = "silero_medium";
-                      applyInputProfileValues();
-                      interpreterMode = false;
+                          interpreterMode = false;
                       interpreterAudioMode = "off";
                       mirrorBottomMode = false;
                       sp.edit().putInt("stableDefaultsVersion", 352).apply();
@@ -496,7 +488,6 @@ jobs:
                     .putString("apiKey", apiKey)
                     .putString("model", model)
                     .putString("profile", profile)
-                    .putString("soundProfile", soundProfile)
                     .putString("mode", mode)
                     .putString("vadMode", vadMode)
                     .putString("delayMode", delayMode)
@@ -524,7 +515,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V353");
+                  TextView title = label("Fordito_V354");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -533,10 +524,12 @@ jobs:
           
                   LinearLayout langRow = row();
                   topLangBtn = btn("FELSŐ");
-                  centerLangBtn = btn("VÁGÓ\nLAP");
-                  centerLangBtn.setSingleLine(false);
-                  centerLangBtn.setTextSize(11);
-                  centerLangBtn.setLineSpacing(0f, 0.88f);
+                  centerLangBtn = btn("VÁGÓLAP");
+                  centerLangBtn.setSingleLine(true);
+                  centerLangBtn.setTextSize(10);
+                  centerLangBtn.setGravity(Gravity.CENTER);
+                  centerLangBtn.setIncludeFontPadding(false);
+                  centerLangBtn.setPadding(2,0,2,0);
                   centerLangBtn.setContentDescription("Vágólap beillesztése az aktív ablakba");
                   bottomLangBtn = btn("ALSÓ");
                   langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,85,1));
@@ -1135,6 +1128,8 @@ jobs:
                       .writeTimeout(90, TimeUnit.SECONDS)
                       .build();
                   if(withAudio) {
+                      // V354: minden mikrofonindítás pontosan egyszer teljesen újranyitja
+                      // az AudioRecordot, a VAD-ot és a kapcsolódó puffereket.
                       resetAudioModeState();
                       state.setText("mikrofon előkészítés");
                       audioLoop();
@@ -3578,26 +3573,24 @@ jobs:
                   CharSequence[] items = {
                       menuItem("AI modell", modelLabel(), false),
                       menuItem("Beszélgetési profil", profileLabel(), false),
-                      menuItem("Fordítás stílusa", modeLabel(), false),
-                      menuItem("Hangprofil", soundProfileLabel(), false)
+                      menuItem("Fordítás stílusa", modeLabel(), false)
                   };
-          
+
                   showCenteredMenu("Fordítási beállítások", items, (d,w) -> {
                       if(w==0) chooseModel();
                       if(w==1) chooseProfile();
                       if(w==2) chooseMode();
-                      if(w==3) chooseSoundProfile();
                       updateButtons();
                   });
               }
-          
+
               void advancedMenu() {
                   if(uiLockedForSpeech || finalizingStop) return;
                   chooseVadEngine();
               }
           
               String speechMenuLabel() {
-                  return soundProfileLabel() + " – egy blokk";
+                  return "egy blokk";
               }
           
               String noiseMenuLabel() {
@@ -3788,57 +3781,6 @@ jobs:
               void chooseModel() { chooseFrom("AI modell", models, model, v -> { model = v; save(); restartIfNeeded(); }); }
               void chooseProfile() { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save();  }); }
               void chooseMode() { chooseFrom("Fordítás stílusa", modes, mode, v -> { mode = v; save();  }); }
-              void chooseSoundProfile() {
-                  CharSequence[] labels = new CharSequence[soundProfiles.length];
-                  for(int i=0;i<soundProfiles.length;i++) {
-                      boolean selected = soundProfiles[i][1].equals(soundProfile);
-                      String sub = "general".equals(soundProfiles[i][1]) ? "közepes zárás, közepes késés" : "gyors zárás, közepes késés";
-                      labels[i] = menuItem(soundProfiles[i][0], sub + (selected ? " • kiválasztva" : ""), selected);
-                  }
-                  showCenteredMenu("Hangprofil", labels, (d,w) -> {
-                      applySoundProfile(soundProfiles[w][1]);
-                      updateButtons();
-                  });
-              }
-          
-              void applyInputProfileValues() {
-                  // V318: egyetlen valódi hanglánc-blokk.
-                  // A mikrofon/STT értékeket nem több külön menü és nem régi mentés darabjai vezérlik,
-                  // hanem a kiválasztott hangprofil. Így nincs placebo-érzés és nincs egymás ellen dolgozó beállítás.
-                  if("truck_noisy".equals(soundProfile)) {
-                      vadMode = "high";              // gyorsabb mondatzárás, ne várja meg a teljes monológot
-                      delayMode = "medium";          // nem xhigh: kisebb késleltetés, még nem túl kapkodó
-                      audioSourceMode = "recognition";
-                  } else {
-                      soundProfile = "general";
-                      vadMode = "medium";
-                      delayMode = "medium";
-                      audioSourceMode = "recognition";
-                  }
-              }
-          
-              String activeInputChainLabel() {
-                  return "profil=" + soundProfileLabel() +
-                         " | source=" + audioSourceMode +
-                         " | VAD-engine=" + vadEngineMode +
-                         " | vad=" + vadMode +
-                         " | delay=" + delayMode;
-              }
-          
-              void applySoundProfile(String v) {
-                  soundProfile = v;
-                  applyInputProfileValues();
-                  save();
-                  
-                  restartIfNeeded();
-                  Toast.makeText(this, activeInputChainLabel(), Toast.LENGTH_LONG).show();
-              }
-          
-              String soundProfileLabel() {
-                  if("truck_noisy".equals(soundProfile)) return "Kamion / gyors";
-                  return "Általános";
-              }
-          
               void chooseVadEngine() { chooseFrom("Zajszűrési módok", vadEngineModes, vadEngineMode, v -> { vadEngineMode = v; save(); closeExternalVad(); restartIfNeeded(); }); }
               void chooseVad() { chooseFrom("Két mondat közötti szünet", vadModes, vadMode, v -> { vadMode = v; save(); restartIfNeeded(); }); }
               void chooseAudioSource() { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }); }
@@ -3850,10 +3792,8 @@ jobs:
                     .setPositiveButton("Igen", (d,w) -> {
                         model = "gpt-4o-mini";
                         profile = "general";
-                        soundProfile = "general";
-                        mode = "natural";
-                        applyInputProfileValues();
-                        vadEngineMode = "silero_medium";
+                          mode = "natural";
+                              vadEngineMode = "silero_medium";
                         interpreterMode = false;
                         interpreterAudioMode = "off";
                         ttsMuteUntilMs = 0L;
@@ -4114,8 +4054,8 @@ jobs:
                       int active = Color.rgb(30,140,70);
                       int inactive = Color.rgb(60,95,150);
                       int disabled = Color.rgb(55,58,65);
-                      int green = Color.rgb(30,140,70);
-                      int red = Color.rgb(150,55,50);
+                      int green = Color.rgb(20,190,70);
+                      int red = Color.rgb(220,35,35);
                       int orange = Color.rgb(170,105,30);
           
                       if(topLangBtn != null) setOvalButtonColor(topLangBtn, topActive ? active : inactive);
@@ -4153,7 +4093,7 @@ jobs:
           
               void updateButtons() {
                   micBtn.setText(streaming ? "STOP" : "MIKROFON");
-                  setOvalButtonColor(micBtn, streaming ? Color.rgb(30,130,70) : Color.rgb(90,50,50));
+                  setOvalButtonColor(micBtn, streaming ? Color.rgb(20,190,70) : Color.rgb(220,35,35));
                   setOvalButtonColor(arrangeBtn, Color.rgb(55,60,70));
                   setOvalButtonColor(translateBtn, Color.rgb(55,60,70));
                   setOvalButtonColor(menuBtn, hasKey() ? Color.rgb(55,60,70) : Color.rgb(140,80,30));
@@ -4313,14 +4253,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V353.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V353.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V354.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V354.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V353
+          name: V354
           path: |
             artifact/*.apk
             artifact/*.aab
