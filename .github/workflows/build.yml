@@ -1,4 +1,4 @@
-name: Build Android APK V346
+name: Build Android APK V347
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 346; versionName = "34.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 347; versionName = "34.7" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V346" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V347" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -222,7 +222,7 @@ jobs:
               String clipboardSpeechCommittedText = "";
               String clipboardSpeechLastPartial = "";
               Button clipboardMicButton;
-              Button micBtn, translateBtn, menuBtn, topLangBtn, bottomLangBtn;
+              Button micBtn, arrangeBtn, translateBtn, menuBtn, topLangBtn, bottomLangBtn;
               SharedPreferences sp;
               OkHttpClient client;
               AudioRecord rec;
@@ -524,7 +524,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V346");
+                  TextView title = label("Fordito_V347");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -551,11 +551,13 @@ jobs:
           
                   LinearLayout controls = row();
                   micBtn = btn("MIKROFON");
+                  arrangeBtn = btn("RENDEZ");
                   translateBtn = btn("FORDÍT");
                   menuBtn = btn("MENÜ");
-                  controls.addView(micBtn, new LinearLayout.LayoutParams(0,85,1));
-                  controls.addView(translateBtn, new LinearLayout.LayoutParams(0,85,1));
-                  controls.addView(menuBtn, new LinearLayout.LayoutParams(0,85,1));
+                  controls.addView(micBtn, new LinearLayout.LayoutParams(0,94,1));
+                  controls.addView(arrangeBtn, new LinearLayout.LayoutParams(0,94,1));
+                  controls.addView(translateBtn, new LinearLayout.LayoutParams(0,94,1));
+                  controls.addView(menuBtn, new LinearLayout.LayoutParams(0,94,1));
                   root.addView(controls);
           
                   // V318: sima kattintás / fókuszváltás ne állítsa le a mikrofont.
@@ -576,6 +578,7 @@ jobs:
                       if(streaming) stop();
                       else start(true);
                   });
+                  arrangeBtn.setOnClickListener(v -> manualArrange());
                   translateBtn.setOnClickListener(v -> manualTranslate());
                   menuBtn.setOnClickListener(v -> menu());
                   menuBtn.setOnLongClickListener(v -> { clearBothBoxes(); return true; });
@@ -1647,6 +1650,77 @@ jobs:
                   return s.replaceAll("(?m)^\\s*\\d{3}\\s*\\|\\s*", "").trim();
               }
           
+              void manualArrange() {
+                  if(uiLockedForSpeech || finalizingStop) return;
+                  if(streaming) stop();
+
+                  EditText source = manualTopSource ? topBox : bottomBox;
+                  source.clearFocus();
+                  String sourceText = stripDisplayBlockNumbers(source.getText().toString()).trim();
+                  if(sourceText.length() == 0) {
+                      Toast.makeText(this, manualTopSource ? "A felső ablak üres." : "Az alsó ablak üres.", Toast.LENGTH_LONG).show();
+                      return;
+                  }
+                  if(!hasKey()) { showApi(); return; }
+
+                  responseInProgress = true;
+                  updateButtons();
+                  try {
+                      JSONObject root = new JSONObject();
+                      root.put("model", model);
+                      root.put("temperature", 0.1);
+                      JSONArray messages = new JSONArray();
+                      messages.put(new JSONObject().put("role", "system").put("content", cleanupOnlyInstructions()));
+                      messages.put(new JSONObject().put("role", "user").put("content", sourceText));
+                      root.put("messages", messages);
+
+                      OkHttpClient http = client != null ? client : new OkHttpClient.Builder()
+                          .connectTimeout(25, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).writeTimeout(45, TimeUnit.SECONDS).build();
+                      Request req = new Request.Builder().url("https://api.openai.com/v1/chat/completions")
+                          .addHeader("Authorization", "Bearer " + apiKey.trim())
+                          .addHeader("Content-Type", "application/json")
+                          .post(RequestBody.create(MediaType.parse("application/json; charset=utf-8"), root.toString())).build();
+
+                      http.newCall(req).enqueue(new Callback() {
+                          @Override public void onFailure(Call call, java.io.IOException e) {
+                              runOnUiThread(() -> { responseInProgress = false; updateButtons(); Toast.makeText(MainActivity.this, "Rendezés kapcsolat hiba.", Toast.LENGTH_LONG).show(); });
+                          }
+                          @Override public void onResponse(Call call, Response response) throws java.io.IOException {
+                              String raw = response.body() == null ? "" : response.body().string();
+                              if(!response.isSuccessful()) {
+                                  runOnUiThread(() -> { responseInProgress = false; updateButtons(); Toast.makeText(MainActivity.this, "Rendezés HTTP " + response.code(), Toast.LENGTH_LONG).show(); });
+                                  return;
+                              }
+                              try {
+                                  JSONObject obj = new JSONObject(raw);
+                                  String cleaned = obj.getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content", "").trim();
+                                  runOnUiThread(() -> {
+                                      responseInProgress = false;
+                                      programmaticChange = true;
+                                      try {
+                                          source.setText(cleaned);
+                                          source.setSelection(source.getText().length());
+                                      } finally {
+                                          programmaticChange = false;
+                                      }
+                                      try {
+                                          ClipboardManager cm = (ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+                                          cm.setPrimaryClip(ClipData.newPlainText("rendezett_szoveg", cleaned));
+                                      } catch(Exception ignored) {}
+                                      updateButtons();
+                                  });
+                              } catch(Exception e) {
+                                  runOnUiThread(() -> { responseInProgress = false; updateButtons(); Toast.makeText(MainActivity.this, "Rendezés válasz hiba.", Toast.LENGTH_LONG).show(); });
+                              }
+                          }
+                      });
+                  } catch(Exception e) {
+                      responseInProgress = false;
+                      updateButtons();
+                      Toast.makeText(this, "Rendezés hiba.", Toast.LENGTH_LONG).show();
+                  }
+              }
+
               void manualTranslate() {
                   if(uiLockedForSpeech || finalizingStop) return;
           
@@ -1702,6 +1776,20 @@ jobs:
                       messages.put(new JSONObject().put("role", "system").put("content", manualBlockInstructions()));
                       messages.put(new JSONObject().put("role", "user").put("content", "MANUAL_FULL_WINDOW_TRANSLATION\n" + text + "\n\nTreat the entire supplied text as one coherent context. Repair obvious recognition and punctuation errors, join fragments only where the complete context clearly supports it, then return ONLY the natural translated full text. Preserve paragraphs and line breaks where reasonable. Do not write SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT, TRANSLATION, markdown, quotes or explanation. Every word must be output in full. Never replace letters with asterisks or symbols. Do not mask, soften, sanitize, label, bracket, star out, or replace profanity, vulgarity, insults, sexual words, slang, or rude wording."));
                       root.put("messages", messages);
+                      JSONObject manualProps = new JSONObject();
+                      manualProps.put("clean_source", new JSONObject().put("type", "string"));
+                      manualProps.put("translation", new JSONObject().put("type", "string"));
+                      JSONObject manualSchema = new JSONObject()
+                          .put("type", "object")
+                          .put("properties", manualProps)
+                          .put("required", new JSONArray().put("clean_source").put("translation"))
+                          .put("additionalProperties", false);
+                      root.put("response_format", new JSONObject()
+                          .put("type", "json_schema")
+                          .put("json_schema", new JSONObject()
+                              .put("name", "manual_clean_and_translate")
+                              .put("strict", true)
+                              .put("schema", manualSchema)));
                       Request req = new Request.Builder().url("https://api.openai.com/v1/chat/completions")
                           .addHeader("Authorization", "Bearer " + apiKey.trim())
                           .addHeader("Content-Type", "application/json")
@@ -2750,29 +2838,31 @@ jobs:
           
               void applyManualFullWindowTranslation(String out) {
                   try {
-                      String tr = cleanOneBlockTranslation(out);
-                      if(!isCleanManualTranslation(tr)) {
-                          Toast.makeText(this, "Nem tiszta fordítás érkezett. Nyomd meg újra a FORDÍT gombot.", Toast.LENGTH_LONG).show();
-                          return;
-                      }
-          
+                      JSONObject structured = new JSONObject(out);
+                      String cleanSource = structured.optString("clean_source", "").trim();
+                      String tr = structured.optString("translation", "").trim();
+                      if(cleanSource.length() == 0 || tr.length() == 0) throw new Exception("empty manual result");
+
                       programmaticChange = true;
                       try {
-                          if(manualTopSource) bottomBox.setText(tr);
-                          else topBox.setText(tr);
+                          if(manualTopSource) {
+                              topBox.setText(cleanSource);
+                              bottomBox.setText(tr);
+                          } else {
+                              bottomBox.setText(cleanSource);
+                              topBox.setText(tr);
+                          }
+                          topBox.setSelection(topBox.getText().length());
+                          bottomBox.setSelection(bottomBox.getText().length());
                       } finally {
                           programmaticChange = false;
                       }
-          
-                      rebuildBlocksFromCurrentBoxes();
-                      renderBlocksKeepView();
                       speakManualOnce(tr, manualTopSource ? bottomLang : topLang);
-                      Toast.makeText(this, "Teljes ablak újrafordítva.", Toast.LENGTH_SHORT).show();
                   } catch(Exception e) {
-                      Toast.makeText(this, "Kézi fordítás feldolgozási hiba. Próbáld újra.", Toast.LENGTH_LONG).show();
+                      Toast.makeText(this, "Kézi fordítás válasz hiba.", Toast.LENGTH_LONG).show();
                   }
               }
-          
+
               void rebuildBlocksFromCurrentBoxes() {
                   TextBlock b = new TextBlock();
                   b.topText = topBox.getText().toString().trim();
@@ -4052,17 +4142,28 @@ jobs:
                   return profilePrompt();
               }
 
+              String sharedTextCleanupInstructions() {
+                  return profilePrompt() +
+                      "Use the complete supplied source text as one coherent context. " +
+                      "Correct obvious speech-recognition, repetition, punctuation and grammar errors. " +
+                      "Join broken fragments when the surrounding text clearly supports the connection. " +
+                      "Make the source text natural, readable and internally consistent, but preserve its actual meaning, facts, names, tone and intent. " +
+                      "You may rephrase slightly for clarity, but do not invent events, reasons, plans, names, numbers or intentions that are not supported by the supplied text. " +
+                      "Return only the cleaned source text, with no labels, markdown, explanation or quotation marks. " +
+                      "Never censor, mask, redact, soften, sanitize or replace profanity, insults, slang, vulgar, sexual, rude or emotional wording.";
+              }
+
+              String cleanupOnlyInstructions() {
+                  return sharedTextCleanupInstructions();
+              }
+
+
               String manualBlockInstructions() {
                   return pairRules(false) + "\n" +
-                      profilePrompt() +
-                      "This is manual full-text translation, not live fragment translation. " +
-                      "Use the complete supplied text as one coherent context. " +
-                      "Repair obvious speech-recognition and punctuation errors, connect broken fragments where the full context clearly supports it, and form natural complete sentences and paragraphs. " +
-                      "Do not invent facts, events, names or intentions that are not supported by the supplied full text. " +
-                      "Translate the resulting coherent meaning naturally into the selected target language. " +
-                      "Return only the translated full text. Do not output labels, markdown, quotes, explanations, SOURCE_LANG, TARGET_LANG, ORIGINAL, TEXT or TRANSLATION. " +
-                      "Preserve the speaker's meaning, tone and level of formality. " +
-                      "Never censor, mask, redact, soften, sanitize or replace profanity, insults, slang, vulgar, sexual, rude or emotional wording. Write every word in full.";
+                      sharedTextCleanupInstructions() +
+                      " This is manual full-text translation. First clean the complete source text using the shared cleanup rules, then translate that cleaned text naturally into the selected target language. " +
+                      "Return a strict JSON object with exactly two string fields: clean_source and translation. " +
+                      "Do not output labels, markdown, quotes or explanations outside the JSON object.";
               }
 
               String speechBlockInstructions(boolean sourceIsTop) {
@@ -4145,6 +4246,7 @@ jobs:
                   uiLockedForSpeech = false;
                   finalizingStop = false;
                   try {
+                      if(arrangeBtn != null) arrangeBtn.setEnabled(true);
                       if(translateBtn != null) translateBtn.setEnabled(true);
                       if(menuBtn != null) menuBtn.setEnabled(true);
                       styleUiState();
@@ -4163,6 +4265,7 @@ jobs:
                       if(topLangBtn != null) topLangBtn.setBackgroundColor(topActive ? active : inactive);
                       if(bottomLangBtn != null) bottomLangBtn.setBackgroundColor(!topActive ? active : inactive);
                       
+                      if(arrangeBtn != null) arrangeBtn.setBackgroundColor(inactive);
                       if(translateBtn != null) translateBtn.setBackgroundColor(inactive);
                       if(menuBtn != null) menuBtn.setBackgroundColor(inactive);
           
@@ -4194,6 +4297,7 @@ jobs:
               void updateButtons() {
                   micBtn.setText(streaming ? "STOP" : "MIKROFON");
                   micBtn.setBackgroundColor(streaming ? Color.rgb(30,130,70) : Color.rgb(90,50,50));
+                  arrangeBtn.setBackgroundColor(Color.rgb(55,60,70));
                   translateBtn.setBackgroundColor(Color.rgb(55,60,70));
                   menuBtn.setBackgroundColor(hasKey() ? Color.rgb(55,60,70) : Color.rgb(140,80,30));
                   topLangBtn.setText("FELSŐ: " + code(topLang));
