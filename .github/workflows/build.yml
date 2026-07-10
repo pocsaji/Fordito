@@ -1,4 +1,4 @@
-name: Build Android APK V342
+name: Build Android APK V343
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 342; versionName = "34.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 343; versionName = "34.3" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V342" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V343" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -521,7 +521,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V342");
+                  TextView title = label("Fordito_V343");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1380,7 +1380,7 @@ jobs:
                               try {
                                   JSONObject obj = new JSONObject(raw);
                                   String tr = obj.optString("text", "").trim();
-                                  if(tr.length() > 0) runOnUiThread(() -> handleTranscriptCompleted(tr));
+                                  if(tr.length() > 0) runOnUiThread(() -> handleTranscriptCompleted(tr, finalFlush));
                               } catch(Exception e) {
                                   runOnUiThread(() -> Toast.makeText(MainActivity.this, "STT válasz nem értelmezhető.", Toast.LENGTH_LONG).show());
                               }
@@ -1714,17 +1714,43 @@ jobs:
                   }
               }
 
-              void handleTranscriptCompleted(String transcript) {
-                  boolean completedIsOnlyAlreadyReleased = false;
-
-                  if(transcript != null && transcript.trim().length() > 0) {
-                      completedIsOnlyAlreadyReleased = isAlreadyReleasedTranscript(transcript);
-                      if(!completedIsOnlyAlreadyReleased) {
-                          speechTranscriptBuffer = transcript;
-                      }
+              void handleTranscriptCompleted(String transcript, boolean finalFlush) {
+                  if(transcript == null || transcript.trim().length() == 0) {
+                      speechIdleFlushToken++;
+                      return;
                   }
 
-                  int released = completedIsOnlyAlreadyReleased ? 0 : flushReadyTranscriptBlocks(true);
+                  if(isAlreadyReleasedTranscript(transcript)) {
+                      speechIdleFlushToken++;
+                      return;
+                  }
+
+                  if(!finalFlush) {
+                      // V343: egy teljes 8 másodperces audioablak STT-válasza pontosan egy kész blokk.
+                      // Nem kerül vissza a második időalapú speechTranscriptBuffer-darabolásba,
+                      // ezért ugyanaz az STT-válasz nem tud két-három blokkot egyszerre kiengedni.
+                      String b = normalizeAndDeduplicateSpeechBlock(transcript);
+                      if(b.length() > 0) {
+                          boolean sourceGuessTop = sourceIsTopBySelectedPair(b, topActive);
+                          int id = addSourceOnlyBlock(sourceGuessTop, b);
+                          if(id >= 0) {
+                              firstSpeechBlockReleased = true;
+                              speechTranslateQueue.add(id);
+                              lastSpeechBlockReleasedAt = System.currentTimeMillis();
+                              processNextSpeechTranslation();
+                          }
+                      }
+                      speechTranscriptBuffer = "";
+                      firstSpeechHeardAt = 0L;
+                      speechBufferStartedAt = 0L;
+                      speechIdleFlushToken++;
+                      return;
+                  }
+
+                  // A beszéd végi, 8 másodpercnél rövidebb maradék továbbra is a meglévő
+                  // biztonságos lezárási úton kerül kiadásra.
+                  speechTranscriptBuffer = transcript;
+                  int released = flushReadyTranscriptBlocks(true);
                   if(released > 0) lastSpeechBlockReleasedAt = System.currentTimeMillis();
                   speechIdleFlushToken++;
               }
