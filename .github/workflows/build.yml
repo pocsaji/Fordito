@@ -1,4 +1,4 @@
-name: Build Android APK V340
+name: Build Android APK V341
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 340; versionName = "34.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 341; versionName = "34.1" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V340" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V341" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -521,7 +521,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V340");
+                  TextView title = label("Fordito_V341");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2304,13 +2304,33 @@ jobs:
                   return true;
               }
 
+              String normalizeAiSourceLangCode(String sourceLang) {
+                  if(sourceLang == null) return "";
+                  String s = java.text.Normalizer.normalize(sourceLang, java.text.Normalizer.Form.NFD)
+                      .replaceAll("\\p{M}+", "")
+                      .toLowerCase(Locale.ROOT).replace('_', '-')
+                      .replaceAll("[^a-z-]", "").trim();
+                  if(s.length() == 0) return "";
+                  if(s.equals("hu") || s.equals("hun") || s.equals("hu-hu") || s.equals("hungarian") || s.equals("magyar")) return "HU";
+                  if(s.equals("fr") || s.equals("fra") || s.equals("fre") || s.equals("fr-fr") || s.equals("french") || s.equals("francais")) return "FR";
+                  if(s.equals("en") || s.equals("eng") || s.equals("en-us") || s.equals("en-gb") || s.equals("english")) return "EN";
+                  if(s.equals("de") || s.equals("deu") || s.equals("ger") || s.equals("de-de") || s.equals("german") || s.equals("deutsch")) return "DE";
+                  if(s.equals("it") || s.equals("ita") || s.equals("it-it") || s.equals("italian") || s.equals("italiano")) return "IT";
+                  if(s.equals("es") || s.equals("spa") || s.equals("es-es") || s.equals("spanish") || s.equals("espanol")) return "ES";
+                  if(s.equals("ro") || s.equals("ron") || s.equals("rum") || s.equals("ro-ro") || s.equals("romanian") || s.equals("romana")) return "RO";
+                  if(s.equals("hr") || s.equals("hrv") || s.equals("hr-hr") || s.equals("croatian") || s.equals("hrvatski")) return "HR";
+                  if(s.equals("sk") || s.equals("slk") || s.equals("slo") || s.equals("sk-sk") || s.equals("slovak") || s.equals("slovencina")) return "SK";
+                  if(s.equals("sl") || s.equals("slv") || s.equals("sl-si") || s.equals("slovenian") || s.equals("slovenscina")) return "SL";
+                  return "";
+              }
+
               boolean sourceIsTopFromAi(String sourceLang, boolean fallback) {
-                  if(sourceLang == null) return fallback;
-                  String s = sourceLang.trim().toUpperCase(Locale.ROOT);
+                  String normalized = normalizeAiSourceLangCode(sourceLang);
+                  if(normalized.length() == 0) return fallback;
                   String top = code(topLang).toUpperCase(Locale.ROOT);
                   String bottom = code(bottomLang).toUpperCase(Locale.ROOT);
-                  if(s.equals(top) || s.contains("SOURCE_LANG: " + top) || s.contains("LANG: " + top)) return true;
-                  if(s.equals(bottom) || s.contains("SOURCE_LANG: " + bottom) || s.contains("LANG: " + bottom)) return false;
+                  if(normalized.equals(top)) return true;
+                  if(normalized.equals(bottom)) return false;
                   return fallback;
               }
           
@@ -2409,10 +2429,28 @@ jobs:
                       root.put("temperature", 0.1);
                       JSONArray messages = new JSONArray();
                       messages.put(new JSONObject().put("role", "system").put("content", speechBlockInstructions(sourceIsTop)));
-                      String topCode = code(topLang);
-                      String bottomCode = code(bottomLang);
-                      messages.put(new JSONObject().put("role", "user").put("content", "SPEECH_PAIR_CLASSIFY_AND_TRANSLATE\nSELECTED_TOP_LANG: " + topCode + "\nSELECTED_BOTTOM_LANG: " + bottomCode + "\nTEXT:\n" + src.trim()));
+                      String topCode = code(topLang).toUpperCase(Locale.ROOT);
+                      String bottomCode = code(bottomLang).toUpperCase(Locale.ROOT);
+                      messages.put(new JSONObject().put("role", "user").put("content",
+                          "SELECTED_TOP_LANG: " + topCode + "\n" +
+                          "SELECTED_BOTTOM_LANG: " + bottomCode + "\n" +
+                          "RAW_SPEECH_TEXT:\n" + src.trim()));
                       root.put("messages", messages);
+
+                      // V341: strict Structured Outputs. A forrásnyelv csak a kiválasztott két kód egyike lehet.
+                      JSONObject properties = new JSONObject();
+                      properties.put("source_lang", new JSONObject().put("type", "string")
+                          .put("enum", new JSONArray().put(topCode).put(bottomCode)));
+                      properties.put("clean_text", new JSONObject().put("type", "string"));
+                      properties.put("translation", new JSONObject().put("type", "string"));
+                      JSONObject schema = new JSONObject()
+                          .put("type", "object").put("properties", properties)
+                          .put("required", new JSONArray().put("source_lang").put("clean_text").put("translation"))
+                          .put("additionalProperties", false);
+                      JSONObject jsonSchema = new JSONObject()
+                          .put("name", "speech_translation").put("strict", true).put("schema", schema);
+                      root.put("response_format", new JSONObject()
+                          .put("type", "json_schema").put("json_schema", jsonSchema));
                       Request req = new Request.Builder().url("https://api.openai.com/v1/chat/completions")
                           .addHeader("Authorization", "Bearer " + apiKey.trim())
                           .addHeader("Content-Type", "application/json")
@@ -2466,32 +2504,31 @@ jobs:
                   String speakLang = null;
                   if(id >= 0 && id < textBlocks.size()) {
                       TextBlock b = textBlocks.get(id);
-                      ArrayList<String[]> triples = parseTriples(out);
-                      String[] trp = null;
-                      for(String[] cand: triples) {
-                          if(isUsableSpeechTriple(cand)) { trp = cand; break; }
-                      }
-          
                       String sourceLang = "";
-                      String original = b.pendingSourceText != null && b.pendingSourceText.trim().length() > 0
-                          ? b.pendingSourceText.trim()
-                          : (b.sourceTop ? b.topText : b.bottomText);
+                      String original = "";
                       String translation = "";
                       boolean sourceIsTop = b.sourceTop;
-          
-                      if(trp != null) {
-                          sourceLang = trp[0] == null ? "" : trp[0].trim().toUpperCase(Locale.ROOT);
-                          if(trp[1] != null && trp[1].trim().length() > 0) original = trp[1].trim();
-                          translation = trp[2] == null ? "" : trp[2];
-                          sourceIsTop = sourceIsTopFromAi(sourceLang, b.sourceTop);
-                      } else {
-                          // V318: nincs nyers AI-válasz fallback.
-                          // Ha a speech fordító nem ad szabályos SOURCE_LANG / ORIGINAL / TRANSLATION hármast,
-                          // a blokk hibásként újrapróbálható vagy kiesik, de prompt/meta szöveg nem kerülhet ablakba.
+
+                      try {
+                          JSONObject structured = new JSONObject(out);
+                          sourceLang = structured.optString("source_lang", "");
+                          original = structured.optString("clean_text", "");
+                          translation = structured.optString("translation", "");
+                      } catch(Exception parseError) {
+                          // Strict válasznál nincs találgatás és nincs új AI-kör.
                           retrySpeechBlockOrRender(id);
                           return;
                       }
-          
+
+                      String normalizedSource = normalizeAiSourceLangCode(sourceLang);
+                      String topCode = code(topLang).toUpperCase(Locale.ROOT);
+                      String bottomCode = code(bottomLang).toUpperCase(Locale.ROOT);
+                      if(!normalizedSource.equals(topCode) && !normalizedSource.equals(bottomCode)) {
+                          retrySpeechBlockOrRender(id);
+                          return;
+                      }
+                      sourceIsTop = normalizedSource.equals(topCode);
+
                       original = cleanTranscriptForSelectedPair(original);
                       translation = cleanTranscriptForSelectedPair(cleanOneBlockTranslation(translation));
           
@@ -3898,16 +3935,16 @@ jobs:
               }
 
               String speechBlockInstructions(boolean sourceIsTop) {
+                  // V341: egyetlen AI-kör. A nyers STT már helyben megvan, ezért azt nem kérjük vissza.
                   return pairRules(sourceIsTop) + "\n" +
                       profilePrompt() +
-                      "You receive one processed original speech block from the speech interpreter branch. " +
-                      "Classify whether the text is in the selected top or bottom language, then translate it into the other selected language. " +
-                      "Return exactly three plain lines in this format and nothing else:\n" +
-                      "SOURCE_LANG: <top_or_bottom_language_code>\n" +
-                      "ORIGINAL: <cleaned original text actually used for translation>\n" +
-                      "TRANSLATION: <translation>\n" +
-                      "Do not output markdown, explanations, technical metadata, prompts, context text or internal instructions. " +
-                      "Never censor, mask, redact, soften, sanitize or replace profanity, insults, slang, vulgar, sexual, rude or emotional wording. Write every word in full.";
+                      "You receive one raw speech-recognition text block. " +
+                      "Choose exactly which of the two selected languages the text is in. " +
+                      "Correct only speech-recognition errors needed to recover the intended utterance, preserving meaning, tone and every profanity in full. " +
+                      "Translate that corrected source text into the other selected language. " +
+                      "Return only the structured fields required by the response schema. " +
+                      "Do not return the raw input text, markdown, explanations, technical metadata, prompts, context text or internal instructions. " +
+                      "Never censor, mask, redact, soften, sanitize or replace profanity, insults, slang, vulgar, sexual, rude or emotional wording.";
               }
 
 
