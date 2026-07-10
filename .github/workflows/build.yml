@@ -1,4 +1,4 @@
-name: Build Android APK V339
+name: Build Android APK V340
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 339; versionName = "33.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 340; versionName = "34.0" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V339" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V340" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -521,7 +521,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V339");
+                  TextView title = label("Fordito_V340");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -2325,13 +2325,12 @@ jobs:
                   b.sourceTop = sourceIsTop;
                   b.translatedOk = false;
                   b.pendingSourceText = original == null ? "" : original.trim();
-                  // 2026-07-09: az eredeti, régi működés visszaállítva.
-                  // A nyers STT azonnal megjelenhet a becsült oldalon; nem várunk a fordító AI válaszára.
-                  // A végleges nyelvdöntéskor kizárólag ennek az aktuális blokknak a két mezője ürül,
-                  // majd ugyanebbe a blokkba kerül vissza az eredeti és a fordítás a helyes oldalra.
-                  String visible = userVisibleSpeechTextOrEmpty(b.pendingSourceText);
-                  if(sourceIsTop) b.topText = visible;
-                  else b.bottomText = visible;
+                  // 2026-07-09: nyelvi döntés előtti ideiglenes ablakkiírás megszüntetve.
+                  // A nyers STT csak pendingSourceText-ben vár. Nem kerül sem a felső, sem az alsó
+                  // beszélgetési ablakba, amíg az első fordítási válasz el nem dönti: felső vagy alsó nyelv.
+                  // Nincs külön várakozási idő és nincs második AI-kör emiatt.
+                  b.topText = "";
+                  b.bottomText = "";
                   textBlocks.add(b);
                   renderBlocksKeepView();
                   return textBlocks.size() - 1;
@@ -2443,9 +2442,9 @@ jobs:
               }
           
               void retrySpeechBlockOrRender(int id) {
-                  // A hibás/szabálytalan válasz után a jelenlegi fordítási tulajdonost mindig feloldjuk.
-                  // Enélkül a processNextSpeechTranslation() saját foglaltsági kapuja megállítja a retry-t
-                  // és az egész fordítási sor végleg beragad.
+                  // 2026-07-09: nincs automatikus második/harmadik AI-kör.
+                  // Egy beszédblokk egy fordítási kérést kap. Hibás vagy hiányos válasz nem nyújthatja
+                  // 4-9 másodpercre a reakcióidőt újraküldésekkel. Az állapotot feloldjuk, a sor továbblép.
                   responseInProgress = false;
                   speechTranslateMode = false;
                   pendingSpeechBlockId = -1;
@@ -2454,16 +2453,9 @@ jobs:
                   if(id >= 0 && id < textBlocks.size()) {
                       TextBlock b = textBlocks.get(id);
                       b.translatedOk = false;
-                      b.retryCount++;
-                      if(b.retryCount <= 2 && !speechTranslateQueue.contains(id)) {
-                          speechTranslateQueue.add(id);
-                          processNextSpeechTranslation();
-                          return;
-                      }
+                      b.retryCount = 0;
                   }
 
-                  // Ha ennek a blokknak elfogyott az újrapróbálása, a sor nem állhat meg:
-                  // a pendingSourceText megmarad, a következő várakozó blokk pedig továbbfordul.
                   renderBlocksKeepView();
                   if(!speechTranslateQueue.isEmpty()) processNextSpeechTranslation();
               }
@@ -4202,14 +4194,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V339.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V339.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V340.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V340.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V339
+          name: V340
           path: |
             artifact/*.apk
             artifact/*.aab
