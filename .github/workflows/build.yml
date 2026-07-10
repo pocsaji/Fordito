@@ -1,4 +1,4 @@
-name: Build Android APK V352
+name: Build Android APK V353
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 352; versionName = "35.2" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 353; versionName = "35.3" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V352" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V353" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -271,7 +271,7 @@ jobs:
               String speechVadInstanceMode = "";
               ByteArrayOutputStream vadFrameBuffer = new ByteArrayOutputStream();
               boolean mirrorBottomMode = false;
-              boolean backgroundScreenAllowed = false;
+              boolean backgroundScreenAllowed = true;
               boolean floatingTranslatorEnabled = false;
               Handler floatingLongPressHandler = new Handler();
               android.view.WindowManager floatingWindowManager;
@@ -298,7 +298,6 @@ jobs:
               Button clipboardTranslateButton;
               boolean manualTopSource = true;
               boolean responseInProgress = false;
-              long sessionStart = 0L;
               String pendingOutput = "";
               String speechTranscriptBuffer = "";
               boolean speechTranslateMode = false;
@@ -430,7 +429,7 @@ jobs:
                   super.onCreate(b);
                   sp = getSharedPreferences("settings", MODE_PRIVATE);
                   load();
-                  backgroundScreenAllowed = false;
+                  backgroundScreenAllowed = true;
                   interpreterMode = false;
                   interpreterAudioMode = "off";
                   applyV318StableDefaultsOnce();
@@ -525,7 +524,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V352");
+                  TextView title = label("Fordito_V353");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -534,8 +533,11 @@ jobs:
           
                   LinearLayout langRow = row();
                   topLangBtn = btn("FELSŐ");
-                  centerLangBtn = btn("");
-                  centerLangBtn.setContentDescription("Későbbi funkció");
+                  centerLangBtn = btn("VÁGÓ\nLAP");
+                  centerLangBtn.setSingleLine(false);
+                  centerLangBtn.setTextSize(11);
+                  centerLangBtn.setLineSpacing(0f, 0.88f);
+                  centerLangBtn.setContentDescription("Vágólap beillesztése az aktív ablakba");
                   bottomLangBtn = btn("ALSÓ");
                   langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,85,1));
                   langRow.addView(centerLangBtn, new LinearLayout.LayoutParams(0,85,1));
@@ -574,7 +576,7 @@ jobs:
                   
                   topLangBtn.setOnClickListener(v -> { hapticTap(v); chooseLang(true); });
                   bottomLangBtn.setOnClickListener(v -> { hapticTap(v); chooseLang(false); });
-                  centerLangBtn.setOnClickListener(v -> hapticTap(v));
+                  centerLangBtn.setOnClickListener(v -> { hapticTap(v); pasteClipboardAtCursor(); });
                   topLangBtn.setOnLongClickListener(v -> { hapticTap(v); copyBox(true); return true; });
                   bottomLangBtn.setOnLongClickListener(v -> { hapticTap(v); copyBox(false); return true; });
                   micBtn.setOnClickListener(v -> {
@@ -1102,7 +1104,6 @@ jobs:
               }
           
               void startBackgroundForegroundServiceIfAllowed() {
-                  if(!backgroundScreenAllowed) return;
                   try {
                       Intent i = new Intent(this, VoiceForegroundService.class);
                       if(Build.VERSION.SDK_INT >= 26) startForegroundService(i);
@@ -1125,8 +1126,6 @@ jobs:
                   clipboardResponseMode = false;
                   if(!hasKey()) { showApi(); return; }
                   if(withAudio && Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reqMic(); return; }
-                  if(withAudio && sessionStart == 0L) sessionStart = System.currentTimeMillis();
-                  if(withAudio && System.currentTimeMillis() - sessionStart > 20L*60L*1000L) { confirm(); return; }
                   if(withAudio) startBackgroundForegroundServiceIfAllowed();
           
                   connected = true;
@@ -2945,15 +2944,6 @@ jobs:
                   appendTo(target, s);
               }
           
-              void confirm() {
-                  new AlertDialog.Builder(this)
-                    .setTitle("Folyik még a beszélgetés?")
-                    .setMessage("20 perce aktív a rendszer. Folytassuk?")
-                    .setPositiveButton("Igen", (d,w) -> { sessionStart = System.currentTimeMillis(); start(true); })
-                    .setNegativeButton("Leállítás", (d,w) -> { sessionStart = 0L; stop(); })
-                    .show();
-              }
-          
               void menu() {
                   if(uiLockedForSpeech || finalizingStop) return;
           
@@ -2962,11 +2952,6 @@ jobs:
                   box.setPadding(10, 10, 10, 10);
                   box.setBackgroundColor(Color.rgb(35,38,44));
           
-                  addMenuButton(box, "Háttér / lezárt kijelző", backgroundScreenLabel(), backgroundScreenAllowed, v -> {
-                      toggleBackgroundScreenMode();
-                      refreshMenuButton((Button)v, "Háttér / lezárt kijelző", backgroundScreenLabel(), backgroundScreenAllowed);
-                      updateButtons();
-                  });
                   Button interpreterBtn = addMenuButton(box, "Tolmács mód", interpreterQuickLabel(), interpreterMode, v -> {
                       toggleInterpreterQuick();
                       refreshInterpreterMenuButton((Button)v);
@@ -3080,7 +3065,7 @@ jobs:
           
           
               String floatingTranslatorLabel() {
-                  return floatingTranslatorEnabled ? "két lebegő gomb – beillesztés és másolás" : "kikapcsolva";
+                  return floatingTranslatorEnabled ? "pici gomb – alkalmazás előtérbe hozása" : "kikapcsolva";
               }
           
               boolean canDrawOverlayNow() {
@@ -3108,10 +3093,6 @@ jobs:
           
               void toggleFloatingTranslator() {
                   floatingTranslatorEnabled = !floatingTranslatorEnabled;
-                  if(floatingTranslatorEnabled && backgroundScreenAllowed) {
-                      backgroundScreenAllowed = false;
-                      stopBackgroundForegroundService();
-                  }
                   save();
                   if(floatingTranslatorEnabled) ensureFloatingTranslator();
                   else hideFloatingTranslator();
@@ -3121,7 +3102,7 @@ jobs:
                   if(!floatingTranslatorEnabled) return;
                   if(!canDrawOverlayNow()) { requestOverlayPermission(); return; }
                   if(floatingButtonView != null) return;
-                  showFloatingClipboardExpanded();
+                  showFloatingClipboardCollapsed();
               }
           
               android.graphics.drawable.GradientDrawable roundBg(int color) {
@@ -3154,15 +3135,6 @@ jobs:
                   b.setBackground(rectBg(color));
                   if(android.os.Build.VERSION.SDK_INT >= 21) b.setBackgroundTintList(null);
                   return b;
-              }
-          
-              void scheduleFloatingClipboardCollapse() {
-                  floatingCollapseHandler.removeCallbacksAndMessages(null);
-                  floatingCollapseHandler.postDelayed(() -> {
-                      if(floatingTranslatorEnabled && floatingButtonView != null && !floatingClipboardCollapsed) {
-                          showFloatingClipboardCollapsed();
-                      }
-                  }, 7000);
               }
           
               void removeFloatingClipboardViewOnly() {
@@ -3213,7 +3185,7 @@ jobs:
                               floatingButtonX=lp.x; floatingButtonY=lp.y; save();
                               if(!moved[0]) {
                                   try { mini.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP); } catch(Exception ignored) {}
-                                  showFloatingClipboardExpanded();
+                                  bringAppToFrontForClipboardRead();
                               }
                               return true;
                           }
@@ -3222,98 +3194,6 @@ jobs:
           
                       floatingButtonView = mini;
                       floatingWindowManager.addView(floatingButtonView, lp);
-                  } catch(Exception e) {
-                      floatingButtonView = null;
-                      Toast.makeText(this, "Lebegő gomb hiba: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                  }
-              }
-          
-              void showFloatingClipboardExpanded() {
-                  try {
-                      if(!floatingTranslatorEnabled) return;
-                      if(!canDrawOverlayNow()) { requestOverlayPermission(); return; }
-                      if(floatingWindowManager == null) floatingWindowManager = (android.view.WindowManager)getSystemService(WINDOW_SERVICE);
-                      removeFloatingClipboardViewOnly();
-                      floatingClipboardCollapsed = false;
-          
-                      LinearLayout group = new LinearLayout(this);
-                      group.setOrientation(LinearLayout.VERTICAL);
-          
-                      Button paste = overlayBtn("BEILLESZT", Color.rgb(30,120,75), 11);
-                      Button copy = overlayBtn("MÁSOL\nRENDEZ", Color.rgb(45,95,150), 10);
-                      LinearLayout.LayoutParams pasteLp = new LinearLayout.LayoutParams(200,108);
-                      pasteLp.setMargins(0,0,0,4);
-                      LinearLayout.LayoutParams copyLp = new LinearLayout.LayoutParams(200,108);
-                      copyLp.setMargins(0,4,0,0);
-                      group.addView(paste, pasteLp);
-                      group.addView(copy, copyLp);
-          
-                      final android.view.WindowManager.LayoutParams lp = floatingParams(200, 224, Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-                      lp.x = floatingButtonX;
-                      lp.y = floatingButtonY;
-          
-                      final int[] down = new int[4];
-                      final boolean[] moved = new boolean[1];
-                      final boolean[] copyLongDone = new boolean[1];
-                      final Runnable copyLong = () -> {
-                          if(!moved[0]) {
-                              copyLongDone[0] = true;
-                              try { copy.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); } catch(Exception ignored) {}
-                              cleanActiveBoxToClipboard();
-                              scheduleFloatingClipboardCollapse();
-                          }
-                      };
-          
-                      View.OnTouchListener floatingGroupTouch = (v, ev) -> {
-                          boolean isCopy = (v == copy);
-                          if(ev.getAction() == android.view.MotionEvent.ACTION_DOWN) {
-                              down[0]=lp.x; down[1]=lp.y; down[2]=(int)ev.getRawX(); down[3]=(int)ev.getRawY();
-                              moved[0]=false;
-                              copyLongDone[0]=false;
-                              floatingCollapseHandler.removeCallbacksAndMessages(null);
-                              floatingLongPressHandler.removeCallbacks(copyLong);
-                              if(isCopy) floatingLongPressHandler.postDelayed(copyLong, 650);
-                              return true;
-                          }
-                          if(ev.getAction() == android.view.MotionEvent.ACTION_MOVE) {
-                              int dx=(int)ev.getRawX()-down[2], dy=(int)ev.getRawY()-down[3];
-                              if(Math.abs(dx)>20 || Math.abs(dy)>20) {
-                                  moved[0]=true;
-                                  floatingLongPressHandler.removeCallbacks(copyLong);
-                              }
-                              if(moved[0]) {
-                                  lp.x=Math.max(0,down[0]-dx);
-                                  lp.y=down[1]+dy;
-                                  try { floatingWindowManager.updateViewLayout(group,lp); } catch(Exception ignored) {}
-                              }
-                              return true;
-                          }
-                          if(ev.getAction() == android.view.MotionEvent.ACTION_UP) {
-                              floatingLongPressHandler.removeCallbacks(copyLong);
-                              floatingButtonX=lp.x; floatingButtonY=lp.y; save();
-                              if(!moved[0] && !copyLongDone[0]) {
-                                  try { ((View)v).performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP); } catch(Exception ignored) {}
-                                  if(isCopy) copyActiveBoxToClipboard();
-                                  else pasteClipboardToLanguageBox();
-                              }
-                              scheduleFloatingClipboardCollapse();
-                              return true;
-                          }
-                          if(ev.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
-                              floatingLongPressHandler.removeCallbacks(copyLong);
-                              scheduleFloatingClipboardCollapse();
-                              return true;
-                          }
-                          return true;
-                      };
-          
-                      group.setOnTouchListener(floatingGroupTouch);
-                      paste.setOnTouchListener(floatingGroupTouch);
-                      copy.setOnTouchListener(floatingGroupTouch);
-          
-                      floatingButtonView = group;
-                      floatingWindowManager.addView(floatingButtonView, lp);
-                      scheduleFloatingClipboardCollapse();
                   } catch(Exception e) {
                       floatingButtonView = null;
                       Toast.makeText(this, "Lebegő gomb hiba: " + e.getMessage(), Toast.LENGTH_LONG).show();
@@ -3339,6 +3219,39 @@ jobs:
                       CharSequence cs = cm.getPrimaryClip().getItemAt(0).coerceToText(this);
                       return cs == null ? "" : cs.toString();
                   } catch(Exception ignored) { return ""; }
+              }
+
+              void pasteClipboardAtCursor() {
+                  String clip = getClipboardText();
+                  if(clip == null || clip.length() == 0) {
+                      Toast.makeText(this, "A vágólap üres.", Toast.LENGTH_SHORT).show();
+                      return;
+                  }
+
+                  EditText target;
+                  if(topBox != null && topBox.hasFocus()) target = topBox;
+                  else if(bottomBox != null && bottomBox.hasFocus()) target = bottomBox;
+                  else target = manualTopSource ? topBox : bottomBox;
+                  if(target == null) return;
+
+                  int start = Math.max(0, target.getSelectionStart());
+                  int end = Math.max(0, target.getSelectionEnd());
+                  if(start > end) { int t = start; start = end; end = t; }
+                  start = Math.min(start, target.getText().length());
+                  end = Math.min(end, target.getText().length());
+
+                  programmaticChange = true;
+                  try {
+                      target.getText().replace(start, end, clip);
+                      int cursor = Math.min(start + clip.length(), target.getText().length());
+                      target.setSelection(cursor);
+                      target.requestFocus();
+                      manualTopSource = (target == topBox);
+                      topActive = manualTopSource;
+                  } finally {
+                      programmaticChange = false;
+                  }
+                  updateButtons();
               }
           
               void bringAppToFrontForClipboardRead() {
@@ -3689,51 +3602,6 @@ jobs:
           
               String noiseMenuLabel() {
                   return vadEngineLabel();
-              }
-          
-              String backgroundScreenLabel() {
-                  return backgroundScreenAllowed ? "engedélyezve erre az indításra" : "kikapcsolva – minden indításkor ez az alap";
-              }
-          
-              void speechMenu() {
-                  if(uiLockedForSpeech || finalizingStop) return;
-                  chooseSoundProfile();
-              }
-          
-              void noiseMenu() {
-                  if(uiLockedForSpeech || finalizingStop) return;
-                  chooseVadEngine();
-              }
-          
-              void chooseBackgroundScreenMode() {
-                  CharSequence[] items = {
-                      menuItem("Kikapcsolva", "alapértelmezett minden appindításkor", !backgroundScreenAllowed),
-                      menuItem("Engedélyezve erre az indításra", "lezárt kijelzőnél is fusson, értesítéssel", backgroundScreenAllowed)
-                  };
-                  showCenteredMenu("Háttér / lezárt kijelző", items, (d,w) -> {
-                      backgroundScreenAllowed = (w == 1);
-                      if(!backgroundScreenAllowed) stopBackgroundForegroundService();
-                      Toast.makeText(this, backgroundScreenAllowed ? "Háttér mód engedélyezve erre az indításra." : "Háttér mód kikapcsolva.", Toast.LENGTH_SHORT).show();
-                      updateButtons();
-                  });
-              }
-          
-          
-              void toggleBackgroundScreenMode() {
-                  backgroundScreenAllowed = !backgroundScreenAllowed;
-                  if(backgroundScreenAllowed) {
-                      if(floatingTranslatorEnabled) {
-                          floatingTranslatorEnabled = false;
-                          hideFloatingTranslator();
-                          stopClipboardSystemSpeech(false);
-                          try { if(clipboardDialog != null && clipboardDialog.isShowing()) clipboardDialog.dismiss(); } catch(Exception ignored) {}
-                          save();
-                      }
-                  } else {
-                      stopBackgroundForegroundService();
-                  }
-                  Toast.makeText(this, backgroundScreenAllowed ? "Háttér mód aktív. Lebegő vágólap mód kikapcsolva." : "Háttér mód kikapcsolva.", Toast.LENGTH_SHORT).show();
-                  updateButtons();
               }
           
               String interpreterQuickLabel() {
@@ -4243,8 +4111,8 @@ jobs:
           
               void styleUiState() {
                   try {
-                      int active = Color.rgb(65,100,155);
-                      int inactive = Color.rgb(75,80,90);
+                      int active = Color.rgb(30,140,70);
+                      int inactive = Color.rgb(60,95,150);
                       int disabled = Color.rgb(55,58,65);
                       int green = Color.rgb(30,140,70);
                       int red = Color.rgb(150,55,50);
@@ -4291,8 +4159,8 @@ jobs:
                   setOvalButtonColor(menuBtn, hasKey() ? Color.rgb(55,60,70) : Color.rgb(140,80,30));
                   topLangBtn.setText("FELSŐ: " + code(topLang));
                   bottomLangBtn.setText("ALSÓ: " + code(bottomLang));
-                  setOvalButtonColor(topLangBtn, topActive ? Color.rgb(60,95,150) : Color.rgb(55,60,70));
-                  setOvalButtonColor(bottomLangBtn, !topActive ? Color.rgb(60,95,150) : Color.rgb(55,60,70));
+                  setOvalButtonColor(topLangBtn, topActive ? Color.rgb(30,140,70) : Color.rgb(60,95,150));
+                  setOvalButtonColor(bottomLangBtn, !topActive ? Color.rgb(30,140,70) : Color.rgb(60,95,150));
                   setOvalButtonColor(centerLangBtn, Color.rgb(55,60,70));
                   styleUiState();
                   refreshInterpreterFloatingButton();
@@ -4377,17 +4245,6 @@ jobs:
           
               @Override public void onPause() {
                   super.onPause();
-                  if(streaming && !backgroundScreenAllowed) stop();
-                  if(!backgroundScreenAllowed) {
-                      // Ha nincs külön engedélyezve, háttérbe kerüléskor marad a régi, biztonságos működés: leáll.
-                      finalizingStop = false;
-                      setSpeechUiLocked(false);
-                      try {
-                          if(tts != null) tts.stop();
-                          ttsSpeaking = false;
-                      } catch(Exception ignored) {}
-                      updateButtons();
-                  }
                   if(floatingTranslatorEnabled) new Handler().postDelayed(() -> ensureFloatingTranslator(), 250); if(interpreterMode) new Handler().postDelayed(() -> ensureInterpreterFloatingButton(), 250);
               }
           
@@ -4456,14 +4313,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V352.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V352.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V353.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V353.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V352
+          name: V353
           path: |
             artifact/*.apk
             artifact/*.aab
