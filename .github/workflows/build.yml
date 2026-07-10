@@ -1,4 +1,4 @@
-name: Build Android APK V354
+name: Build Android APK V355
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 354; versionName = "35.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 355; versionName = "35.5" }
 
               signingConfigs {
                   create("release") {
@@ -108,11 +108,12 @@ jobs:
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.VIBRATE" />
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V354" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V355" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -279,6 +280,15 @@ jobs:
               android.view.View floatingResultView;
               boolean floatingClipboardCollapsed = false;
               Handler floatingCollapseHandler = new Handler();
+              final Handler micLifeSignalHandler = new Handler(Looper.getMainLooper());
+              int micLifeSignalMinutes = 0;
+              final Runnable micLifeSignalRunnable = new Runnable() {
+                  @Override public void run() {
+                      if(!streaming || micLifeSignalMinutes <= 0) return;
+                      playMicLifeSignal();
+                      scheduleMicLifeSignal();
+                  }
+              };
               int floatingButtonX = 24;
               int floatingButtonY = 0;
               Dialog clipboardDialog;
@@ -390,9 +400,17 @@ jobs:
               };
           
               final String[][] modes = {
-                  {"Pontos","precise"},
-                  {"Természetes","natural"},
+                  {"Szó szerinti fordítás","precise"},
+                  {"Normál fordítás","natural"},
                   {"Tolmács","interpreter"}
+              };
+
+              final String[][] micLifeSignalModes = {
+                  {"Kikapcsolva","0"},
+                  {"5 perc","5"},
+                  {"10 perc","10"},
+                  {"20 perc","20"},
+                  {"30 perc","30"}
               };
           
               final String[][] vadModes = {
@@ -458,6 +476,8 @@ jobs:
                   }
                   mirrorBottomMode = sp.getBoolean("mirrorBottomMode", false);
                   floatingTranslatorEnabled = sp.getBoolean("floatingTranslatorEnabled", false);
+                  micLifeSignalMinutes = sp.getInt("micLifeSignalMinutes", 0);
+                  if(micLifeSignalMinutes != 0 && micLifeSignalMinutes != 5 && micLifeSignalMinutes != 10 && micLifeSignalMinutes != 20 && micLifeSignalMinutes != 30) micLifeSignalMinutes = 0;
                   floatingButtonX = sp.getInt("floatingButtonX", 24);
                   floatingButtonY = sp.getInt("floatingButtonY", 0);
                   interpreterFloatingX = sp.getInt("interpreterFloatingX", 24);
@@ -498,6 +518,7 @@ jobs:
                     .putString("lastInterpreterAudioMode", lastInterpreterAudioMode)
                     .putBoolean("mirrorBottomMode", mirrorBottomMode)
                     .putBoolean("floatingTranslatorEnabled", floatingTranslatorEnabled)
+                    .putInt("micLifeSignalMinutes", micLifeSignalMinutes)
                     .putInt("floatingButtonX", floatingButtonX)
                     .putInt("floatingButtonY", floatingButtonY)
                     .putInt("interpreterFloatingX", interpreterFloatingX)
@@ -515,7 +536,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V354");
+                  TextView title = label("Fordito_V355");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1128,7 +1149,7 @@ jobs:
                       .writeTimeout(90, TimeUnit.SECONDS)
                       .build();
                   if(withAudio) {
-                      // V354: minden mikrofonindítás pontosan egyszer teljesen újranyitja
+                      // V355: minden mikrofonindítás pontosan egyszer teljesen újranyitja
                       // az AudioRecordot, a VAD-ot és a kapcsolódó puffereket.
                       resetAudioModeState();
                       state.setText("mikrofon előkészítés");
@@ -1486,6 +1507,7 @@ jobs:
           
               void resetAudioModeState() {
                   streaming = false;
+                  cancelMicLifeSignal();
                   voiceSendActive = false;
                   clearPreRollAudio();
                   clearPendingSpeechAudio();
@@ -1507,7 +1529,10 @@ jobs:
                   streaming = true;
                   setSpeechUiLocked(false);
                   rec.startRecording();
-                  runOnUiThread(() -> state.setText("mikrofon aktív"));
+                  runOnUiThread(() -> {
+                      state.setText("mikrofon aktív");
+                      scheduleMicLifeSignal();
+                  });
                   updateButtons();
           
                   audioExec.submit(() -> {
@@ -1589,6 +1614,7 @@ jobs:
           
               void stop() {
                   streaming = false;
+                  cancelMicLifeSignal();
                   connected = false;
                   ttsMuteUntilMs = 0L;
                   voiceSendActive = false;
@@ -2948,31 +2974,32 @@ jobs:
                   box.setBackgroundColor(Color.rgb(35,38,44));
           
                   Button interpreterBtn = addMenuButton(box, "Tolmács mód", interpreterQuickLabel(), interpreterMode, v -> {
-                      toggleInterpreterQuick();
+                      toggleInterpreterEnabled();
                       refreshInterpreterMenuButton((Button)v);
                       updateButtons();
                   });
                   interpreterBtn.setOnLongClickListener(v -> {
-                      disableInterpreterQuick();
+                      if(interpreterMode) toggleInterpreterAudioMode();
                       refreshInterpreterMenuButton((Button)v);
                       updateButtons();
                       return true;
                   });
                   refreshInterpreterMenuButton(interpreterBtn);
-                  addMenuButton(box, "Vágólap mód", floatingTranslatorLabel(), floatingTranslatorEnabled, v -> {
+                  addMenuButton(box, "Lebegő gomb", floatingTranslatorLabel(), floatingTranslatorEnabled, v -> {
                       toggleFloatingTranslator();
-                      refreshMenuButton((Button)v, "Vágólap mód", floatingTranslatorLabel(), floatingTranslatorEnabled);
+                      refreshMenuButton((Button)v, "Lebegő gomb", floatingTranslatorLabel(), floatingTranslatorEnabled);
                       updateButtons();
                   });
+                  addMenuButton(box, "Mikrofon életjel", micLifeSignalLabel(), micLifeSignalMinutes > 0, v -> chooseMicLifeSignal());
                   addMenuButton(box, "Tükör mód", displayModeLabel(), mirrorBottomMode, v -> {
                       toggleDisplayModeQuick();
                       refreshMenuButton((Button)v, "Tükör mód", displayModeLabel(), mirrorBottomMode);
                       updateButtons();
                   });
-                  addMenuButton(box, "Fordítási beállítások", translationMenuLabel(), false, v -> translationMenu());
-                  addMenuButton(box, "Zajszűrési motor", vadEngineLabel(), false, v -> chooseVadEngine());
+                  addMenuButton(box, "Beszélgetési profil", profileLabel(), false, v -> chooseProfile());
+                  addMenuButton(box, "Zajszűrés és tolmácsolás", noiseAndTranslationLabel(), false, v -> noiseAndTranslationMenu());
                   addMenuButton(box, "Ablakkezelés", "másolás, teljes törlés", false, v -> windowMenu());
-                  addMenuButton(box, "OpenAI API kulcs", hasKey() ? "kulcs mentve – megnyitáskor kijelölve" : "nincs megadva", false, v -> showApi());
+                  addMenuButton(box, "OpenAI API kulcs és modell", hasKey() ? "kulcs mentve / " + modelLabel() : "nincs kulcs / " + modelLabel(), false, v -> showApi());
                   addMenuButton(box, "Alapbeállítások", "nyelvpár marad, fordítás/bevitel visszaáll", false, v -> { resetCoreSettings(); updateButtons(); });
           
                   AlertDialog dlg = new AlertDialog.Builder(this).setView(box).create();
@@ -3044,16 +3071,8 @@ jobs:
                   ss.setSpan(new AbsoluteSizeSpan(14, true), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   ss.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
           
-                  if(!interpreterMode) {
-                      ss.setSpan(new ForegroundColorSpan(Color.rgb(245,245,245)), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                      b.setBackgroundColor(Color.rgb(85,85,85));
-                  } else if("speaker".equals(interpreterAudioMode)) {
-                      ss.setSpan(new ForegroundColorSpan(Color.WHITE), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                      b.setBackgroundColor(Color.rgb(10,115,55));
-                  } else {
-                      ss.setSpan(new ForegroundColorSpan(Color.WHITE), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                      b.setBackgroundColor(Color.rgb(15,75,145));
-                  }
+                  ss.setSpan(new ForegroundColorSpan(Color.WHITE), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                  b.setBackgroundColor(interpreterSharedColor());
           
                   b.setText(ss);
               }
@@ -3398,8 +3417,8 @@ jobs:
                       setLayerType(View.LAYER_TYPE_SOFTWARE, null);
                   }
           
-                  void setState(boolean active, boolean headsetModeNow) {
-                      bgColor = active ? Color.rgb(30,135,70) : Color.rgb(150,45,45);
+                  void setState(int sharedColor, boolean headsetModeNow) {
+                      bgColor = sharedColor;
                       headsetMode = headsetModeNow;
                       invalidate();
                   }
@@ -3511,19 +3530,13 @@ jobs:
               void refreshInterpreterFloatingButton() {
                   if(!(interpreterFloatingView instanceof InterpreterFloatingButton)) return;
                   InterpreterFloatingButton b=(InterpreterFloatingButton)interpreterFloatingView;
-                  b.setState(streaming, "headset".equals(interpreterAudioMode));
+                  b.setState(interpreterSharedColor(), "headset".equals(interpreterAudioMode));
               }
           
           
               void toggleInterpreterAudioModeFromFloating() {
                   if(!interpreterMode) return;
-                  if("headset".equals(interpreterAudioMode)) interpreterAudioMode = "speaker";
-                  else interpreterAudioMode = "headset";
-                  lastInterpreterAudioMode = interpreterAudioMode;
-                  save();
-                  refreshInterpreterFloatingButton();
-                  updateButtons();
-                  Toast.makeText(this, interpreterQuickLabel(), Toast.LENGTH_SHORT).show();
+                  toggleInterpreterAudioMode();
               }
           
               void toggleInterpreterFloatingRun() {
@@ -3571,17 +3584,71 @@ jobs:
               void translationMenu() {
                   if(uiLockedForSpeech || finalizingStop) return;
                   CharSequence[] items = {
-                      menuItem("AI modell", modelLabel(), false),
                       menuItem("Beszélgetési profil", profileLabel(), false),
-                      menuItem("Fordítás stílusa", modeLabel(), false)
+                      menuItem("Tolmácsolás módja", modeLabel(), false)
                   };
 
                   showCenteredMenu("Fordítási beállítások", items, (d,w) -> {
-                      if(w==0) chooseModel();
-                      if(w==1) chooseProfile();
-                      if(w==2) chooseMode();
+                      if(w==0) chooseProfile();
+                      if(w==1) chooseMode();
                       updateButtons();
                   });
+              }
+
+              String noiseAndTranslationLabel() {
+                  return vadEngineLabel() + " / " + modeLabel();
+              }
+
+              void noiseAndTranslationMenu() {
+                  if(uiLockedForSpeech || finalizingStop) return;
+                  CharSequence[] items = {
+                      menuItem("Zajszűrési motor", vadEngineLabel(), false),
+                      menuItem("Tolmácsolás módja", modeLabel(), false)
+                  };
+                  showCenteredMenu("Zajszűrés és tolmácsolás", items, (d,w) -> {
+                      if(w==0) chooseVadEngine();
+                      if(w==1) chooseMode();
+                      updateButtons();
+                  });
+              }
+
+              String micLifeSignalLabel() {
+                  return micLifeSignalMinutes <= 0 ? "kikapcsolva" : micLifeSignalMinutes + " percenként – hang + rezgés";
+              }
+
+              void chooseMicLifeSignal() {
+                  String current = String.valueOf(micLifeSignalMinutes);
+                  chooseFrom("Mikrofon életjel", micLifeSignalModes, current, v -> {
+                      try { micLifeSignalMinutes = Integer.parseInt(v); } catch(Exception ignored) { micLifeSignalMinutes = 0; }
+                      save();
+                      if(streaming) scheduleMicLifeSignal(); else cancelMicLifeSignal();
+                  });
+              }
+
+              void scheduleMicLifeSignal() {
+                  micLifeSignalHandler.removeCallbacks(micLifeSignalRunnable);
+                  if(streaming && micLifeSignalMinutes > 0) {
+                      micLifeSignalHandler.postDelayed(micLifeSignalRunnable, micLifeSignalMinutes * 60L * 1000L);
+                  }
+              }
+
+              void cancelMicLifeSignal() {
+                  micLifeSignalHandler.removeCallbacks(micLifeSignalRunnable);
+              }
+
+              void playMicLifeSignal() {
+                  try {
+                      android.os.Vibrator vibrator = (android.os.Vibrator)getSystemService(VIBRATOR_SERVICE);
+                      if(vibrator != null && vibrator.hasVibrator()) {
+                          if(Build.VERSION.SDK_INT >= 26) vibrator.vibrate(android.os.VibrationEffect.createOneShot(180, android.os.VibrationEffect.DEFAULT_AMPLITUDE));
+                          else vibrator.vibrate(180);
+                      }
+                  } catch(Exception ignored) {}
+                  try {
+                      final android.media.ToneGenerator tone = new android.media.ToneGenerator(AudioManager.STREAM_MUSIC, 75);
+                      tone.startTone(android.media.ToneGenerator.TONE_PROP_BEEP2, 180);
+                      micLifeSignalHandler.postDelayed(() -> { try { tone.release(); } catch(Exception ignored) {} }, 350);
+                  } catch(Exception ignored) {}
               }
 
               void advancedMenu() {
@@ -3603,6 +3670,12 @@ jobs:
                   return "BT  BLUETOOTH MÓD";
               }
           
+              int interpreterSharedColor() {
+                  if(!interpreterMode) return Color.rgb(85,85,85);
+                  if("speaker".equals(interpreterAudioMode)) return Color.rgb(10,115,55);
+                  return Color.rgb(15,75,145);
+              }
+
               void disableInterpreterQuick() {
                   interpreterMode = false;
                   interpreterAudioMode = "off";
@@ -3614,21 +3687,31 @@ jobs:
                   save();
                   Toast.makeText(this, "Tolmács mód kikapcsolva.", Toast.LENGTH_SHORT).show();
               }
-          
-              void toggleInterpreterQuick() {
-                  if(!interpreterMode) {
+
+              void toggleInterpreterEnabled() {
+                  if(interpreterMode) {
+                      disableInterpreterQuick();
+                  } else {
                       interpreterMode = true;
                       interpreterAudioMode = lastInterpreterAudioMode;
                       if(!"speaker".equals(interpreterAudioMode) && !"headset".equals(interpreterAudioMode)) interpreterAudioMode = "headset";
-                  } else {
-                      if("headset".equals(interpreterAudioMode)) interpreterAudioMode = "speaker";
-                      else interpreterAudioMode = "headset";
+                      lastInterpreterAudioMode = interpreterAudioMode;
+                      save();
+                      ensureInterpreterFloatingButton();
+                      Toast.makeText(this, interpreterQuickLabel(), Toast.LENGTH_SHORT).show();
                   }
-                  if("speaker".equals(interpreterAudioMode) || "headset".equals(interpreterAudioMode)) lastInterpreterAudioMode = interpreterAudioMode;
-                  save();
-                  if(interpreterMode) ensureInterpreterFloatingButton(); else hideInterpreterFloatingButton();
-                  Toast.makeText(this, interpreterQuickLabel(), Toast.LENGTH_SHORT).show();
                   updateButtons();
+              }
+
+              void toggleInterpreterAudioMode() {
+                  if(!interpreterMode) return;
+                  if("headset".equals(interpreterAudioMode)) interpreterAudioMode = "speaker";
+                  else interpreterAudioMode = "headset";
+                  lastInterpreterAudioMode = interpreterAudioMode;
+                  save();
+                  refreshInterpreterFloatingButton();
+                  updateButtons();
+                  Toast.makeText(this, interpreterQuickLabel(), Toast.LENGTH_SHORT).show();
               }
           
               void toggleDisplayModeQuick() {
@@ -3751,12 +3834,25 @@ jobs:
                   input.setTextSize(14);
                   input.setPadding(8, 8, 8, 8);
                   box.addView(input, new LinearLayout.LayoutParams(-1, -2));
+
+                  Button modelButton = new Button(this);
+                  modelButton.setAllCaps(false);
+                  modelButton.setText("API modell\n" + modelLabel());
+                  modelButton.setOnClickListener(v -> {
+                      chooseFrom("API modell", models, model, selected -> {
+                          model = selected;
+                          save();
+                          modelButton.setText("API modell\n" + modelLabel());
+                          restartIfNeeded();
+                      });
+                  });
+                  box.addView(modelButton, new LinearLayout.LayoutParams(-1, -2));
           
                   android.widget.ScrollView scroll = new android.widget.ScrollView(this);
                   scroll.addView(box);
           
                   AlertDialog dlg = new AlertDialog.Builder(this)
-                    .setTitle("OpenAI API kulcs")
+                    .setTitle("OpenAI API kulcs és modell")
                     .setView(scroll)
                     .setPositiveButton("Mentés", (d,w) -> { apiKey = input.getText().toString().trim(); save(); updateButtons(); })
                     .setNeutralButton("Kulcs törlése", null)
@@ -3780,7 +3876,7 @@ jobs:
           
               void chooseModel() { chooseFrom("AI modell", models, model, v -> { model = v; save(); restartIfNeeded(); }); }
               void chooseProfile() { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save();  }); }
-              void chooseMode() { chooseFrom("Fordítás stílusa", modes, mode, v -> { mode = v; save();  }); }
+              void chooseMode() { chooseFrom("Tolmácsolás módja", modes, mode, v -> { mode = v; save();  }); }
               void chooseVadEngine() { chooseFrom("Zajszűrési módok", vadEngineModes, vadEngineMode, v -> { vadEngineMode = v; save(); closeExternalVad(); restartIfNeeded(); }); }
               void chooseVad() { chooseFrom("Két mondat közötti szünet", vadModes, vadMode, v -> { vadMode = v; save(); restartIfNeeded(); }); }
               void chooseAudioSource() { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }); }
@@ -4199,6 +4295,7 @@ jobs:
               }
           
               @Override public void onDestroy() {
+                  cancelMicLifeSignal();
                   hideFloatingTranslator();
                   hideInterpreterFloatingButton();
                   stopClipboardSystemSpeech(false);
@@ -4253,14 +4350,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V354.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V354.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V355.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V355.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V354
+          name: V355
           path: |
             artifact/*.apk
             artifact/*.aab
