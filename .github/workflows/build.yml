@@ -1,4 +1,4 @@
-name: Build Android APK V350
+name: Build Android APK V351
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 350; versionName = "35.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 351; versionName = "35.1" }
 
               signingConfigs {
                   create("release") {
@@ -112,7 +112,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V350" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V351" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -263,6 +263,7 @@ jobs:
               int preRollAudioBytes = 0;
               final ArrayDeque<byte[]> pendingSpeechAudioChunks = new ArrayDeque<>();
               int pendingSpeechAudioMs = 0;
+              static final int AUDIO_SAMPLE_RATE = 16000;
               static final int BLOCK_WINDOW_MS = 8000;
               static final int BLOCK_ACCEPT_MS = 8000;
               static final int BLOCK_OVERLAP_MS = 1000;
@@ -527,7 +528,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V350");
+                  TextView title = label("Fordito_V351");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1174,7 +1175,7 @@ jobs:
               void rememberPreRollAudio(byte[] data, int len) {
                   if(data == null || len <= 0) return;
                   byte[] copy = Arrays.copyOf(data, len);
-                  int maxBytes = Math.max(1, 24000 * 2 * PRE_ROLL_AUDIO_MS / 1000);
+                  int maxBytes = Math.max(1, AUDIO_SAMPLE_RATE * 2 * PRE_ROLL_AUDIO_MS / 1000);
                   synchronized(preRollAudioChunks) {
                       preRollAudioChunks.add(copy);
                       preRollAudioBytes += copy.length;
@@ -1197,9 +1198,9 @@ jobs:
                   return out;
               }
           
-              int pcm16Mono24kMs(int bytes) {
+              int pcm16Mono16kMs(int bytes) {
                   if(bytes <= 0) return 0;
-                  return Math.max(1, (int)Math.round(bytes * 1000.0 / (24000.0 * 2.0)));
+                  return Math.max(1, (int)Math.round(bytes * 1000.0 / (AUDIO_SAMPLE_RATE * 2.0)));
               }
           
               void clearPendingSpeechAudio() {
@@ -1213,7 +1214,7 @@ jobs:
                   if(data == null || len <= 0) return;
                   synchronized(pendingSpeechAudioChunks) {
                       pendingSpeechAudioChunks.add(Arrays.copyOf(data, len));
-                      pendingSpeechAudioMs += pcm16Mono24kMs(len);
+                      pendingSpeechAudioMs += pcm16Mono16kMs(len);
                   }
               }
           
@@ -1294,22 +1295,6 @@ jobs:
                   }
               }
           
-              byte[] downsample24kTo16kPcm16(byte[] data, int len) {
-                  if(data == null || len < 6) return new byte[0];
-                  int inSamples = len / 2;
-                  int outSamples = (inSamples * 2) / 3;
-                  byte[] out = new byte[outSamples * 2];
-                  for(int i=0;i<outSamples;i++) {
-                      int srcSample = (i * 3) / 2;
-                      int si = srcSample * 2;
-                      int oi = i * 2;
-                      if(si + 1 >= len) break;
-                      out[oi] = data[si];
-                      out[oi+1] = data[si+1];
-                  }
-                  return out;
-              }
-          
               boolean vadIsSpeechOn16k(byte[] pcm16k) {
                   if(speechVadInstance == null || pcm16k == null || pcm16k.length == 0) return false;
                   try {
@@ -1346,7 +1331,7 @@ jobs:
               boolean externalVadOverGate(byte[] data, int len) {
                   if("pass".equals(vadEngineMode)) return true;
                   if(!ensureExternalVadReady()) return false;
-                  return vadIsSpeechOn16k(downsample24kTo16kPcm16(data, len));
+                  return vadIsSpeechOn16k(Arrays.copyOf(data, len));
               }
           
               void clearSpeechAudioWindow() {
@@ -1356,7 +1341,7 @@ jobs:
               }
           
               int speechAudioWindowMs() {
-                  synchronized(speechAudioWindowLock) { return pcm16Mono24kMs(speechAudioWindow.size()); }
+                  synchronized(speechAudioWindowLock) { return pcm16Mono16kMs(speechAudioWindow.size()); }
               }
           
               void appendSpeechAudioChunk(byte[] chunk) {
@@ -1364,11 +1349,11 @@ jobs:
                   byte[] ready = null;
                   synchronized(speechAudioWindowLock) {
                       try { speechAudioWindow.write(chunk); } catch(Exception ignored) {}
-                      int needBytes = 24000 * 2 * BLOCK_WINDOW_MS / 1000;
+                      int needBytes = AUDIO_SAMPLE_RATE * 2 * BLOCK_WINDOW_MS / 1000;
                       if(speechAudioWindow.size() >= needBytes) {
                           byte[] all = speechAudioWindow.toByteArray();
                           ready = Arrays.copyOf(all, needBytes);
-                          int keepBytes = 24000 * 2 * BLOCK_OVERLAP_MS / 1000;
+                          int keepBytes = AUDIO_SAMPLE_RATE * 2 * BLOCK_OVERLAP_MS / 1000;
                           speechAudioWindow.reset();
                           int start = Math.max(0, needBytes - keepBytes);
                           try { speechAudioWindow.write(all, start, needBytes - start); } catch(Exception ignored) {}
@@ -1383,7 +1368,7 @@ jobs:
               void flushSpeechAudioWindow(boolean force) {
                   byte[] ready = null;
                   synchronized(speechAudioWindowLock) {
-                      int minBytes = 24000 * 2 * (force ? 400 : 1200) / 1000;
+                      int minBytes = AUDIO_SAMPLE_RATE * 2 * (force ? 400 : 1200) / 1000;
                       if(speechAudioWindow.size() >= minBytes) {
                           ready = speechAudioWindow.toByteArray();
                           speechAudioWindow.reset();
@@ -1392,12 +1377,12 @@ jobs:
                   if(ready != null) transcribeAudioWindow(ready, true);
               }
           
-              byte[] wavFromPcm24k(byte[] pcm) throws Exception {
+              byte[] wavFromPcm16k(byte[] pcm) throws Exception {
                   int dataLen = pcm == null ? 0 : pcm.length;
                   ByteArrayOutputStream out = new ByteArrayOutputStream(44 + dataLen);
                   writeAscii(out, "RIFF"); writeIntLE(out, 36 + dataLen); writeAscii(out, "WAVE");
                   writeAscii(out, "fmt "); writeIntLE(out, 16); writeShortLE(out, 1); writeShortLE(out, 1);
-                  writeIntLE(out, 24000); writeIntLE(out, 24000 * 2); writeShortLE(out, 2); writeShortLE(out, 16);
+                  writeIntLE(out, AUDIO_SAMPLE_RATE); writeIntLE(out, AUDIO_SAMPLE_RATE * 2); writeShortLE(out, 2); writeShortLE(out, 16);
                   writeAscii(out, "data"); writeIntLE(out, dataLen);
                   if(pcm != null) out.write(pcm);
                   return out.toByteArray();
@@ -1410,7 +1395,7 @@ jobs:
               void transcribeAudioWindow(byte[] pcm, boolean finalFlush) {
                   if(pcm == null || pcm.length == 0 || client == null || !hasKey()) return;
                   try {
-                      byte[] wav = wavFromPcm24k(pcm);
+                      byte[] wav = wavFromPcm16k(pcm);
                       MultipartBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
                           .addFormDataPart("model", "gpt-4o-mini-transcribe")
                           .addFormDataPart("prompt", speechTranscriptionPrompt())
@@ -1533,11 +1518,11 @@ jobs:
               }
           
               void audioLoop() {
-                  int sr = 24000;
+                  int sr = AUDIO_SAMPLE_RATE;
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
                   int bs = Math.max(min, 4800);
           
-                  // V318: 24 kHz PCM16 mono marad. Buffer cél kb. 100 ms.
+                  // V318: 16 kHz PCM16 mono marad. Buffer cél kb. 100 ms.
                   rec = makeBestAudioRecord(sr, bs);
                   if(rec == null) { runOnUiThread(() -> state.setText("mikrofon hiba")); return; }
                   streaming = true;
@@ -4502,14 +4487,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V350.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V350.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V351.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V351.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V350
+          name: V351
           path: |
             artifact/*.apk
             artifact/*.aab
