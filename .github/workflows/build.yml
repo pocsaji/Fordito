@@ -1,4 +1,4 @@
-name: Build Android APK V367
+name: Build Android APK V368
 
 on:
   workflow_dispatch:
@@ -49,7 +49,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 367; versionName = "36.7" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 368; versionName = "36.8" }
 
               signingConfigs {
                   create("release") {
@@ -134,7 +134,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V367" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V368" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -312,17 +312,14 @@ jobs:
               String lastInterpreterAudioMode = "headset";
               volatile long ttsMuteUntilMs = 0L;
               static final int PRE_ROLL_AUDIO_MS = 500;
-              // Élő tolmács blokkzárás - egy központi időlogika:
-              // 150 ms valódi beszéd alatt zajnak tekintjük, 1.2 s csendnél zárunk,
-              // 10 s folyamatos beszédnél szóhatáron vágunk akkor is, ha nincs csend.
-              static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
-              static final int MAX_SPEECH_SILENCE_MS = 800;
+              // Egyetlen valódi hangszűrő marad: DeepFilterNet.
+              // A Silero kizárólag beszédkezdetet és blokkzáró csendet jelez;
+              // hangmintát nem alakít át, és aktív beszéd közben nem dobhat el hangdarabot.
+              static final int MIN_INITIAL_TRANSCRIPT_AGE_MS = 150;
               static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 8000;
               volatile boolean voiceSendActive = false;
               final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
               int preRollAudioBytes = 0;
-              final ArrayDeque<byte[]> pendingSpeechAudioChunks = new ArrayDeque<>();
-              int pendingSpeechAudioMs = 0;
               static final int AUDIO_SAMPLE_RATE = 48000;
               static final int BLOCK_WINDOW_MS = 8000;
               static final int BLOCK_ACCEPT_MS = 8000;
@@ -330,16 +327,17 @@ jobs:
               final Object speechAudioWindowLock = new Object();
               ByteArrayOutputStream speechAudioWindow = new ByteArrayOutputStream();
 
-              // V358: egyetlen zajszűrő motor: DeepFilterNet 3, natív 48 kHz PCM16 mono lánc.
+              // V368: az egyetlen zajszűrő motor a DeepFilterNet 3, natív 48 kHz PCM16 mono láncon.
               final Object deepFilterLock = new Object();
               DeepFilterNet deepFilterNetInstance = null;
               int deepFilterFrameBytes = 0;
               ByteArrayOutputStream deepFilterPending = new ByteArrayOutputStream();
 
-              // A Silero itt nem zajszűrő, csak belső beszéd/nem-beszéd blokkzáró.
-              final String vadEngineMode = "silero_medium";
+              // A Silero nem zajszűrő és nem hangkapu: csak a blokkhatárt jelzi.
+              final String vadEngineMode = "silero_boundary_normal";
               Object speechVadInstance = null;
               String speechVadInstanceMode = "";
+              boolean speechVadUnavailableForSession = false;
               ByteArrayOutputStream vadFrameBuffer = new ByteArrayOutputStream();
               boolean mirrorBottomMode = false;
               boolean backgroundScreenAllowed = true;
@@ -426,7 +424,7 @@ jobs:
               String mode = "natural";
               String vadMode = "low";
               String delayMode = "medium";
-              String audioSourceMode = "recognition";
+              String audioSourceMode = "unprocessed";
               String topLang = "hu";
               String bottomLang = "fr";
           
@@ -493,10 +491,8 @@ jobs:
 
           
               final String[][] audioSourceModes = {
-                  {"Beszédfelismerés / ajánlott","recognition"},
-                  {"Kommunikáció / régi","communication"},
-                  {"Nyers mikrofon / próba","unprocessed"},
-                  {"Alap mikrofon","mic"}
+                  {"Nyers mikrofon / ajánlott","unprocessed"},
+                  {"Alap mikrofon / tartalék","mic"}
               };
           
 
@@ -524,7 +520,10 @@ jobs:
                   mode = sp.getString("mode", "natural");
                   vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "xhigh");
-                  audioSourceMode = sp.getString("audioSourceMode", "recognition");
+                  audioSourceMode = sp.getString("audioSourceMode", "unprocessed");
+                  // Régi VOICE_RECOGNITION / VOICE_COMMUNICATION beállítás nem maradhat aktív,
+                  // mert a rendszer saját előfeldolgozása a DeepFilterNet előtt második szűrést okozhat.
+                  if(!"unprocessed".equals(audioSourceMode) && !"mic".equals(audioSourceMode)) audioSourceMode = "unprocessed";
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   lastInterpreterAudioMode = sp.getString("lastInterpreterAudioMode", "headset");
                   if(!"speaker".equals(lastInterpreterAudioMode) && !"headset".equals(lastInterpreterAudioMode)) lastInterpreterAudioMode = "headset";
@@ -594,7 +593,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V367");
+                  TextView title = label("Fordito_V368");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1273,37 +1272,6 @@ jobs:
                   return Math.max(1, (int)Math.round(bytes * 1000.0 / (AUDIO_SAMPLE_RATE * 2.0)));
               }
           
-              void clearPendingSpeechAudio() {
-                  synchronized(pendingSpeechAudioChunks) {
-                      pendingSpeechAudioChunks.clear();
-                      pendingSpeechAudioMs = 0;
-                  }
-              }
-          
-              void rememberPendingSpeechAudio(byte[] data, int len) {
-                  if(data == null || len <= 0) return;
-                  synchronized(pendingSpeechAudioChunks) {
-                      pendingSpeechAudioChunks.add(Arrays.copyOf(data, len));
-                      pendingSpeechAudioMs += pcm16Mono48kMs(len);
-                  }
-              }
-          
-              int pendingSpeechAudioDurationMs() {
-                  synchronized(pendingSpeechAudioChunks) { return pendingSpeechAudioMs; }
-              }
-          
-              ArrayList<byte[]> takePendingSpeechAudio() {
-                  ArrayList<byte[]> out = new ArrayList<>();
-                  synchronized(pendingSpeechAudioChunks) {
-                      while(!pendingSpeechAudioChunks.isEmpty()) {
-                          byte[] b = pendingSpeechAudioChunks.poll();
-                          if(b != null) out.add(b);
-                      }
-                      pendingSpeechAudioMs = 0;
-                  }
-                  return out;
-              }
-          
               String deepFilterRootCause(Throwable e) {
                   Throwable root = e;
                   while(root.getCause() != null && root.getCause() != root) root = root.getCause();
@@ -1444,6 +1412,14 @@ jobs:
                   return Enum.valueOf((Class<Enum>)c.asSubclass(Enum.class), name);
               }
           
+              int sileroSilenceDurationMs() {
+                  // Ez kizárólag blokkzárási késleltetés, nem zajszűrési erősség.
+                  if("low".equals(vadMode)) return 900;
+                  if("high".equals(vadMode)) return 350;
+                  if("auto".equals(vadMode)) return 600;
+                  return 600;
+              }
+
               Object buildVadByReflection(String mode) throws Exception {
                   Class<?> vadClass = Class.forName("com.konovalov.vad.silero.Vad");
                   Object b = vadClass.getMethod("builder").invoke(null);
@@ -1452,22 +1428,25 @@ jobs:
                       .invoke(b, enumConst("com.konovalov.vad.silero.config.SampleRate", "SAMPLE_RATE_16K"));
                   b.getClass().getMethod("setFrameSize", Class.forName("com.konovalov.vad.silero.config.FrameSize"))
                       .invoke(b, enumConst("com.konovalov.vad.silero.config.FrameSize", "FRAME_SIZE_512"));
+                  // A Silero gyártói ajánlás szerinti NORMAL módban csak blokkhatárt jelez.
                   b.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.silero.config.Mode"))
-                      .invoke(b, enumConst("com.konovalov.vad.silero.config.Mode", "AGGRESSIVE"));
-                  b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, 300);
+                      .invoke(b, enumConst("com.konovalov.vad.silero.config.Mode", "NORMAL"));
+                  b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, sileroSilenceDurationMs());
                   b.getClass().getMethod("setSpeechDurationMs", int.class).invoke(b, 50);
                   return b.getClass().getMethod("build").invoke(b);
               }
 
               boolean ensureExternalVadReady() {
                   if(speechVadInstance != null) return true;
+                  if(speechVadUnavailableForSession) return false;
                   closeExternalVad();
                   try {
                       speechVadInstance = buildVadByReflection(vadEngineMode);
                       speechVadInstanceMode = vadEngineMode;
                       return speechVadInstance != null;
-                  } catch(Exception e) {
-                      runOnUiThread(() -> state.setText("Silero blokkzáró nem indult"));
+                  } catch(Throwable e) {
+                      speechVadUnavailableForSession = true;
+                      runOnUiThread(() -> state.setText("Silero nélkül – 8 mp blokkok"));
                       return false;
                   }
               }
@@ -1501,12 +1480,16 @@ jobs:
                       if(pos < all.length) vadFrameBuffer.write(all, pos, all.length - pos);
                       return speech;
                   } catch(Exception e) {
-                      return false;
+                      speechVadUnavailableForSession = true;
+                      closeExternalVad();
+                      runOnUiThread(() -> state.setText("Silero nélkül – 8 mp blokkok"));
+                      return true;
                   }
               }
           
-              boolean externalVadOverGate(byte[] data, int len) {
-                  if(!ensureExternalVadReady()) return false;
+              boolean sileroBoundaryHasSpeech(byte[] data, int len) {
+                  // Silero-hiba esetén minden DeepFilterNet-utáni hang továbbmegy a 8 mp-es STT-ablakba.
+                  if(!ensureExternalVadReady()) return true;
                   return vadIsSpeechOn16k(downsample48kTo16kForVad(data, len));
               }
           
@@ -1638,10 +1621,10 @@ jobs:
               }
           
               int selectedAudioSource() {
-                  if("recognition".equals(audioSourceMode)) return MediaRecorder.AudioSource.VOICE_RECOGNITION;
-                  if("communication".equals(audioSourceMode)) return MediaRecorder.AudioSource.VOICE_COMMUNICATION;
-                  if("unprocessed".equals(audioSourceMode)) return MediaRecorder.AudioSource.UNPROCESSED;
-                  return MediaRecorder.AudioSource.MIC;
+                  // Nincs VOICE_RECOGNITION / VOICE_COMMUNICATION: ezek a DeepFilterNet előtt
+                  // készülékfüggő második előfeldolgozást kapcsolhatnak be.
+                  if("mic".equals(audioSourceMode)) return MediaRecorder.AudioSource.MIC;
+                  return MediaRecorder.AudioSource.UNPROCESSED;
               }
           
               AudioRecord makeAudioRecord(int source, int sr, int bs) {
@@ -1654,13 +1637,18 @@ jobs:
               }
           
               AudioRecord makeBestAudioRecord(int sr, int bs) {
-                  AudioRecord r = makeAudioRecord(selectedAudioSource(), sr, bs);
+                  int preferred = selectedAudioSource();
+                  AudioRecord r = makeAudioRecord(preferred, sr, bs);
                   if(r != null) return r;
-                  r = makeAudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sr, bs);
-                  if(r != null) return r;
-                  r = makeAudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, sr, bs);
-                  if(r != null) return r;
-                  return makeAudioRecord(MediaRecorder.AudioSource.MIC, sr, bs);
+                  if(preferred != MediaRecorder.AudioSource.UNPROCESSED) {
+                      r = makeAudioRecord(MediaRecorder.AudioSource.UNPROCESSED, sr, bs);
+                      if(r != null) return r;
+                  }
+                  if(preferred != MediaRecorder.AudioSource.MIC) {
+                      r = makeAudioRecord(MediaRecorder.AudioSource.MIC, sr, bs);
+                      if(r != null) return r;
+                  }
+                  return null;
               }
           
               boolean shouldMuteMicForSpeakerTts() {
@@ -1674,8 +1662,8 @@ jobs:
                   cancelMicLifeSignal();
                   voiceSendActive = false;
                   clearPreRollAudio();
-                  clearPendingSpeechAudio();
                   clearSpeechAudioWindow();
+                  speechVadUnavailableForSession = false;
                   closeExternalVad();
                   releaseDeepFilterNet();
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception ignored) {}
@@ -1741,32 +1729,36 @@ jobs:
                                       // A pre-rollt nem töröljük, és TTS alatti hangot sem pufferezzük,
                                       // így a saját felolvasás nem kerülhet vissza később bemenetként.
                                       if(shouldMuteMicForSpeakerTts()) {
-                                          voiceSendActive = false;
+                                          if(voiceSendActive) {
+                                              voiceSendActive = false;
+                                              flushSpeechAudioWindow(true);
+                                          }
+                                          clearPreRollAudio();
                                           continue;
                                       }
 
                                       long now = System.currentTimeMillis();
-                                      boolean overGate = externalVadOverGate(filtered, filteredLen);
-                                      if(overGate) {
+                                      boolean sileroSpeech = sileroBoundaryHasSpeech(filtered, filteredLen);
+                                      if(sileroSpeech) {
                                           if(!voiceSendActive) {
-                                              rememberPendingSpeechAudio(filtered, filteredLen);
-                                              if(pendingSpeechAudioDurationMs() < MIN_TRUE_SPEECH_AUDIO_MS) continue;
                                               if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = now;
                                               for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr);
-                                              for(byte[] ps : takePendingSpeechAudio()) sendAudioChunk(ps);
-                                          } else {
-                                              sendAudioChunk(Arrays.copyOf(filtered, filteredLen));
                                           }
+                                          // A DeepFilterNet által egyszer megtisztított hang változtatás nélkül megy tovább.
+                                          sendAudioChunk(Arrays.copyOf(filtered, filteredLen));
                                           voiceSendActive = true;
                                           continue;
                                       }
 
                                       if(voiceSendActive) {
+                                          // A Silero csak blokkhatárt jelez. A lezáró hangdarab is továbbmegy,
+                                          // ezért a halk szóvég és a mondatvégi lecsengés nem vész el.
+                                          sendAudioChunk(Arrays.copyOf(filtered, filteredLen));
                                           voiceSendActive = false;
                                           flushSpeechAudioWindow(true);
+                                          continue;
                                       }
 
-                                      clearPendingSpeechAudio();
                                       rememberPreRollAudio(filtered, filteredLen);
                                   } catch(Exception ignored) {}
                               }
@@ -1831,7 +1823,6 @@ jobs:
                   ttsMuteUntilMs = 0L;
                   voiceSendActive = false;
                   clearPreRollAudio();
-                  clearPendingSpeechAudio();
                   clearSpeechAudioWindow();
                   closeExternalVad();
                   releaseDeepFilterNet();
@@ -2145,7 +2136,7 @@ jobs:
           
                   // V318: nincs külön szótáras nyelvkapu az első blokknál.
                   // Rövid válasz is beszéd. Csak minimális stabilizálást várunk, hogy ne fél karakter menjen fordításra.
-                  if(age >= MIN_TRUE_SPEECH_AUDIO_MS && s.length() >= 2 && words >= 1) return true;
+                  if(age >= MIN_INITIAL_TRANSCRIPT_AGE_MS && s.length() >= 2 && words >= 1) return true;
                   if(firstHardSentenceEnd(s) >= 0 && words >= 1) return true;
                   if(s.length() >= 18 && words >= 2) return true;
                   return false;
@@ -4585,14 +4576,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V367.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V367.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V368.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V368.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V367
+          name: V368
           path: |
             artifact/*.apk
             artifact/*.aab
