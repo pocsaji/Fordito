@@ -1,4 +1,4 @@
-name: Build Android APK V359
+name: Build Android APK V360
 
 on:
   workflow_dispatch:
@@ -43,7 +43,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 359; versionName = "35.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 360; versionName = "36.0" }
 
               signingConfigs {
                   create("release") {
@@ -118,7 +118,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V359" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V360" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -504,8 +504,7 @@ jobs:
                   if(last < 352) {
                       profile = "general";
                       mode = "natural";
-                      vadEngineMode = "silero_medium";
-                          interpreterMode = false;
+                      interpreterMode = false;
                       interpreterAudioMode = "off";
                       mirrorBottomMode = false;
                       sp.edit().putInt("stableDefaultsVersion", 352).apply();
@@ -545,7 +544,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V359");
+                  TextView title = label("Fordito_V360");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -4490,14 +4489,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V359.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V359.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V360.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V360.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V359
+          name: V360
           path: |
             artifact/*.apk
             artifact/*.aab
