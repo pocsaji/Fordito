@@ -1,4 +1,4 @@
-name: Build Android APK V373
+name: Build Android APK V374
 
 on:
   workflow_dispatch:
@@ -49,7 +49,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 373; versionName = "37.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 374; versionName = "37.4" }
 
               signingConfigs {
                   create("release") {
@@ -133,7 +133,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V373" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V374" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -314,10 +314,12 @@ jobs:
               // Egyetlen hanglánc: mikrofon -> DeepFilterNet egyszer -> egyetlen beszédblokk -> STT.
               // Nincs Silero-modell, nincs második hangkapu és nincs átfedő második blokkosítás.
               static final int MIN_INITIAL_TRANSCRIPT_AGE_MS = 150;
-              // A 8 másodperc csak célidő, nem vágási pont. Utána az első valódi szóközi
-              // hangszünetnél zárunk, így egy szó nem kerül két külön STT-blokkba.
-              static final int TARGET_SPEECH_BLOCK_MS = 8000;
-              static final int POST_TARGET_WORD_GAP_MS = 200;
+              // V374: 8 másodperces STT-ablak, amelyből az utolsó 1 másodperc
+              // változatlanul átkerül a következő ablak elejére. Így az első küldés 8 mp-nél,
+              // a további küldések 7 mp új hangonként történnek, és a határon vágott szó
+              // teljes egészében benne lesz a következő blokkban is.
+              static final int STT_WINDOW_MS = 8000;
+              static final int STT_OVERLAP_MS = 1000;
               static final int MIN_SPEECH_SIGNAL_MS = 180;
               volatile boolean voiceSendActive = false;
               volatile long lastSpeechSignalAtMs = 0L;
@@ -329,7 +331,7 @@ jobs:
               final Object speechAudioWindowLock = new Object();
               ByteArrayOutputStream speechAudioWindow = new ByteArrayOutputStream();
 
-              // V373: az egyetlen valódi hangszűrő a DeepFilterNet 3, 48 kHz PCM16 mono láncon.
+              // V374: az egyetlen valódi hangszűrő a DeepFilterNet 3, 48 kHz PCM16 mono láncon.
               static final float DEEP_FILTER_ATTENUATION_DB = 12.0f;
               final Object deepFilterLock = new Object();
               DeepFilterNet deepFilterNetInstance = null;
@@ -415,7 +417,7 @@ jobs:
                   String bottomSttText = "";
                   double topSttLogprob = -99.0;
                   double bottomSttLogprob = -99.0;
-                  // V373: egyetlen automatikus STT-eredmény. A két kiválasztott nyelvre
+                  // V374: egyetlen automatikus STT-eredmény. A két kiválasztott nyelvre
                   // zárást a következő strukturált feldolgozás végzi, harmadik nyelv nem jelenhet meg.
                   String autoSttText = "";
                   double autoSttLogprob = -99.0;
@@ -556,7 +558,7 @@ jobs:
                   mode = sp.getString("mode", "natural");
                   vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "xhigh");
-                  // V373-ban kizárólag nyers bemenet használható. Régi mentett MIC/VOICE mód
+                  // V374-ben kizárólag nyers bemenet használható. Régi mentett MIC/VOICE mód
                   // nem tehet gyártói előfeldolgozást a DeepFilterNet elé.
                   audioSourceMode = "unprocessed";
                   interpreterMode = sp.getBoolean("interpreterMode", false);
@@ -628,7 +630,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V373");
+                  TextView title = label("Fordito_V374");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1463,10 +1465,33 @@ jobs:
                   if(chunk == null || chunk.length == 0 || client == null) return false;
                   synchronized(speechAudioWindowLock) {
                       try { speechAudioWindow.write(chunk); } catch(Exception ignored) {}
+                      int hardWindowBytes = AUDIO_SAMPLE_RATE * 2 * STT_WINDOW_MS / 1000;
+                      return speechAudioWindow.size() >= hardWindowBytes;
                   }
-                  // Soha nem zárunk pusztán azért, mert elértük a 8 másodpercet.
-                  // A lezárást kizárólag a mikrofonhurok természetes hangszünete végzi.
-                  return false;
+              }
+
+              // Kötelező időalapú küldés zajban is. Az elküldött ablak utolsó 1 másodperce
+              // megmarad ugyanebben az egyetlen PCM-pufferben a következő STT-ablak elejének.
+              // A hang nem megy át újabb szűrőn, és egyetlen minta sem vész el.
+              void flushSpeechAudioWindowWithOverlap() {
+                  byte[] ready = null;
+                  synchronized(speechAudioWindowLock) {
+                      int hardWindowBytes = AUDIO_SAMPLE_RATE * 2 * STT_WINDOW_MS / 1000;
+                      if(speechAudioWindow.size() < hardWindowBytes) return;
+
+                      ready = speechAudioWindow.toByteArray();
+                      int overlapBytes = AUDIO_SAMPLE_RATE * 2 * STT_OVERLAP_MS / 1000;
+                      overlapBytes = Math.min(overlapBytes, ready.length);
+                      overlapBytes -= overlapBytes % 2;
+
+                      speechAudioWindow.reset();
+                      if(overlapBytes > 0) {
+                          try {
+                              speechAudioWindow.write(ready, ready.length - overlapBytes, overlapBytes);
+                          } catch(Exception ignored) {}
+                      }
+                  }
+                  if(ready != null) transcribeAudioWindow(ready, true);
               }
           
               void flushSpeechAudioWindow(boolean force) {
@@ -1562,7 +1587,9 @@ jobs:
                       return;
                   }
 
-                  String transcript = cleanTranscriptForSelectedPair(auto.text);
+                  // Az 1 másodperces hangátfedés miatt az új átirat eleje ismételheti
+                  // az előző átirat végét. Csak ezt a biztos szöveges átfedést távolítjuk el.
+                  String transcript = normalizeAndDeduplicateSpeechBlock(auto.text);
                   if(transcript.length() == 0) return;
 
                   TextBlock b = new TextBlock();
@@ -1814,27 +1841,35 @@ jobs:
                                               voiceSendActive = true;
                                               speechSignalMsInBlock = 0;
                                           }
-                                          sendAudioChunk(Arrays.copyOf(filtered, filteredLen));
+                                          boolean hardWindowReady = sendAudioChunk(Arrays.copyOf(filtered, filteredLen));
                                           speechSignalMsInBlock += pcm16Mono48kMs(filteredLen);
                                           lastSpeechSignalAtMs = now;
+                                          if(hardWindowReady) {
+                                              flushSpeechAudioWindowWithOverlap();
+                                              // Az átfedés csak határvédelem. Az új blokk tényleges
+                                              // beszédidejét a következő friss hangdaraboktól számoljuk.
+                                              speechSignalMsInBlock = 0;
+                                          }
                                           continue;
                                       }
 
                                       if(voiceSendActive) {
                                           // Az aktív blokk minden képkockáját megtartjuk, így a halk szóvég és a csendfarok
-                                          // sem vész el. 8 másodperc előtt a választott, legfeljebb 900 ms-os mondatvégi
-                                          // szünet zár. 8 másodperc után már az első 200 ms-os valódi szóközi szünet zár,
-                                          // de maga a 8 másodperces időpont soha nem vág ketté egy szót.
-                                          sendAudioChunk(Arrays.copyOf(filtered, filteredLen));
+                                          // sem vész el. Legfeljebb 1 mp valódi szünet azonnal zár; háttérzajban pedig
+                                          // a 8 mp-es kötelező ablak küld, 1 mp változatlan hangátfedéssel.
+                                          boolean hardWindowReady = sendAudioChunk(Arrays.copyOf(filtered, filteredLen));
                                           long silentFor = lastSpeechSignalAtMs > 0L ? now - lastSpeechSignalAtMs : 0L;
-                                          int requiredSilenceMs = speechAudioWindowMs() >= TARGET_SPEECH_BLOCK_MS
-                                              ? POST_TARGET_WORD_GAP_MS
-                                              : blockSilenceDurationMs();
+                                          int requiredSilenceMs = Math.min(1000, blockSilenceDurationMs());
                                           if(silentFor >= requiredSilenceMs) {
                                               voiceSendActive = false;
                                               lastSpeechSignalAtMs = 0L;
                                               if(speechSignalMsInBlock >= MIN_SPEECH_SIGNAL_MS) flushSpeechAudioWindow(true);
                                               else clearSpeechAudioWindow();
+                                              speechSignalMsInBlock = 0;
+                                          } else if(hardWindowReady) {
+                                              // Háttérzajban sem várunk csendre: 8 mp-nél kötelező küldés,
+                                              // majd az utolsó 1 mp átcsúszik a következő ablak elejére.
+                                              flushSpeechAudioWindowWithOverlap();
                                               speechSignalMsInBlock = 0;
                                           }
                                           continue;
@@ -2453,7 +2488,9 @@ jobs:
                   String[] nw = h.split("\\s+");
                   String[] rawWords = raw.split("\\s+");
           
-                  for(String old : recentSpeechBlockHashOrder) {
+                  Iterator<String> overlapIt = recentSpeechBlockHashOrder.descendingIterator();
+                  while(overlapIt.hasNext()) {
+                      String old = overlapIt.next();
                       if(old == null || old.length() < 8) continue;
                       String[] ow = old.split("\\s+");
                       if(ow.length < 2 || nw.length < 2) continue;
@@ -4680,14 +4717,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V373.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V373.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V374.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V374.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V373
+          name: V374
           path: |
             artifact/*.apk
             artifact/*.aab
