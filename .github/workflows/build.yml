@@ -1,4 +1,4 @@
-name: Build Android APK V383
+name: Build Android APK V384
 
 on:
   workflow_dispatch:
@@ -49,7 +49,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 383; versionName = "38.3" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 384; versionName = "38.4" }
           
               signingConfigs {
                   create("release") {
@@ -80,7 +80,7 @@ jobs:
               implementation("com.squareup.okhttp3:okhttp:4.12.0")
               implementation("org.json:json:20240303")
               implementation("io.github.kaleyravideo:android-deepfilternet:0.0.8")
-              implementation("com.github.gkonovalov.android-vad:webrtc:2.0.10")
+              implementation("com.github.gkonovalov.android-vad:silero:2.0.10")
               implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
               implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
           }
@@ -134,7 +134,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V383" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V384" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -268,11 +268,11 @@ jobs:
           import java.io.*;
           import java.nio.*;
           import com.kaleyra.noise_filter.DeepFilterNet;
-          import com.konovalov.vad.webrtc.Vad;
-          import com.konovalov.vad.webrtc.VadWebRTC;
-          import com.konovalov.vad.webrtc.config.FrameSize;
-          import com.konovalov.vad.webrtc.config.Mode;
-          import com.konovalov.vad.webrtc.config.SampleRate;
+          import com.konovalov.vad.silero.Vad;
+          import com.konovalov.vad.silero.VadSilero;
+          import com.konovalov.vad.silero.config.FrameSize;
+          import com.konovalov.vad.silero.config.Mode;
+          import com.konovalov.vad.silero.config.SampleRate;
           import okhttp3.*;
 
           public class MainActivity extends Activity {
@@ -316,17 +316,17 @@ jobs:
               String interpreterAudioMode = "off";
               String lastInterpreterAudioMode = "headset";
               volatile long ttsMuteUntilMs = 0L;
-              // V383 hanglánc: 20 ms-os folyamatos AudioRecord -> nyers hangon VAD-döntés ->
-              // ugyanazon hang DeepFilterNet-szűrése -> kizárólag megerősített beszéd kerül STT-re.
-              // A VAD nem módosít hangot, csak a szűrt PCM beszédhatárait vezérli.
+              // V384 hanglánc: folyamatos 16 kHz AudioRecord -> Silero csak beszédhatárt jelez ->
+              // ugyanaz a nyers PCM kerül STT-re. Nincs egymásra rakott Android + DeepFilter zajszűrés,
+              // és nincs második szerveroldali VAD, amely levághatná a halk szókezdeteket.
               static final int STT_WINDOW_MS = 8000;
               static final int STT_OVERLAP_MS = 1000;
-              static final int AUDIO_SAMPLE_RATE = 48000;
-              static final int AUDIO_READ_FRAME_MS = 20;
-              static final int PRE_ROLL_AUDIO_MS = 500;
-              static final int SPEECH_CONFIRM_MS = 160;
-              static final int SPEECH_CONFIRM_MAX_GAP_MS = 40;
-              static final int END_SILENCE_MS = 500;
+              static final int AUDIO_SAMPLE_RATE = 16000;
+              static final int AUDIO_READ_FRAME_MS = 32;
+              static final int PRE_ROLL_AUDIO_MS = 800;
+              static final int SPEECH_CONFIRM_MS = 32;
+              static final int SPEECH_CONFIRM_MAX_GAP_MS = 64;
+              static final int END_SILENCE_MS = 250;
 
               final Object speechAudioWindowLock = new Object();
               ByteArrayOutputStream speechAudioWindow = new ByteArrayOutputStream();
@@ -350,13 +350,13 @@ jobs:
               String lastDeepFilterFailure = "";
               volatile boolean deepFilterBypass = false;
 
-              // A WebRTC VAD a DeepFilter előtti, időben azonos nyers 48 kHz-es képkockán dönt.
-              // Az STT-be kizárólag a hozzá tartozó DeepFilterNet-kimenet kerül.
-              VadWebRTC speechVadInstance = null;
+              // A Silero kizárólag beszéd/nem beszéd döntést végez a 16 kHz-es nyers PCM-en.
+              // Ugyanez a PCM kerül az STT-hez, ezért nincs szűrő- vagy puffereltolódás.
+              VadSilero speechVadInstance = null;
               ByteArrayOutputStream rawVadFrameBuffer = new ByteArrayOutputStream();
               ByteArrayOutputStream filteredVadFrameBuffer = new ByteArrayOutputStream();
               final ArrayDeque<Boolean> rawVadDecisionQueue = new ArrayDeque<>();
-              static final int VAD_FRAME_BYTES = 960 * 2; // 20 ms, 48 kHz, PCM16 mono
+              static final int VAD_FRAME_BYTES = 512 * 2; // 32 ms, 16 kHz, PCM16 mono
               volatile boolean voiceSendActive = false;
               final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
               int preRollAudioBytes = 0;
@@ -424,7 +424,7 @@ jobs:
                   String topText = "";
                   String bottomText = "";
                   String pendingSourceText = "";
-                  // V383: egyetlen, nyelvre nem kényszerített STT-eredmény.
+                  // V384: egyetlen, nyelvre nem kényszerített STT-eredmény.
                   // A következő strukturált lépés kizárólag a két kiválasztott nyelv egyikére sorolja.
                   String autoSttText = "";
                   String sttLanguageCode = "";
@@ -627,7 +627,7 @@ jobs:
                   setContentView(root);
 
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V383");
+                  TextView title = label("Fordito_V384");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1264,7 +1264,7 @@ jobs:
                   updateButtons();
               }
 
-              int pcm16Mono48kMs(int bytes) {
+              int pcm16MonoMs(int bytes) {
                   if(bytes <= 0) return 0;
                   return Math.max(1, (int)Math.round(bytes * 1000.0 / (AUDIO_SAMPLE_RATE * 2.0)));
               }
@@ -1423,17 +1423,18 @@ jobs:
                   closeSpeechVad();
                   try {
                       speechVadInstance = Vad.builder()
-                          .setSampleRate(SampleRate.SAMPLE_RATE_48K)
-                          .setFrameSize(FrameSize.FRAME_SIZE_960)
+                          .setContext(getApplicationContext())
+                          .setSampleRate(SampleRate.SAMPLE_RATE_16K)
+                          .setFrameSize(FrameSize.FRAME_SIZE_512)
                           .setMode(Mode.NORMAL)
-                          .setSilenceDurationMs(100)
-                          .setSpeechDurationMs(40)
+                          .setSilenceDurationMs(250)
+                          .setSpeechDurationMs(32)
                           .build();
                       return speechVadInstance != null;
                   } catch(Exception e) {
                       closeSpeechVad();
                       final String reason = deepFilterRootCause(e);
-                      runOnUiThread(() -> state.setText("WebRTC VAD hiba: " + reason));
+                      runOnUiThread(() -> state.setText("Silero VAD hiba: " + reason));
                       return false;
                   }
               }
@@ -1452,7 +1453,7 @@ jobs:
                       rawVadFrameBuffer.reset();
                       if(pos < all.length) rawVadFrameBuffer.write(all, pos, all.length - pos);
                   } catch(Exception e) {
-                      throw new IllegalStateException("WebRTC VAD feldolgozási hiba: " + deepFilterRootCause(e), e);
+                      throw new IllegalStateException("Silero VAD feldolgozási hiba: " + deepFilterRootCause(e), e);
                   }
               }
 
@@ -1462,12 +1463,12 @@ jobs:
                   pendingSpeechGapMs = 0;
               }
 
-              void handleSynchronizedVadFrame(byte[] filteredFrame, boolean speech) {
-                  if(filteredFrame == null || filteredFrame.length == 0) return;
-                  final int frameMs = pcm16Mono48kMs(filteredFrame.length);
+              void handleSynchronizedVadFrame(byte[] audioFrame, boolean speech) {
+                  if(audioFrame == null || audioFrame.length == 0) return;
+                  final int frameMs = pcm16MonoMs(audioFrame.length);
 
                   if(voiceSendActive) {
-                      appendSpeechAudioChunk(filteredFrame);
+                      appendSpeechAudioChunk(audioFrame);
                       if(speech) {
                           trailingSilenceMs = 0;
                       } else {
@@ -1477,32 +1478,22 @@ jobs:
                               trailingSilenceMs = 0;
                               flushSpeechAudioWindow(true);
                               clearPendingSpeechAudio();
+                              clearPreRollAudio();
                           }
                       }
                       return;
                   }
 
+                  // A teljes szókezdetet folyamatosan megőrizzük. Amint a Silero beszédet jelez,
+                  // az előpufferrel együtt indítjuk a blokkot; nincs további 160 ms-os kapu.
+                  rememberPreRollAudio(audioFrame);
                   if(speech) {
-                      rememberPendingSpeechAudio(filteredFrame);
-                      pendingSpeechEvidenceMs += frameMs;
+                      for(byte[] pre : takePreRollAudio()) appendSpeechAudioChunk(pre);
+                      voiceSendActive = true;
+                      pendingSpeechEvidenceMs = 0;
                       pendingSpeechGapMs = 0;
-                      if(pendingSpeechEvidenceMs >= SPEECH_CONFIRM_MS) {
-                          for(byte[] pre : takePreRollAudio()) appendSpeechAudioChunk(pre);
-                          for(byte[] pending : takePendingSpeechAudio()) appendSpeechAudioChunk(pending);
-                          voiceSendActive = true;
-                          pendingSpeechEvidenceMs = 0;
-                          pendingSpeechGapMs = 0;
-                          trailingSilenceMs = 0;
-                      }
-                      return;
-                  }
-
-                  if(pendingSpeechEvidenceMs > 0) {
-                      rememberPendingSpeechAudio(filteredFrame);
-                      pendingSpeechGapMs += frameMs;
-                      if(pendingSpeechGapMs > SPEECH_CONFIRM_MAX_GAP_MS) movePendingSpeechToPreRoll();
-                  } else {
-                      rememberPreRollAudio(filteredFrame);
+                      trailingSilenceMs = 0;
+                      clearPendingSpeechAudio();
                   }
               }
 
@@ -1565,7 +1556,7 @@ jobs:
                   if(data == null || data.length == 0) return;
                   synchronized(pendingSpeechAudioChunks) {
                       pendingSpeechAudioChunks.add(Arrays.copyOf(data, data.length));
-                      pendingSpeechAudioMs += pcm16Mono48kMs(data.length);
+                      pendingSpeechAudioMs += pcm16MonoMs(data.length);
                   }
               }
 
@@ -1596,7 +1587,7 @@ jobs:
               }
 
               int speechAudioWindowMs() {
-                  synchronized(speechAudioWindowLock) { return pcm16Mono48kMs(speechAudioWindow.size()); }
+                  synchronized(speechAudioWindowLock) { return pcm16MonoMs(speechAudioWindow.size()); }
               }
 
               void captureSpeechAudioWindowIdentityIfNeeded() {
@@ -1635,7 +1626,8 @@ jobs:
                   }
                   for(AudioWindowPacket ready : readyWindows) {
                       transcribeAudioWindow(ready.pcm, ready.hasLeadingOverlap, audioSessionId,
-                          "", ready.sourceTop, ready.topLangCode, ready.bottomLangCode);
+                          ready.sourceTop ? ready.topLangCode : ready.bottomLangCode,
+                          ready.sourceTop, ready.topLangCode, ready.bottomLangCode);
                   }
               }
 
@@ -1665,13 +1657,14 @@ jobs:
                   }
                   if(ready != null) {
                       transcribeAudioWindow(ready, hasLeadingOverlap, audioSessionId,
-                          "", sourceTop, topLangCode, bottomLangCode);
+                          sourceTop ? topLangCode : bottomLangCode,
+                          sourceTop, topLangCode, bottomLangCode);
                       return true;
                   }
                   return false;
               }
 
-              byte[] wavFromPcm48k(byte[] pcm) throws Exception {
+              byte[] wavFromPcm(byte[] pcm) throws Exception {
                   int dataLen = pcm == null ? 0 : pcm.length;
                   ByteArrayOutputStream out = new ByteArrayOutputStream(44 + dataLen);
                   writeAscii(out, "RIFF"); writeIntLE(out, 36 + dataLen); writeAscii(out, "WAVE");
@@ -1788,8 +1781,7 @@ jobs:
                   if(pair == null) return;
                   SttCandidate candidate = chooseSttCandidate(pair);
                   if(candidate == null) {
-                      if(streaming) state.setText("mikrofon aktív – bizonytalan blokk eldobva");
-                      else updateSpeechWorkState();
+                      if(!streaming) updateSpeechWorkState();
                       return;
                   }
 
@@ -1798,21 +1790,11 @@ jobs:
                       updateSpeechWorkState();
                       return;
                   }
-                  if(clearlyOutsideSelectedLanguages(transcript, pair.captureTopLangCode, pair.captureBottomLangCode)) {
-                      if(streaming) state.setText("mikrofon aktív – idegen/hibás rövid blokk eldobva");
-                      else updateSpeechWorkState();
-                      return;
-                  }
-
                   TextBlock b = new TextBlock();
                   b.speechSeq = ++speechSourceBlockSeq;
-                  String deterministicSource = deterministicSelectedSourceLanguage(
-                      transcript, pair.captureTopLangCode, pair.captureBottomLangCode);
-                  b.sourceTop = deterministicSource.length() > 0
-                      ? deterministicSource.equals(pair.captureTopLangCode)
-                      : pair.sourceTop;
+                  b.sourceTop = pair.sourceTop;
                   b.autoSttText = transcript;
-                  b.sttLanguageCode = "";
+                  b.sttLanguageCode = pair.sourceTop ? pair.captureTopLangCode : pair.captureBottomLangCode;
                   b.captureTopLangCode = pair.captureTopLangCode;
                   b.captureBottomLangCode = pair.captureBottomLangCode;
                   b.audioSessionId = pair.audioSessionId;
@@ -1879,10 +1861,15 @@ jobs:
                           .addFormDataPart("model", "gpt-4o-transcribe")
                           .addFormDataPart("response_format", "json")
                           .addFormDataPart("temperature", "0")
-                          .addFormDataPart("chunking_strategy", "auto")
                           .addFormDataPart("include[]", "logprobs");
                       String apiLanguage = apiCode(languageCode);
-                      if(apiLanguage.length() > 0) builder.addFormDataPart("language", apiLanguage);
+                      if(apiLanguage.length() > 0) {
+                          builder.addFormDataPart("language", apiLanguage);
+                          builder.addFormDataPart("prompt",
+                              "Transcribe only clearly audible speech in language " + apiLanguage +
+                              ". Do not translate and do not invent words from silence, noise or clipped audio. " +
+                              "If there is no intelligible speech, return an empty transcription.");
+                      }
                       builder.addFormDataPart("file", "speech.wav", RequestBody.create(MediaType.parse("audio/wav"), wav));
                       MultipartBody body = builder.build();
                       Request req = new Request.Builder().url("https://api.openai.com/v1/audio/transcriptions")
@@ -1943,8 +1930,8 @@ jobs:
                                          String topLangCode, String bottomLangCode) {
                   if(pcm == null || pcm.length == 0 || client == null || !hasKey()) return;
                   try {
-                      final byte[] wav = wavFromPcm48k(pcm);
-                      final int audioMs = pcm16Mono48kMs(pcm.length);
+                      final byte[] wav = wavFromPcm(pcm);
+                      final int audioMs = pcm16MonoMs(pcm.length);
                       final int requestSeq;
                       final int requestGeneration;
                       synchronized(sttOrderLock) {
@@ -1953,10 +1940,9 @@ jobs:
                           pendingSttRequests++;
                       }
 
-                      // Egyetlen, nyelvre nem kényszerített STT-kérés. A V380 ugyanazt a hangot
-                      // kétszer, két külön nyelvre kényszerítve küldte el, majd közeli pontszámnál
-                      // a teljes blokkot eldobta. Ez okozta a hiányzó mondatok jelentős részét.
-                      requestSttCandidate(wav, "", 0, (index, candidate) -> {
+                      // Egyetlen STT-kérés fut, a felhasználó által zöldre választott forrásnyelvvel.
+                      // A rendszer nem próbál zajból nyelvet találni, és nem küldi el kétszer ugyanazt a hangot.
+                      requestSttCandidate(wav, languageCode, 0, (index, candidate) -> {
                           SttPairResult pair = new SttPairResult();
                           pair.top = candidate;
                           pair.bottom = null;
@@ -1991,24 +1977,13 @@ jobs:
                   return null;
               }
 
-              AudioRecord makeBestAudioRecord(int sr, int bs, boolean deepFilterActive) {
-                  int[] sources = deepFilterActive
-                      ? new int[] {
-                          // Elsőként a beszédfelismerésre hangolt út: nem a nyers, halk UNPROCESSED jel.
-                          MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                          MediaRecorder.AudioSource.UNPROCESSED,
-                          MediaRecorder.AudioSource.MIC,
-                          MediaRecorder.AudioSource.VOICE_COMMUNICATION
-                      }
-                      : new int[] {
-                          MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                          MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                          MediaRecorder.AudioSource.MIC,
-                          MediaRecorder.AudioSource.UNPROCESSED
-                      };
-                  HashSet<Integer> tried = new HashSet<>();
+              AudioRecord makeBestAudioRecord(int sr, int bs, boolean ignoredDeepFilterFlag) {
+                  int[] sources = new int[] {
+                      MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                      MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                      MediaRecorder.AudioSource.MIC
+                  };
                   for(int source : sources) {
-                      if(!tried.add(source)) continue;
                       AudioRecord r = makeAudioRecord(source, sr, bs);
                       if(r != null) {
                           activeAudioSource = source;
@@ -2062,17 +2037,15 @@ jobs:
                       AudioRecord localRec = null;
                       try {
                           if(!connected) return;
-                          deepFilterBypass = !initDeepFilterNet();
-                          if(deepFilterBypass) {
-                              runOnUiThread(() -> state.setText("DeepFilter hiba – Android hang tartalék"));
-                          }
+                          deepFilterBypass = true;
+                          releaseDeepFilterNet();
                           if(!ensureSpeechVadReady()) {
-                              throw new IllegalStateException("A WebRTC beszéddaraboló nem inicializálható");
+                              throw new IllegalStateException("A Silero beszéddaraboló nem inicializálható");
                           }
-                          if(!connected) { closeSpeechVad(); releaseDeepFilterNet(); return; }
+                          if(!connected) { closeSpeechVad(); return; }
 
-                          localRec = makeBestAudioRecord(sr, recordBufferBytes, !deepFilterBypass);
-                          if(localRec == null) throw new IllegalStateException("AudioRecord nem inicializálható 48 kHz-en");
+                          localRec = makeBestAudioRecord(sr, recordBufferBytes, false);
+                          if(localRec == null) throw new IllegalStateException("AudioRecord nem inicializálható 16 kHz-en");
                           rec = localRec;
                           localRec.startRecording();
                           if(localRec.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
@@ -2082,12 +2055,12 @@ jobs:
                           clearPreRollAudio();
                           clearPendingSpeechAudio();
                           clearSpeechAudioWindow();
+                          resetVadSegmentationState();
                           voiceSendActive = false;
                           streaming = true;
                           runOnUiThread(() -> {
                               setSpeechUiLocked(false);
-                              if(deepFilterBypass) state.setText("mikrofon aktív – " + activeAudioSourceLabel() + " + VAD");
-                              else state.setText("mikrofon aktív – DeepFilter + " + activeAudioSourceLabel() + " + VAD");
+                              state.setText("mikrofon aktív – " + activeAudioSourceLabel() + " + Silero");
                               scheduleMicLifeSignal();
                               updateButtons();
                           });
@@ -2111,54 +2084,18 @@ jobs:
                                   continue;
                               }
 
-                              // A nyers VAD-döntést a DeepFilter előtt sorba tesszük. Ha a DeepFilter
-                              // egy részleges AudioRecord-olvasást csak a következő körben tud kiadni,
-                              // a döntés akkor sem vész el és nem csúszik el a szűrt hanghoz képest.
+                              byte[] speechPcm = Arrays.copyOf(buf, read);
                               try {
-                                  queueRawVadDecisions(Arrays.copyOf(buf, read));
+                                  queueRawVadDecisions(speechPcm);
+                                  consumeFilteredVadFrames(speechPcm);
                               } catch(Throwable vadError) {
                                   closeSpeechVad();
                                   clearPreRollAudio();
+                                  clearPendingSpeechAudio();
                                   voiceSendActive = false;
                                   if(!ensureSpeechVadReady()) {
-                                      throw new IllegalStateException("WebRTC VAD kiesett: " + deepFilterRootCause(vadError), vadError);
+                                      throw new IllegalStateException("Silero VAD kiesett: " + deepFilterRootCause(vadError), vadError);
                                   }
-                                  continue;
-                              }
-
-                              byte[] filtered48k;
-                              if(deepFilterBypass) {
-                                  filtered48k = Arrays.copyOf(buf, read);
-                              } else {
-                                  try {
-                                      filtered48k = filterWithDeepFilterNet(buf, read);
-                                  } catch(Throwable deepError) {
-                                      deepFilterBypass = true;
-                                      releaseDeepFilterNet();
-                                      filtered48k = Arrays.copyOf(buf, read);
-                                      final String reason = deepFilterRootCause(deepError);
-                                      runOnUiThread(() -> {
-                                          state.setText("DeepFilter kiesett – nyers hang tartalék");
-                                          Toast.makeText(MainActivity.this,
-                                              "DeepFilter feldolgozási hiba; a mikrofon nyers hanggal tovább működik: " + reason,
-                                              Toast.LENGTH_LONG).show();
-                                      });
-                                  }
-                              }
-                              if(filtered48k == null || filtered48k.length == 0) continue;
-
-                              try {
-                                  // A VAD csak határt jelez; az STT ugyanahhoz az időponthoz tartozó,
-                                  // egyszer DeepFilterezett 48 kHz-es PCM-et kapja.
-                                  consumeFilteredVadFrames(filtered48k);
-                              } catch(Throwable vadError) {
-                                  closeSpeechVad();
-                                  clearPreRollAudio();
-                                  voiceSendActive = false;
-                                  if(!ensureSpeechVadReady()) {
-                                      throw new IllegalStateException("WebRTC VAD kiesett: " + deepFilterRootCause(vadError), vadError);
-                                  }
-                                  continue;
                               }
                           }
                       } catch(Throwable e) {
@@ -2591,7 +2528,7 @@ jobs:
                       root.put("model", model);
                       root.put("temperature", 0.0);
                       JSONArray messages = new JSONArray();
-                      String deterministicSource = deterministicSelectedSourceLanguage(transcript, topCode, bottomCode);
+                      String deterministicSource = b.sourceTop ? topCode : bottomCode;
                       messages.put(new JSONObject().put("role", "system").put("content", speechPairInstructions(topCode, bottomCode)));
                       messages.put(new JSONObject().put("role", "user").put("content",
                           "TOP_LANG: " + topCode + "\n" +
@@ -2611,7 +2548,7 @@ jobs:
                           .put("required", new JSONArray().put("source_lang").put("translation"))
                           .put("additionalProperties", false);
                       root.put("response_format", new JSONObject().put("type", "json_schema")
-                          .put("json_schema", new JSONObject().put("name", "speech_pair_translation_v383").put("strict", true).put("schema", schema)));
+                          .put("json_schema", new JSONObject().put("name", "speech_pair_translation_v384").put("strict", true).put("schema", schema)));
 
                       Request req = new Request.Builder().url("https://api.openai.com/v1/chat/completions")
                           .addHeader("Authorization", "Bearer " + apiKey.trim())
@@ -2653,13 +2590,12 @@ jobs:
                       if(b.retryCount < 1) {
                           b.retryCount++;
                           speechTranslateQueue.addFirst(id);
-                          if(streaming) state.setText("mikrofon aktív – blokk újrapróbálása");
                           processNextSpeechTranslation();
                           return;
                       }
 
                       // A V380 itt lenullázta és eltüntette a már felismert mondatot.
-                      // V383-ban a transcript megmarad akkor is, ha a fordítási kérés hibázik.
+                      // V384-ban a transcript megmarad akkor is, ha a fordítási kérés hibázik.
                       String original = b.autoSttText == null ? "" : b.autoSttText.trim();
                       b.pendingSourceText = "";
                       b.topText = "";
@@ -2669,7 +2605,6 @@ jobs:
                       b.translatedOk = false;
                   }
                   renderBlocksKeepView();
-                  if(streaming) state.setText("mikrofon aktív – eredeti megtartva, fordítási hiba");
                   if(!speechTranslateQueue.isEmpty()) processNextSpeechTranslation();
                   else updateSpeechWorkState();
               }
@@ -3457,7 +3392,7 @@ jobs:
               }
 
               String noiseAndTranslationLabel() {
-                  return "DeepFilterNet + WebRTC / " + modeLabel();
+                  return "Android beszédhang + Silero / " + modeLabel();
               }
 
               void noiseAndTranslationMenu() {
@@ -3465,7 +3400,7 @@ jobs:
                   CharSequence[] items = {
                       menuItem("Tolmácsolás módja", modeLabel(), false)
                   };
-                  showCenteredMenu("DeepFilterNet + WebRTC és tolmácsolás", items, (d,w) -> {
+                  showCenteredMenu("Android beszédhang + Silero és tolmácsolás", items, (d,w) -> {
                       if(w==0) chooseMode();
                       updateButtons();
                   });
@@ -3511,7 +3446,7 @@ jobs:
               }
 
               void advancedMenu() {
-                  Toast.makeText(this, "DeepFilterNet + kímélő VAD aktív – 48 kHz", Toast.LENGTH_SHORT).show();
+                  Toast.makeText(this, "Android beszédhang + Silero aktív – 16 kHz", Toast.LENGTH_SHORT).show();
               }
 
               String speechMenuLabel() {
@@ -3519,7 +3454,7 @@ jobs:
               }
 
               String noiseMenuLabel() {
-                  return "DeepFilterNet 3 – 48 kHz";
+                  return "Silero – 16 kHz";
               }
 
               String interpreterQuickLabel() {
@@ -4193,14 +4128,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V383.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V383.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V384.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V384.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V383
+          name: V384
           path: |
             artifact/*.apk
             artifact/*.aab
