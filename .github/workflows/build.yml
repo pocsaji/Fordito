@@ -1,4 +1,4 @@
-name: Build Android APK V361
+name: Build Android APK V362
 
 on:
   workflow_dispatch:
@@ -43,7 +43,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 361; versionName = "36.1" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 362; versionName = "36.2" }
 
               signingConfigs {
                   create("release") {
@@ -118,7 +118,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V361" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V362" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -216,6 +216,7 @@ jobs:
           import java.util.concurrent.*;
           import java.io.*;
           import java.nio.*;
+          import com.rikorose.deepfilternet.NativeDeepFilterNet;
           import okhttp3.*;
           
           public class MainActivity extends Activity {
@@ -280,9 +281,7 @@ jobs:
 
               // V358: egyetlen zajszűrő motor: DeepFilterNet 3, natív 48 kHz PCM16 mono lánc.
               final Object deepFilterLock = new Object();
-              Object deepFilterNetInstance = null;
-              java.lang.reflect.Method deepFilterProcessFrameMethod = null;
-              java.lang.reflect.Method deepFilterReleaseMethod = null;
+              NativeDeepFilterNet deepFilterNetInstance = null;
               int deepFilterFrameBytes = 0;
               ByteArrayOutputStream deepFilterPending = new ByteArrayOutputStream();
 
@@ -544,7 +543,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V361");
+                  TextView title = label("Fordito_V362");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1254,33 +1253,6 @@ jobs:
                   return out;
               }
           
-              Object createDeepFilterNetInstance(Class<?> cls) throws Exception {
-                  // A könyvtár Kotlin-os konstruktora Java felől nem garantál valódi
-                  // egyparaméteres Context konstruktort. Először azt keressük, utána
-                  // a Kotlin által generált default-paraméteres szintetikus konstruktort.
-                  for(java.lang.reflect.Constructor<?> c : cls.getDeclaredConstructors()) {
-                      Class<?>[] p = c.getParameterTypes();
-                      if(p.length == 1 && android.content.Context.class.isAssignableFrom(p[0])) {
-                          c.setAccessible(true);
-                          return c.newInstance(getApplicationContext());
-                      }
-                  }
-
-                  for(java.lang.reflect.Constructor<?> c : cls.getDeclaredConstructors()) {
-                      Class<?>[] p = c.getParameterTypes();
-                      if(p.length == 6 &&
-                         android.content.Context.class.isAssignableFrom(p[0]) &&
-                         p[1] == float.class &&
-                         p[4] == int.class) {
-                          c.setAccessible(true);
-                          // Kotlin default maszk: attenuationLimit, dispatchers és modelLoader.
-                          return c.newInstance(getApplicationContext(), 0.0f, null, null, 14, null);
-                      }
-                  }
-
-                  throw new NoSuchMethodException("NativeDeepFilterNet kompatibilis konstruktor nem található");
-              }
-
               String deepFilterRootCause(Throwable e) {
                   Throwable root = e;
                   while(root.getCause() != null && root.getCause() != root) root = root.getCause();
@@ -1295,40 +1267,18 @@ jobs:
                       try {
                           runOnUiThread(() -> state.setText("DeepFilterNet modell betöltése"));
 
-                          Class<?> cls = Class.forName("com.rikorose.deepfilternet.NativeDeepFilterNet");
-                          deepFilterNetInstance = createDeepFilterNetInstance(cls);
+                          deepFilterNetInstance = new NativeDeepFilterNet(getApplicationContext());
 
-                          // A hivatalos implementáció aszinkron tölti be a beágyazott modellt.
-                          // A frameLength addig dokumentáltan -1, ezért nem szabad azonnal hibának venni.
-                          java.lang.reflect.Method getFrameLengthMethod = cls.getMethod("getFrameLength");
-                          deepFilterProcessFrameMethod = cls.getMethod("processFrame", java.nio.ByteBuffer.class);
-                          deepFilterReleaseMethod = cls.getMethod("release");
-
-                          long deadline = android.os.SystemClock.elapsedRealtime() + 15000L;
-                          int frameLength = -1;
-                          while(android.os.SystemClock.elapsedRealtime() < deadline) {
-                              Object value = getFrameLengthMethod.invoke(deepFilterNetInstance);
-                              frameLength = ((Number)value).intValue();
-                              if(frameLength > 0) break;
-                              try { Thread.sleep(50L); }
-                              catch(InterruptedException interrupted) {
-                                  Thread.currentThread().interrupt();
-                                  throw new IllegalStateException("DeepFilterNet betöltése megszakadt", interrupted);
-                              }
+                          boolean attenuationSet = deepFilterNetInstance.setAttenuationLimit(30.0f);
+                          if(!attenuationSet) {
+                              throw new IllegalStateException("DeepFilterNet 30 dB beállítása sikertelen");
                           }
 
-                          deepFilterFrameBytes = frameLength;
+                          deepFilterFrameBytes = (int)deepFilterNetInstance.getFrameLength();
                           if(deepFilterFrameBytes <= 0 || (deepFilterFrameBytes & 1) != 0) {
                               throw new IllegalStateException(
-                                  "DeepFilterNet modell nem töltődött be 15 másodpercen belül; frame=" +
-                                  deepFilterFrameBytes
+                                  "Érvénytelen DeepFilterNet frame: " + deepFilterFrameBytes
                               );
-                          }
-
-                          Object attenuationSet = cls.getMethod("setAttenuationLimit", float.class)
-                              .invoke(deepFilterNetInstance, 30.0f);
-                          if(attenuationSet instanceof Boolean && !((Boolean)attenuationSet)) {
-                              throw new IllegalStateException("DeepFilterNet 30 dB beállítása sikertelen");
                           }
 
                           deepFilterPending.reset();
@@ -1353,13 +1303,9 @@ jobs:
               void releaseDeepFilterNet() {
                   synchronized(deepFilterLock) {
                       try {
-                          if(deepFilterNetInstance != null && deepFilterReleaseMethod != null) {
-                              deepFilterReleaseMethod.invoke(deepFilterNetInstance);
-                          }
-                      } catch(Exception ignored) {}
+                          if(deepFilterNetInstance != null) deepFilterNetInstance.release();
+                      } catch(Throwable ignored) {}
                       deepFilterNetInstance = null;
-                      deepFilterProcessFrameMethod = null;
-                      deepFilterReleaseMethod = null;
                       deepFilterFrameBytes = 0;
                       deepFilterPending.reset();
                   }
@@ -1368,7 +1314,7 @@ jobs:
               byte[] filterWithDeepFilterNet(byte[] data, int len) {
                   if(data == null || len <= 0) return new byte[0];
                   synchronized(deepFilterLock) {
-                      if(deepFilterNetInstance == null || deepFilterProcessFrameMethod == null || deepFilterFrameBytes <= 0) {
+                      if(deepFilterNetInstance == null || deepFilterFrameBytes <= 0) {
                           return null;
                       }
                       try {
@@ -1384,14 +1330,12 @@ jobs:
                           for(int pos = 0; pos < completeBytes; pos += deepFilterFrameBytes) {
                               frameBuffer.clear();
                               frameBuffer.put(all, pos, deepFilterFrameBytes);
-                              frameBuffer.position(0);
-                              frameBuffer.limit(deepFilterFrameBytes);
+                              frameBuffer.flip();
 
-                              deepFilterProcessFrameMethod.invoke(deepFilterNetInstance, frameBuffer);
+                              deepFilterNetInstance.processFrame(frameBuffer);
 
+                              frameBuffer.rewind();
                               byte[] frame = new byte[deepFilterFrameBytes];
-                              frameBuffer.position(0);
-                              frameBuffer.limit(deepFilterFrameBytes);
                               frameBuffer.get(frame);
                               filtered.write(frame);
                           }
@@ -4559,14 +4503,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V361.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V361.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V362.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V362.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V361
+          name: V362
           path: |
             artifact/*.apk
             artifact/*.aab
