@@ -1,4 +1,4 @@
-name: Build Android APK V369
+name: Build Android APK V370
 
 on:
   workflow_dispatch:
@@ -49,7 +49,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 369; versionName = "36.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 370; versionName = "37.0" }
 
               signingConfigs {
                   create("release") {
@@ -134,7 +134,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V369" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V370" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -330,17 +330,26 @@ jobs:
               final Object speechAudioWindowLock = new Object();
               ByteArrayOutputStream speechAudioWindow = new ByteArrayOutputStream();
 
-              // V369: az egyetlen zajszűrő motor a DeepFilterNet 3, natív 48 kHz PCM16 mono láncon.
+              // V370: egyetlen valódi hangszűrő: DeepFilterNet 3, natív 48 kHz PCM16 mono láncon.
+              // A közvetlen ByteBuffer egyszer készül el és a teljes mikrofonmenet alatt újrahasznosul.
+              static final float DEEP_FILTER_ATTENUATION_DB = 18.0f;
               final Object deepFilterLock = new Object();
               DeepFilterNet deepFilterNetInstance = null;
               int deepFilterFrameBytes = 0;
+              ByteBuffer deepFilterFrameBuffer = null;
               ByteArrayOutputStream deepFilterPending = new ByteArrayOutputStream();
+              boolean deepFilterBypassForSession = false;
+              boolean deepFilterFailureShown = false;
+              String lastDeepFilterFailure = "";
 
               // A Silero nem zajszűrő és nem hangkapu: csak a blokkhatárt jelzi.
+              // Ha nem használható, nem nyitjuk állandóan ki a kaput: egyszerű energiahatár a tartalék.
               final String vadEngineMode = "silero_boundary_normal";
               Object speechVadInstance = null;
               String speechVadInstanceMode = "";
               boolean speechVadUnavailableForSession = false;
+              boolean vadFallbackNoticeShown = false;
+              double fallbackNoiseFloorRms = 80.0;
               ByteArrayOutputStream vadFrameBuffer = new ByteArrayOutputStream();
               boolean mirrorBottomMode = false;
               boolean backgroundScreenAllowed = true;
@@ -410,6 +419,10 @@ jobs:
                   String topText = "";
                   String bottomText = "";
                   String pendingSourceText = "";
+                  String topSttText = "";
+                  String bottomSttText = "";
+                  double topSttLogprob = -99.0;
+                  double bottomSttLogprob = -99.0;
                   boolean sourceTop = true;
                   boolean translatedOk = false;
                   int retryCount = 0;
@@ -421,12 +434,26 @@ jobs:
                   String language = "";
                   String text = "";
                   double averageLogprob = -99.0;
+                  boolean hasLogprob = false;
                   boolean requestOk = false;
+              }
+
+              static class SttPairResult {
+                  SttCandidate top;
+                  SttCandidate bottom;
+                  boolean finalFlush;
+                  int audioMs;
               }
 
               interface SttCandidateCallback {
                   void done(int index, SttCandidate candidate);
               }
+
+              final Object sttOrderLock = new Object();
+              final HashMap<Integer, SttPairResult> completedSttPairs = new HashMap<>();
+              int sttSessionToken = 0;
+              int nextSttRequestSeq = 1;
+              int nextSttDeliverySeq = 1;
           
               final ArrayList<TextBlock> textBlocks = new ArrayList<>();
               final ArrayList<int[]> topRanges = new ArrayList<>();
@@ -607,7 +634,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V369");
+                  TextView title = label("Fordito_V370");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1285,12 +1312,14 @@ jobs:
               boolean initDeepFilterNet() {
                   synchronized(deepFilterLock) {
                       releaseDeepFilterNet();
+                      deepFilterBypassForSession = false;
+                      deepFilterFailureShown = false;
+                      lastDeepFilterFailure = "";
                       try {
                           runOnUiThread(() -> state.setText("DeepFilterNet modell betöltése"));
 
                           deepFilterNetInstance = DeepFilterNetBridge.createReady(getApplicationContext());
-
-                          deepFilterNetInstance.setAttenuationLimit(30.0f);
+                          deepFilterNetInstance.setAttenuationLimit(DEEP_FILTER_ATTENUATION_DB);
 
                           deepFilterFrameBytes = (int)deepFilterNetInstance.getFrameLength();
                           if(deepFilterFrameBytes <= 0 || (deepFilterFrameBytes & 1) != 0) {
@@ -1299,21 +1328,30 @@ jobs:
                               );
                           }
 
+                          // Egyetlen közvetlen natív puffer a teljes sessionre. A korábbi kód
+                          // 100 ms-onként újat foglalt, ami hosszabb futásnál a direct memóriát kimeríthette.
+                          deepFilterFrameBuffer = ByteBuffer.allocateDirect(deepFilterFrameBytes)
+                              .order(ByteOrder.LITTLE_ENDIAN);
                           deepFilterPending.reset();
                           runOnUiThread(() -> state.setText("DeepFilterNet aktív – 48 kHz"));
                           return true;
                       } catch(Throwable e) {
-                          final String reason = deepFilterRootCause(e);
+                          lastDeepFilterFailure = deepFilterRootCause(e);
                           releaseDeepFilterNet();
+                          deepFilterBypassForSession = true;
                           runOnUiThread(() -> {
-                              state.setText("DeepFilterNet hiba");
-                              Toast.makeText(
-                                  MainActivity.this,
-                                  "DeepFilterNet nem indult: " + reason,
-                                  Toast.LENGTH_LONG
-                              ).show();
+                              state.setText("mikrofon aktív – szűrő tartalék nélkül");
+                              if(!deepFilterFailureShown) {
+                                  deepFilterFailureShown = true;
+                                  Toast.makeText(
+                                      MainActivity.this,
+                                      "DeepFilterNet nem indult, a mikrofon szűrő nélkül folytatódik: " + lastDeepFilterFailure,
+                                      Toast.LENGTH_LONG
+                                  ).show();
+                              }
                           });
-                          return false;
+                          // A zajszűrő hibája nem állíthatja le a mikrofont.
+                          return true;
                       }
                   }
               }
@@ -1325,6 +1363,7 @@ jobs:
                       } catch(Throwable ignored) {}
                       deepFilterNetInstance = null;
                       deepFilterFrameBytes = 0;
+                      deepFilterFrameBuffer = null;
                       deepFilterPending.reset();
                   }
               }
@@ -1332,8 +1371,9 @@ jobs:
               byte[] filterWithDeepFilterNet(byte[] data, int len) {
                   if(data == null || len <= 0) return new byte[0];
                   synchronized(deepFilterLock) {
-                      if(deepFilterNetInstance == null || deepFilterFrameBytes <= 0) {
-                          return null;
+                      if(deepFilterBypassForSession || deepFilterNetInstance == null
+                              || deepFilterFrameBytes <= 0 || deepFilterFrameBuffer == null) {
+                          return Arrays.copyOf(data, len);
                       }
                       try {
                           deepFilterPending.write(data, 0, len);
@@ -1342,19 +1382,17 @@ jobs:
                           if(completeBytes <= 0) return new byte[0];
 
                           ByteArrayOutputStream filtered = new ByteArrayOutputStream(completeBytes);
-                          ByteBuffer frameBuffer = ByteBuffer.allocateDirect(deepFilterFrameBytes)
-                              .order(ByteOrder.LITTLE_ENDIAN);
-
                           for(int pos = 0; pos < completeBytes; pos += deepFilterFrameBytes) {
-                              frameBuffer.clear();
-                              frameBuffer.put(all, pos, deepFilterFrameBytes);
-                              frameBuffer.flip();
+                              deepFilterFrameBuffer.clear();
+                              deepFilterFrameBuffer.put(all, pos, deepFilterFrameBytes);
+                              deepFilterFrameBuffer.flip();
 
-                              deepFilterNetInstance.processFrame(frameBuffer);
+                              deepFilterNetInstance.processFrame(deepFilterFrameBuffer);
 
-                              frameBuffer.rewind();
+                              deepFilterFrameBuffer.position(0);
+                              deepFilterFrameBuffer.limit(deepFilterFrameBytes);
                               byte[] frame = new byte[deepFilterFrameBytes];
-                              frameBuffer.get(frame);
+                              deepFilterFrameBuffer.get(frame);
                               filtered.write(frame);
                           }
 
@@ -1364,16 +1402,22 @@ jobs:
                           }
                           return filtered.toByteArray();
                       } catch(Throwable e) {
-                          final String reason = deepFilterRootCause(e);
+                          lastDeepFilterFailure = deepFilterRootCause(e);
+                          deepFilterBypassForSession = true;
+                          releaseDeepFilterNet();
                           runOnUiThread(() -> {
-                              state.setText("DeepFilterNet feldolgozási hiba");
-                              Toast.makeText(
-                                  MainActivity.this,
-                                  "DeepFilterNet feldolgozási hiba: " + reason,
-                                  Toast.LENGTH_LONG
-                              ).show();
+                              state.setText("mikrofon aktív – DeepFilterNet kikapcsolva");
+                              if(!deepFilterFailureShown) {
+                                  deepFilterFailureShown = true;
+                                  Toast.makeText(
+                                      MainActivity.this,
+                                      "DeepFilterNet feldolgozási hiba, a mikrofon szűrő nélkül folytatódik: " + lastDeepFilterFailure,
+                                      Toast.LENGTH_LONG
+                                  ).show();
+                              }
                           });
-                          return null;
+                          // Nem állítjuk le az AudioRecordot, és az aktuális hangdarabot sem veszítjük el.
+                          return Arrays.copyOf(data, len);
                       }
                   }
               }
@@ -1416,10 +1460,10 @@ jobs:
           
               int sileroSilenceDurationMs() {
                   // Ez kizárólag blokkzárási késleltetés, nem zajszűrési erősség.
-                  if("low".equals(vadMode)) return 900;
-                  if("high".equals(vadMode)) return 350;
-                  if("auto".equals(vadMode)) return 600;
-                  return 600;
+                  if("low".equals(vadMode)) return 1200;
+                  if("high".equals(vadMode)) return 500;
+                  if("auto".equals(vadMode)) return 800;
+                  return 800;
               }
 
               Object buildVadByReflection(String mode) throws Exception {
@@ -1439,6 +1483,33 @@ jobs:
                   return b.getClass().getMethod("build").invoke(b);
               }
 
+              void showVadFallbackOnce() {
+                  if(vadFallbackNoticeShown) return;
+                  vadFallbackNoticeShown = true;
+                  runOnUiThread(() -> state.setText("Silero tartalék – energia alapú blokkhatár"));
+              }
+
+              boolean energyBoundaryHasSpeech16k(byte[] pcm16k, int len) {
+                  if(pcm16k == null || len < 2) return false;
+                  int samples = len / 2;
+                  double sumSquares = 0.0;
+                  int peak = 0;
+                  for(int i=0; i<samples; i++) {
+                      int lo = pcm16k[i * 2] & 0xff;
+                      int hi = pcm16k[i * 2 + 1];
+                      int sample = (short)((hi << 8) | lo);
+                      int abs = Math.abs(sample);
+                      if(abs > peak) peak = abs;
+                      sumSquares += (double)sample * (double)sample;
+                  }
+                  double rms = Math.sqrt(sumSquares / Math.max(1, samples));
+                  if(!voiceSendActive && rms < fallbackNoiseFloorRms * 2.0) {
+                      fallbackNoiseFloorRms = Math.max(20.0, fallbackNoiseFloorRms * 0.97 + rms * 0.03);
+                  }
+                  double threshold = Math.max(120.0, fallbackNoiseFloorRms * 2.8);
+                  return rms >= threshold || peak >= Math.max(700.0, threshold * 4.0);
+              }
+
               boolean ensureExternalVadReady() {
                   if(speechVadInstance != null) return true;
                   if(speechVadUnavailableForSession) return false;
@@ -1449,7 +1520,7 @@ jobs:
                       return speechVadInstance != null;
                   } catch(Throwable e) {
                       speechVadUnavailableForSession = true;
-                      runOnUiThread(() -> state.setText("Silero nélkül – 8 mp blokkok"));
+                      showVadFallbackOnce();
                       return false;
                   }
               }
@@ -1485,15 +1556,15 @@ jobs:
                   } catch(Exception e) {
                       speechVadUnavailableForSession = true;
                       closeExternalVad();
-                      runOnUiThread(() -> state.setText("Silero nélkül – 8 mp blokkok"));
-                      return true;
+                      showVadFallbackOnce();
+                      return energyBoundaryHasSpeech16k(pcm16k, pcm16k.length);
                   }
               }
           
               boolean sileroBoundaryHasSpeech(byte[] data, int len) {
-                  // Silero-hiba esetén minden DeepFilterNet-utáni hang továbbmegy a 8 mp-es STT-ablakba.
-                  if(!ensureExternalVadReady()) return true;
-                  return vadIsSpeechOn16k(downsample48kTo16kForVad(data, len));
+                  byte[] pcm16k = downsample48kTo16kForVad(data, len);
+                  if(!ensureExternalVadReady()) return energyBoundaryHasSpeech16k(pcm16k, pcm16k.length);
+                  return vadIsSpeechOn16k(pcm16k);
               }
           
               void clearSpeechAudioWindow() {
@@ -1557,29 +1628,82 @@ jobs:
               boolean sttCandidateUsable(SttCandidate candidate, int audioMs) {
                   if(candidate == null || !candidate.requestOk) return false;
                   String text = candidate.text == null ? "" : candidate.text.trim();
-                  if(text.length() == 0 || candidate.averageLogprob < -1.15) return false;
+                  if(text.length() == 0) return false;
+                  if(candidate.hasLogprob && candidate.averageLogprob < -1.45) return false;
 
                   int words = text.split("\\s+").length;
-                  int maxWords = Math.max(5, (int)Math.ceil(audioMs / 180.0) + 3);
-                  int maxChars = Math.max(24, (int)Math.ceil(audioMs * 20.0 / 1000.0) + 24);
+                  int maxWords = Math.max(6, (int)Math.ceil(audioMs / 170.0) + 4);
+                  int maxChars = Math.max(32, (int)Math.ceil(audioMs * 24.0 / 1000.0) + 36);
                   return words <= maxWords && text.length() <= maxChars;
               }
 
-              SttCandidate chooseSttCandidate(SttCandidate top, SttCandidate bottom, int audioMs) {
-                  boolean topOk = sttCandidateUsable(top, audioMs);
-                  boolean bottomOk = sttCandidateUsable(bottom, audioMs);
-                  if(!topOk && !bottomOk) return null;
-                  if(topOk && !bottomOk) return top;
-                  if(bottomOk && !topOk) return bottom;
-
-                  double diff = top.averageLogprob - bottom.averageLogprob;
-                  if(Math.abs(diff) < 0.08) {
-                      String last = apiCode(lastSureSpeechSourceLang);
-                      if(last.equalsIgnoreCase(top.language)) return top;
-                      if(last.equalsIgnoreCase(bottom.language)) return bottom;
-                      return topActive ? top : bottom;
+              boolean pcmHasAudibleSignal(byte[] pcm) {
+                  if(pcm == null || pcm.length < 2) return false;
+                  int samples = pcm.length / 2;
+                  double sumSquares = 0.0;
+                  int peak = 0;
+                  for(int i=0; i<samples; i++) {
+                      int lo = pcm[i * 2] & 0xff;
+                      int hi = pcm[i * 2 + 1];
+                      int sample = (short)((hi << 8) | lo);
+                      int abs = Math.abs(sample);
+                      if(abs > peak) peak = abs;
+                      sumSquares += (double)sample * (double)sample;
                   }
-                  return diff >= 0.0 ? top : bottom;
+                  double rms = Math.sqrt(sumSquares / Math.max(1, samples));
+                  return peak >= 180 || rms >= 28.0;
+              }
+
+              void resetSttOrdering() {
+                  synchronized(sttOrderLock) {
+                      sttSessionToken++;
+                      nextSttRequestSeq = 1;
+                      nextSttDeliverySeq = 1;
+                      completedSttPairs.clear();
+                  }
+              }
+
+              void queueCompletedSttPair(int sessionToken, int requestSeq, SttPairResult pair) {
+                  synchronized(sttOrderLock) {
+                      if(sessionToken != sttSessionToken) return;
+                      completedSttPairs.put(requestSeq, pair);
+                  }
+                  runOnUiThread(() -> drainCompletedSttPairs());
+              }
+
+              void drainCompletedSttPairs() {
+                  while(true) {
+                      SttPairResult pair;
+                      synchronized(sttOrderLock) {
+                          pair = completedSttPairs.remove(nextSttDeliverySeq);
+                          if(pair == null) return;
+                          nextSttDeliverySeq++;
+                      }
+                      handleSttPairCompleted(pair);
+                  }
+              }
+
+              void handleSttPairCompleted(SttPairResult pair) {
+                  if(pair == null) return;
+                  boolean topOk = sttCandidateUsable(pair.top, pair.audioMs);
+                  boolean bottomOk = sttCandidateUsable(pair.bottom, pair.audioMs);
+                  if(!topOk && !bottomOk) {
+                      state.setText("Bizonytalan vagy zajos hang – kihagyva");
+                      return;
+                  }
+
+                  TextBlock b = new TextBlock();
+                  b.speechSeq = ++speechSourceBlockSeq;
+                  b.sourceTop = topActive; // csak ideiglenes; a kétjelöltes AI-döntés írja felül
+                  b.topSttText = topOk ? cleanTranscriptForSelectedPair(pair.top.text) : "";
+                  b.bottomSttText = bottomOk ? cleanTranscriptForSelectedPair(pair.bottom.text) : "";
+                  b.topSttLogprob = pair.top != null ? pair.top.averageLogprob : -99.0;
+                  b.bottomSttLogprob = pair.bottom != null ? pair.bottom.averageLogprob : -99.0;
+                  if(b.topSttText.length() == 0 && b.bottomSttText.length() == 0) return;
+
+                  textBlocks.add(b);
+                  speechTranslateQueue.add(textBlocks.size() - 1);
+                  processNextSpeechTranslation();
               }
 
               void requestSttCandidate(byte[] wav, String languageCode, int index, SttCandidateCallback callback) {
@@ -1619,9 +1743,12 @@ jobs:
                                               sum += token.optDouble("logprob", -99.0);
                                               count++;
                                           }
-                                          if(count > 0) candidate.averageLogprob = sum / count;
+                                          if(count > 0) {
+                                              candidate.averageLogprob = sum / count;
+                                              candidate.hasLogprob = true;
+                                          }
                                       }
-                                      candidate.requestOk = candidate.text.length() > 0 && candidate.averageLogprob > -90.0;
+                                      candidate.requestOk = candidate.text.length() > 0;
                                   } catch(Exception ignored) {}
                               }
                               callback.done(index, candidate);
@@ -1634,6 +1761,7 @@ jobs:
 
               void transcribeAudioWindow(byte[] pcm, boolean finalFlush) {
                   if(pcm == null || pcm.length == 0 || client == null || !hasKey()) return;
+                  if(!pcmHasAudibleSignal(pcm)) return;
                   try {
                       final byte[] wav = wavFromPcm48k(pcm);
                       final int audioMs = pcm16Mono48kMs(pcm.length);
@@ -1644,26 +1772,28 @@ jobs:
                           return;
                       }
 
+                      final int requestSeq;
+                      final int requestSession;
+                      synchronized(sttOrderLock) {
+                          requestSeq = nextSttRequestSeq++;
+                          requestSession = sttSessionToken;
+                      }
+
                       final Object resultLock = new Object();
                       final SttCandidate[] results = new SttCandidate[2];
                       SttCandidateCallback callback = (index, candidate) -> {
-                          SttCandidate chosen = null;
-                          boolean complete;
+                          SttPairResult pair = null;
                           synchronized(resultLock) {
                               results[index] = candidate;
-                              complete = results[0] != null && results[1] != null;
-                              if(complete) chosen = chooseSttCandidate(results[0], results[1], audioMs);
+                              if(results[0] != null && results[1] != null) {
+                                  pair = new SttPairResult();
+                                  pair.top = results[0];
+                                  pair.bottom = results[1];
+                                  pair.finalFlush = finalFlush;
+                                  pair.audioMs = audioMs;
+                              }
                           }
-                          if(!complete) return;
-
-                          final SttCandidate accepted = chosen;
-                          if(accepted == null) {
-                              runOnUiThread(() -> state.setText("Bizonytalan vagy zajos hang – kihagyva"));
-                              return;
-                          }
-                          final boolean sourceIsTop = accepted.language.equalsIgnoreCase(topCode);
-                          final String text = accepted.text;
-                          runOnUiThread(() -> handleTranscriptCompleted(text, finalFlush, sourceIsTop));
+                          if(pair != null) queueCompletedSttPair(requestSession, requestSeq, pair);
                       };
 
                       requestSttCandidate(wav, topCode, 0, callback);
@@ -1752,6 +1882,12 @@ jobs:
                   clearPreRollAudio();
                   clearSpeechAudioWindow();
                   speechVadUnavailableForSession = false;
+                  vadFallbackNoticeShown = false;
+                  fallbackNoiseFloorRms = 80.0;
+                  deepFilterBypassForSession = false;
+                  deepFilterFailureShown = false;
+                  lastDeepFilterFailure = "";
+                  resetSttOrdering();
                   closeExternalVad();
                   releaseDeepFilterNet();
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception ignored) {}
@@ -1794,7 +1930,7 @@ jobs:
                           voiceSendActive = false;
                           runOnUiThread(() -> {
                               setSpeechUiLocked(false);
-                              state.setText("mikrofon aktív");
+                              state.setText(deepFilterBypassForSession ? "mikrofon aktív – szűrő nélkül" : "mikrofon aktív");
                               scheduleMicLifeSignal();
                               updateButtons();
                           });
@@ -1807,8 +1943,7 @@ jobs:
                               }
                               if(read > 0) {
                                   byte[] filtered = filterWithDeepFilterNet(buf, read);
-                                  if(filtered == null) throw new IllegalStateException("DeepFilterNet feldolgozás megszakadt");
-                                  if(filtered.length == 0) continue;
+                                  if(filtered == null || filtered.length == 0) continue;
                                   int filteredLen = filtered.length;
                                   try {
                                       // Tolmács mód nem módosíthatja a bemeneti beszédfelismerést.
@@ -1926,6 +2061,7 @@ jobs:
                   vadPositiveMsInBlock = 0;
                   clearPreRollAudio();
                   clearSpeechAudioWindow();
+                  resetSttOrdering();
                   closeExternalVad();
                   releaseDeepFilterNet();
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception ignored) {}
@@ -2943,11 +3079,12 @@ jobs:
                   int id = idObj.intValue();
                   if(id < 0 || id >= textBlocks.size()) { processNextSpeechTranslation(); return; }
                   TextBlock b = textBlocks.get(id);
-                  boolean sourceIsTop = b.sourceTop;
-                  String src = b.pendingSourceText != null && b.pendingSourceText.trim().length() > 0
-                      ? b.pendingSourceText
-                      : (sourceIsTop ? b.topText : b.bottomText);
-                  if(src == null || src.trim().length() == 0) { processNextSpeechTranslation(); return; }
+                  String topCandidate = b.topSttText == null ? "" : b.topSttText.trim();
+                  String bottomCandidate = b.bottomSttText == null ? "" : b.bottomSttText.trim();
+                  if(topCandidate.length() == 0 && bottomCandidate.length() == 0) {
+                      processNextSpeechTranslation();
+                      return;
+                  }
           
                   try {
                       pendingSpeechBlockId = id;
@@ -2955,28 +3092,31 @@ jobs:
                       responseInProgress = true;
                       JSONObject root = new JSONObject();
                       root.put("model", model);
-                      root.put("temperature", 0.1);
+                      root.put("temperature", 0.0);
                       JSONArray messages = new JSONArray();
-                      messages.put(new JSONObject().put("role", "system").put("content", speechBlockInstructions(sourceIsTop)));
+                      messages.put(new JSONObject().put("role", "system").put("content", speechPairInstructions()));
                       String topCode = code(topLang).toUpperCase(Locale.ROOT);
                       String bottomCode = code(bottomLang).toUpperCase(Locale.ROOT);
                       messages.put(new JSONObject().put("role", "user").put("content",
                           "SELECTED_TOP_LANG: " + topCode + "\n" +
                           "SELECTED_BOTTOM_LANG: " + bottomCode + "\n" +
-                          "RAW_SPEECH_TEXT:\n" + src.trim()));
+                          "TOP_LANGUAGE_STT_CANDIDATE:\n" + topCandidate + "\n" +
+                          "TOP_CANDIDATE_AVG_LOGPROB: " + b.topSttLogprob + "\n" +
+                          "BOTTOM_LANGUAGE_STT_CANDIDATE:\n" + bottomCandidate + "\n" +
+                          "BOTTOM_CANDIDATE_AVG_LOGPROB: " + b.bottomSttLogprob));
                       root.put("messages", messages);
 
-                      // V341: strict Structured Outputs. A forrásnyelv csak a kiválasztott két kód egyike lehet.
                       JSONObject properties = new JSONObject();
                       properties.put("source_lang", new JSONObject().put("type", "string")
-                          .put("enum", new JSONArray().put(sourceIsTop ? topCode : bottomCode)));
+                          .put("enum", new JSONArray().put(topCode).put(bottomCode)));
+                      properties.put("clean_source", new JSONObject().put("type", "string"));
                       properties.put("translation", new JSONObject().put("type", "string"));
                       JSONObject schema = new JSONObject()
                           .put("type", "object").put("properties", properties)
-                          .put("required", new JSONArray().put("source_lang").put("translation"))
+                          .put("required", new JSONArray().put("source_lang").put("clean_source").put("translation"))
                           .put("additionalProperties", false);
                       JSONObject jsonSchema = new JSONObject()
-                          .put("name", "speech_translation").put("strict", true).put("schema", schema);
+                          .put("name", "speech_pair_translation").put("strict", true).put("schema", schema);
                       root.put("response_format", new JSONObject()
                           .put("type", "json_schema").put("json_schema", jsonSchema));
                       Request req = new Request.Builder().url("https://api.openai.com/v1/chat/completions")
@@ -3026,23 +3166,60 @@ jobs:
                   if(!speechTranslateQueue.isEmpty()) processNextSpeechTranslation();
               }
           
+              boolean cleanedSourceGroundedInCandidates(String clean, TextBlock b) {
+                  if(clean == null || b == null) return false;
+                  String c = normalizeSpeechBlockHash(clean);
+                  String a = normalizeSpeechBlockHash(b.topSttText == null ? "" : b.topSttText);
+                  String d = normalizeSpeechBlockHash(b.bottomSttText == null ? "" : b.bottomSttText);
+                  int maxLen = Math.max(a.length(), d.length());
+                  if(c.length() == 0 || maxLen == 0) return false;
+                  if(c.length() > maxLen * 2 + 40) return false;
+                  if(c.length() < 8 || maxLen < 8) return true;
+                  if(a.contains(c) || c.contains(a) || d.contains(c) || c.contains(d)) return true;
+
+                  HashSet<String> cleanWords = new HashSet<>(Arrays.asList(c.split("\\s+")));
+                  int bestCommon = 0;
+                  for(String candidate : new String[]{a, d}) {
+                      if(candidate.length() == 0) continue;
+                      HashSet<String> candidateWords = new HashSet<>(Arrays.asList(candidate.split("\\s+")));
+                      int common = 0;
+                      for(String w : cleanWords) if(w.length() >= 2 && candidateWords.contains(w)) common++;
+                      if(common > bestCommon) bestCommon = common;
+                  }
+                  int needed = Math.max(1, Math.min(3, cleanWords.size() / 4));
+                  return bestCommon >= needed;
+              }
+
+              void finishSkippedSpeechBlock(int id) {
+                  if(id >= 0 && id < textBlocks.size()) {
+                      TextBlock b = textBlocks.get(id);
+                      b.pendingSourceText = "";
+                      b.topText = "";
+                      b.bottomText = "";
+                      b.translatedOk = false;
+                  }
+                  pendingSpeechBlockId = -1;
+                  speechTranslateMode = false;
+                  renderBlocksKeepView();
+                  if(!speechTranslateQueue.isEmpty()) processNextSpeechTranslation();
+              }
+
               void applySpeechTranslation(String out) {
                   int id = pendingSpeechBlockId;
                   String speakText = null;
                   String speakLang = null;
                   if(id >= 0 && id < textBlocks.size()) {
                       TextBlock b = textBlocks.get(id);
-                      String sourceLang = "";
-                      String original = b.pendingSourceText == null ? "" : b.pendingSourceText.trim();
-                      String translation = "";
-                      boolean sourceIsTop = b.sourceTop;
+                      String sourceLang;
+                      String cleanSource;
+                      String translation;
 
                       try {
                           JSONObject structured = new JSONObject(out);
                           sourceLang = structured.optString("source_lang", "");
+                          cleanSource = structured.optString("clean_source", "");
                           translation = structured.optString("translation", "");
                       } catch(Exception parseError) {
-                          // Strict válasznál nincs találgatás és nincs új AI-kör.
                           retrySpeechBlockOrRender(id);
                           return;
                       }
@@ -3054,43 +3231,44 @@ jobs:
                           retrySpeechBlockOrRender(id);
                           return;
                       }
-                      sourceIsTop = normalizedSource.equals(topCode);
+                      boolean sourceIsTop = normalizedSource.equals(topCode);
 
-                      original = cleanTranscriptForSelectedPair(original);
+                      cleanSource = cleanTranscriptForSelectedPair(cleanSource);
                       translation = cleanTranscriptForSelectedPair(cleanOneBlockTranslation(translation));
-          
-                      if(looksLikeInternalLeak(original) || looksLikeInternalLeak(translation)) {
+                      if(looksLikeInternalLeak(cleanSource) || looksLikeInternalLeak(translation)) {
                           retrySpeechBlockOrRender(id);
                           return;
                       }
-          
-                      if(original.length() == 0 || translation.length() == 0) {
+                      if(cleanSource.length() == 0 || translation.length() == 0
+                              || !cleanedSourceGroundedInCandidates(cleanSource, b)) {
                           retrySpeechBlockOrRender(id);
                           return;
                       }
-          
-                      String no = normalizeSpeechBlockHash(original);
+
+                      cleanSource = normalizeAndDeduplicateSpeechBlock(cleanSource);
+                      if(cleanSource.length() == 0) {
+                          finishSkippedSpeechBlock(id);
+                          return;
+                      }
+
+                      String no = normalizeSpeechBlockHash(cleanSource);
                       String nt = normalizeSpeechBlockHash(translation);
                       if(no.length() >= 12 && no.equals(nt)) {
                           retrySpeechBlockOrRender(id);
                           return;
                       }
-          
+
                       b.sourceTop = sourceIsTop;
                       b.pendingSourceText = "";
-                      // 2026-07-09: csak az aktuális blokk saját ideiglenes maradványát takarítjuk.
-                      // Nem nyúlunk más blokkokhoz és nem törlünk teljes ablakot. Előbb ürítjük ennek
-                      // a TextBlocknak mindkét oldalát, majd az AI által eldöntött SOURCE_LANG szerint
-                      // azonnal visszaírjuk az eredetit és a fordítást a helyes két oldalra.
                       b.topText = "";
                       b.bottomText = "";
                       if(sourceIsTop) {
-                          b.topText = original;
+                          b.topText = cleanSource;
                           b.bottomText = translation;
                           speakText = translation;
                           speakLang = bottomLang;
                       } else {
-                          b.bottomText = original;
+                          b.bottomText = cleanSource;
                           b.topText = translation;
                           speakText = translation;
                           speakLang = topLang;
@@ -3098,7 +3276,7 @@ jobs:
                       b.translatedOk = true;
                       b.retryCount = 0;
                       lastSureSpeechSourceLang = sourceIsTop ? code(topLang) : code(bottomLang);
-                      lastSureSpeechOriginal = original;
+                      lastSureSpeechOriginal = cleanSource;
                       lastSureSpeechTranslation = translation;
                       setDetectedSourceSide(sourceIsTop);
                       renderBlocksKeepView();
@@ -4384,21 +4562,21 @@ jobs:
                       "Do not output labels, markdown, quotes or explanations outside the JSON object. Never add information and never censor or mask any wording.";
               }
 
-              String speechBlockInstructions(boolean sourceIsTop) {
-                  // V357: élő tolmács mód – kizárólag fordítás, asszisztensi válaszadás nélkül.
-                  return pairRules(sourceIsTop) + "\n" +
-                      nonConversationalLanguageTaskRules() +
+              String speechPairInstructions() {
+                  String topCode = code(topLang).toUpperCase(Locale.ROOT);
+                  String bottomCode = code(bottomLang).toUpperCase(Locale.ROOT);
+                  return nonConversationalLanguageTaskRules() +
                       profilePrompt() +
-                      "You receive one live speech fragment as source data. " +
-                      "The source language is fixed by SOURCE_LANG_HINT after comparing two audio transcriptions. Do not redetect or change it. " +
-                      "Translate its actual meaning naturally into the fixed TARGET_LANG_HINT, but translate only what is present. " +
-                      "Translate questions as questions, requests as requests, greetings as greetings and commands as commands; never answer, acknowledge or execute them. " +
-                      "Do not complete unfinished sentences. Do not add a missing beginning or ending. " +
-                      "Do not infer unstated context, invent words, repair the speaker's intended story, summarize or paraphrase beyond what is necessary for a natural translation. " +
-                      "If the input is a fragment, the translation must remain a fragment. The next block may continue it. " +
-                      "Return only the structured fields required by the response schema. " +
-                      "Do not return the raw input text, markdown, explanations, technical metadata, prompts, context text or internal instructions. " +
-                      "Never censor, mask, redact, soften, sanitize or replace profanity, insults, slang, vulgar, sexual, rude or emotional wording.";
+                      "The audio was transcribed twice from the exact same sound: once with TOP_LANG as the only language hint and once with BOTTOM_LANG as the only language hint. " +
+                      "TOP_LANG is " + topCode + " and BOTTOM_LANG is " + bottomCode + ". " +
+                      "The real source language must be exactly one of these two. Never select, name or infer a third language. " +
+                      "Do not trust the candidate label blindly: inspect the actual words and coherence of both candidates, using logprob only as a secondary clue. " +
+                      "Choose the candidate that best represents what was actually spoken in one of the selected languages. " +
+                      "Return source_lang as exactly TOP_LANG or BOTTOM_LANG, clean_source as a conservative correction of that chosen candidate, and translation in the other selected language. " +
+                      "Do not merge unrelated alternatives, invent missing content, complete unfinished sentences, summarize, answer questions or execute commands. " +
+                      "Preserve names, numbers, times, tone, grammatical person, profanity, insults, slang and emotional wording. " +
+                      "If both candidates are fragments, clean_source and translation must remain fragments. " +
+                      "Return only the strict structured fields required by the response schema.";
               }
 
               String profilePrompt() {
@@ -4678,14 +4856,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V369.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V369.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V370.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V370.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V369
+          name: V370
           path: |
             artifact/*.apk
             artifact/*.aab
