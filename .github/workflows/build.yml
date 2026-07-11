@@ -1,4 +1,4 @@
-name: Build Android APK V364
+name: Build Android APK V365
 
 on:
   workflow_dispatch:
@@ -49,7 +49,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 364; versionName = "36.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 365; versionName = "36.5" }
 
               signingConfigs {
                   create("release") {
@@ -132,7 +132,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V364" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V365" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -205,13 +205,31 @@ jobs:
           package com.attila.forditokonzol
 
           import android.content.Context
+          import com.kaleyra.noise_filter.DeepFilterNet
           import com.rikorose.deepfilternet.NativeDeepFilterNet
+          import kotlinx.coroutines.runBlocking
+          import kotlinx.coroutines.suspendCancellableCoroutine
+          import kotlin.coroutines.resume
 
           object DeepFilterNetBridge {
+              /**
+               * A gyári NativeDeepFilterNetLoader működésével azonos betöltés:
+               * a natív példány létrehozása után megvárjuk az onModelLoaded callbacket,
+               * és csak a callbackben kapott, teljesen inicializált példányt adjuk vissza.
+               */
               @JvmStatic
-              fun create(context: Context): NativeDeepFilterNet =
-                  NativeDeepFilterNet(context.applicationContext)
-          }
+              fun createReady(context: Context): DeepFilterNet = runBlocking {
+                  suspendCancellableCoroutine { continuation ->
+                      val native = NativeDeepFilterNet(context.applicationContext)
+                      native.onModelLoaded { loaded ->
+                          if (continuation.isActive) continuation.resume(loaded)
+                      }
+                      continuation.invokeOnCancellation {
+                          runCatching { native.release() }
+                      }
+                  }
+              }
+
           EOF
 
           cat > app/src/main/java/com/attila/forditokonzol/MainActivity.java <<'EOF'
@@ -244,7 +262,7 @@ jobs:
           import java.util.concurrent.*;
           import java.io.*;
           import java.nio.*;
-          import com.rikorose.deepfilternet.NativeDeepFilterNet;
+          import com.kaleyra.noise_filter.DeepFilterNet;
           import okhttp3.*;
           
           public class MainActivity extends Activity {
@@ -309,7 +327,7 @@ jobs:
 
               // V358: egyetlen zajszűrő motor: DeepFilterNet 3, natív 48 kHz PCM16 mono lánc.
               final Object deepFilterLock = new Object();
-              NativeDeepFilterNet deepFilterNetInstance = null;
+              DeepFilterNet deepFilterNetInstance = null;
               int deepFilterFrameBytes = 0;
               ByteArrayOutputStream deepFilterPending = new ByteArrayOutputStream();
 
@@ -571,7 +589,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V364");
+                  TextView title = label("Fordito_V365");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1295,7 +1313,7 @@ jobs:
                       try {
                           runOnUiThread(() -> state.setText("DeepFilterNet modell betöltése"));
 
-                          deepFilterNetInstance = DeepFilterNetBridge.create(getApplicationContext());
+                          deepFilterNetInstance = DeepFilterNetBridge.createReady(getApplicationContext());
 
                           deepFilterNetInstance.setAttenuationLimit(30.0f);
 
@@ -4528,14 +4546,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V364.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V364.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V365.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V365.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V364
+          name: V365
           path: |
             artifact/*.apk
             artifact/*.aab
