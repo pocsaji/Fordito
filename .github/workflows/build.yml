@@ -1,4 +1,4 @@
-name: Build Android APK V365
+name: Build Android APK V366
 
 on:
   workflow_dispatch:
@@ -49,7 +49,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 365; versionName = "36.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 366; versionName = "36.6" }
 
               signingConfigs {
                   create("release") {
@@ -80,6 +80,7 @@ jobs:
               implementation("com.squareup.okhttp3:okhttp:4.12.0")
               implementation("org.json:json:20240303")
               implementation("io.github.kaleyravideo:android-deepfilternet:0.0.8")
+              implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
               implementation("com.github.gkonovalov.android-vad:silero:2.0.10")
           }
           EOF
@@ -132,7 +133,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V365" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V366" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -229,6 +230,7 @@ jobs:
                       }
                   }
               }
+          }
 
           EOF
 
@@ -589,7 +591,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V365");
+                  TextView title = label("Fordito_V366");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -4546,14 +4548,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V365.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V365.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V366.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V366.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V365
+          name: V366
           path: |
             artifact/*.apk
             artifact/*.aab
