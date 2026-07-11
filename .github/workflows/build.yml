@@ -1,4 +1,4 @@
-name: Build Android APK V357
+name: Build Android APK V358
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 357; versionName = "35.7" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 358; versionName = "35.8" }
 
               signingConfigs {
                   create("release") {
@@ -60,7 +60,7 @@ jobs:
           dependencies {
               implementation("com.squareup.okhttp3:okhttp:4.12.0")
               implementation("org.json:json:20240303")
-              implementation("com.github.gkonovalov.android-vad:webrtc:2.0.10")
+              implementation("io.github.kaleyravideo:android-deepfilternet:0.0.8")
               implementation("com.github.gkonovalov.android-vad:silero:2.0.10")
           }
           EOF
@@ -113,7 +113,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V357" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V358" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -210,6 +210,7 @@ jobs:
           import java.util.*;
           import java.util.concurrent.*;
           import java.io.*;
+          import java.nio.*;
           import okhttp3.*;
           
           public class MainActivity extends Activity {
@@ -265,13 +266,23 @@ jobs:
               int preRollAudioBytes = 0;
               final ArrayDeque<byte[]> pendingSpeechAudioChunks = new ArrayDeque<>();
               int pendingSpeechAudioMs = 0;
-              static final int AUDIO_SAMPLE_RATE = 16000;
+              static final int AUDIO_SAMPLE_RATE = 48000;
               static final int BLOCK_WINDOW_MS = 8000;
               static final int BLOCK_ACCEPT_MS = 8000;
               static final int BLOCK_OVERLAP_MS = 1000;
               final Object speechAudioWindowLock = new Object();
               ByteArrayOutputStream speechAudioWindow = new ByteArrayOutputStream();
-              String vadEngineMode = "silero_medium"; // alapértelmezett: Silero közepes
+
+              // V358: egyetlen zajszűrő motor: DeepFilterNet 3, natív 48 kHz PCM16 mono lánc.
+              final Object deepFilterLock = new Object();
+              Object deepFilterNetInstance = null;
+              java.lang.reflect.Method deepFilterProcessFrameMethod = null;
+              java.lang.reflect.Method deepFilterReleaseMethod = null;
+              int deepFilterFrameBytes = 0;
+              ByteArrayOutputStream deepFilterPending = new ByteArrayOutputStream();
+
+              // A Silero itt nem zajszűrő, csak belső beszéd/nem-beszéd blokkzáró.
+              final String vadEngineMode = "silero_medium";
               Object speechVadInstance = null;
               String speechVadInstanceMode = "";
               ByteArrayOutputStream vadFrameBuffer = new ByteArrayOutputStream();
@@ -424,15 +435,7 @@ jobs:
                   {"Automatikus mondatzárás","auto"}
               };
           
-              final String[][] vadEngineModes = {
-                  {"WebRTC VAD – csendes", "webrtc_quiet"},
-                  {"WebRTC VAD – közepes", "webrtc_medium"},
-                  {"WebRTC VAD – zajos", "webrtc"},
-                  {"Silero VAD – csendes", "silero"},
-                  {"Silero VAD – közepes", "silero_medium"},
-                  {"Silero VAD – zajos", "silero_truck"},
-                  {"Passz / nincs zajkapu", "pass"}
-              };
+
           
               final String[][] audioSourceModes = {
                   {"Beszédfelismerés / ajánlott","recognition"},
@@ -466,8 +469,6 @@ jobs:
                   mode = sp.getString("mode", "natural");
                   vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "xhigh");
-                  vadEngineMode = sp.getString("vadEngineMode", "silero_medium");
-                  if(!"webrtc_quiet".equals(vadEngineMode) && !"webrtc_medium".equals(vadEngineMode) && !"webrtc".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode) && !"pass".equals(vadEngineMode)) vadEngineMode = "silero_medium";
                   audioSourceMode = sp.getString("audioSourceMode", "recognition");
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   lastInterpreterAudioMode = sp.getString("lastInterpreterAudioMode", "headset");
@@ -515,7 +516,6 @@ jobs:
                     .putString("mode", mode)
                     .putString("vadMode", vadMode)
                     .putString("delayMode", delayMode)
-                    .putString("vadEngineMode", vadEngineMode)
                     .putString("audioSourceMode", audioSourceMode)
                     .putBoolean("interpreterMode", interpreterMode)
                     .putString("interpreterAudioMode", interpreterAudioMode)
@@ -540,7 +540,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V357");
+                  TextView title = label("Fordito_V358");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1214,7 +1214,7 @@ jobs:
                   return out;
               }
           
-              int pcm16Mono16kMs(int bytes) {
+              int pcm16Mono48kMs(int bytes) {
                   if(bytes <= 0) return 0;
                   return Math.max(1, (int)Math.round(bytes * 1000.0 / (AUDIO_SAMPLE_RATE * 2.0)));
               }
@@ -1230,7 +1230,7 @@ jobs:
                   if(data == null || len <= 0) return;
                   synchronized(pendingSpeechAudioChunks) {
                       pendingSpeechAudioChunks.add(Arrays.copyOf(data, len));
-                      pendingSpeechAudioMs += pcm16Mono16kMs(len);
+                      pendingSpeechAudioMs += pcm16Mono48kMs(len);
                   }
               }
           
@@ -1250,6 +1250,119 @@ jobs:
                   return out;
               }
           
+              boolean initDeepFilterNet() {
+                  synchronized(deepFilterLock) {
+                      releaseDeepFilterNet();
+                      try {
+                          Class<?> cls = Class.forName("com.rikorose.deepfilternet.NativeDeepFilterNet");
+                          deepFilterNetInstance = cls
+                              .getConstructor(android.content.Context.class)
+                              .newInstance(this);
+
+                          cls.getMethod("setAttenuationLimit", float.class)
+                              .invoke(deepFilterNetInstance, 30.0f);
+
+                          Object frameLength = cls.getMethod("getFrameLength")
+                              .invoke(deepFilterNetInstance);
+                          deepFilterFrameBytes = ((Number)frameLength).intValue();
+                          if(deepFilterFrameBytes <= 0 || (deepFilterFrameBytes & 1) != 0) {
+                              throw new IllegalStateException("Érvénytelen DeepFilterNet frame: " + deepFilterFrameBytes);
+                          }
+
+                          deepFilterProcessFrameMethod = cls.getMethod("processFrame", java.nio.ByteBuffer.class);
+                          deepFilterReleaseMethod = cls.getMethod("release");
+                          deepFilterPending.reset();
+                          return true;
+                      } catch(Exception e) {
+                          releaseDeepFilterNet();
+                          final String msg = "DeepFilterNet nem indult: " +
+                              (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+                          runOnUiThread(() -> state.setText(msg));
+                          return false;
+                      }
+                  }
+              }
+
+              void releaseDeepFilterNet() {
+                  synchronized(deepFilterLock) {
+                      try {
+                          if(deepFilterNetInstance != null && deepFilterReleaseMethod != null) {
+                              deepFilterReleaseMethod.invoke(deepFilterNetInstance);
+                          }
+                      } catch(Exception ignored) {}
+                      deepFilterNetInstance = null;
+                      deepFilterProcessFrameMethod = null;
+                      deepFilterReleaseMethod = null;
+                      deepFilterFrameBytes = 0;
+                      deepFilterPending.reset();
+                  }
+              }
+
+              byte[] filterWithDeepFilterNet(byte[] data, int len) {
+                  if(data == null || len <= 0) return new byte[0];
+                  synchronized(deepFilterLock) {
+                      if(deepFilterNetInstance == null || deepFilterProcessFrameMethod == null || deepFilterFrameBytes <= 0) {
+                          return null;
+                      }
+                      try {
+                          deepFilterPending.write(data, 0, len);
+                          byte[] all = deepFilterPending.toByteArray();
+                          int completeBytes = (all.length / deepFilterFrameBytes) * deepFilterFrameBytes;
+                          if(completeBytes <= 0) return new byte[0];
+
+                          ByteArrayOutputStream filtered = new ByteArrayOutputStream(completeBytes);
+                          ByteBuffer frameBuffer = ByteBuffer.allocateDirect(deepFilterFrameBytes)
+                              .order(ByteOrder.LITTLE_ENDIAN);
+
+                          for(int pos = 0; pos < completeBytes; pos += deepFilterFrameBytes) {
+                              frameBuffer.clear();
+                              frameBuffer.put(all, pos, deepFilterFrameBytes);
+                              frameBuffer.position(0);
+                              frameBuffer.limit(deepFilterFrameBytes);
+
+                              deepFilterProcessFrameMethod.invoke(deepFilterNetInstance, frameBuffer);
+
+                              byte[] frame = new byte[deepFilterFrameBytes];
+                              frameBuffer.position(0);
+                              frameBuffer.limit(deepFilterFrameBytes);
+                              frameBuffer.get(frame);
+                              filtered.write(frame);
+                          }
+
+                          deepFilterPending.reset();
+                          if(completeBytes < all.length) {
+                              deepFilterPending.write(all, completeBytes, all.length - completeBytes);
+                          }
+                          return filtered.toByteArray();
+                      } catch(Exception e) {
+                          final String msg = "DeepFilterNet feldolgozási hiba";
+                          runOnUiThread(() -> state.setText(msg));
+                          return null;
+                      }
+                  }
+              }
+
+              byte[] downsample48kTo16kForVad(byte[] pcm48k, int len) {
+                  if(pcm48k == null || len < 6) return new byte[0];
+                  int inputSamples = len / 2;
+                  int outputSamples = inputSamples / 3;
+                  byte[] out = new byte[outputSamples * 2];
+
+                  for(int i = 0; i < outputSamples; i++) {
+                      int sum = 0;
+                      for(int k = 0; k < 3; k++) {
+                          int p = (i * 3 + k) * 2;
+                          int lo = pcm48k[p] & 0xff;
+                          int hi = pcm48k[p + 1];
+                          sum += (short)((hi << 8) | lo);
+                      }
+                      int averaged = Math.max(Short.MIN_VALUE, Math.min(Short.MAX_VALUE, Math.round(sum / 3.0f)));
+                      out[i * 2] = (byte)(averaged & 0xff);
+                      out[i * 2 + 1] = (byte)((averaged >> 8) & 0xff);
+                  }
+                  return out;
+              }
+
               void closeExternalVad() {
                   try {
                       if(speechVadInstance instanceof AutoCloseable) ((AutoCloseable)speechVadInstance).close();
@@ -1266,55 +1379,37 @@ jobs:
               }
           
               Object buildVadByReflection(String mode) throws Exception {
-                  if("webrtc_quiet".equals(mode) || "webrtc_medium".equals(mode) || "webrtc".equals(mode)) {
-                      Class<?> vadClass = Class.forName("com.konovalov.vad.webrtc.Vad");
-                      Object b = vadClass.getMethod("builder").invoke(null);
-                      b.getClass().getMethod("setSampleRate", Class.forName("com.konovalov.vad.webrtc.config.SampleRate")).invoke(b, enumConst("com.konovalov.vad.webrtc.config.SampleRate", "SAMPLE_RATE_16K"));
-                      b.getClass().getMethod("setFrameSize", Class.forName("com.konovalov.vad.webrtc.config.FrameSize")).invoke(b, enumConst("com.konovalov.vad.webrtc.config.FrameSize", "FRAME_SIZE_320"));
-                      String webRtcModeName = "webrtc_quiet".equals(mode) ? "NORMAL"
-                          : ("webrtc_medium".equals(mode) ? "AGGRESSIVE" : "VERY_AGGRESSIVE");
-                      b.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.webrtc.config.Mode")).invoke(b, enumConst("com.konovalov.vad.webrtc.config.Mode", webRtcModeName));
-                      b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, 300);
-                      b.getClass().getMethod("setSpeechDurationMs", int.class).invoke(b, 50);
-                      return b.getClass().getMethod("build").invoke(b);
-                  }
-                  if("silero".equals(mode) || "silero_medium".equals(mode) || "silero_truck".equals(mode)) {
-                      Class<?> vadClass = Class.forName("com.konovalov.vad.silero.Vad");
-                      Object b = vadClass.getMethod("builder").invoke(null);
-                      b.getClass().getMethod("setContext", android.content.Context.class).invoke(b, this);
-                      b.getClass().getMethod("setSampleRate", Class.forName("com.konovalov.vad.silero.config.SampleRate")).invoke(b, enumConst("com.konovalov.vad.silero.config.SampleRate", "SAMPLE_RATE_16K"));
-                      b.getClass().getMethod("setFrameSize", Class.forName("com.konovalov.vad.silero.config.FrameSize")).invoke(b, enumConst("com.konovalov.vad.silero.config.FrameSize", "FRAME_SIZE_512"));
-                      // V350 tesztprofilok: csendes=NORMAL, közepes=AGGRESSIVE, zajos=VERY_AGGRESSIVE.
-                      String sileroModeName = "silero".equals(mode) ? "NORMAL"
-                          : ("silero_medium".equals(mode) ? "AGGRESSIVE" : "VERY_AGGRESSIVE");
-                      b.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.silero.config.Mode")).invoke(b, enumConst("com.konovalov.vad.silero.config.Mode", sileroModeName));
-                      b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, 300);
-                      b.getClass().getMethod("setSpeechDurationMs", int.class).invoke(b, 50);
-                      return b.getClass().getMethod("build").invoke(b);
-                  }
-                  return null;
+                  Class<?> vadClass = Class.forName("com.konovalov.vad.silero.Vad");
+                  Object b = vadClass.getMethod("builder").invoke(null);
+                  b.getClass().getMethod("setContext", android.content.Context.class).invoke(b, this);
+                  b.getClass().getMethod("setSampleRate", Class.forName("com.konovalov.vad.silero.config.SampleRate"))
+                      .invoke(b, enumConst("com.konovalov.vad.silero.config.SampleRate", "SAMPLE_RATE_16K"));
+                  b.getClass().getMethod("setFrameSize", Class.forName("com.konovalov.vad.silero.config.FrameSize"))
+                      .invoke(b, enumConst("com.konovalov.vad.silero.config.FrameSize", "FRAME_SIZE_512"));
+                  b.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.silero.config.Mode"))
+                      .invoke(b, enumConst("com.konovalov.vad.silero.config.Mode", "AGGRESSIVE"));
+                  b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, 300);
+                  b.getClass().getMethod("setSpeechDurationMs", int.class).invoke(b, 50);
+                  return b.getClass().getMethod("build").invoke(b);
               }
-          
+
               boolean ensureExternalVadReady() {
-                  if("pass".equals(vadEngineMode)) return true;
-                  if(!"webrtc_quiet".equals(vadEngineMode) && !"webrtc_medium".equals(vadEngineMode) && !"webrtc".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode)) return false;
-                  if(speechVadInstance != null && vadEngineMode.equals(speechVadInstanceMode)) return true;
+                  if(speechVadInstance != null) return true;
                   closeExternalVad();
                   try {
                       speechVadInstance = buildVadByReflection(vadEngineMode);
                       speechVadInstanceMode = vadEngineMode;
                       return speechVadInstance != null;
                   } catch(Exception e) {
-                      final String msg = "VAD nem indult: " + vadEngineMode;
-                      runOnUiThread(() -> state.setText(msg));
+                      runOnUiThread(() -> state.setText("Silero blokkzáró nem indult"));
                       return false;
                   }
               }
-          
+
               boolean vadIsSpeechOn16k(byte[] pcm16k) {
                   if(speechVadInstance == null || pcm16k == null || pcm16k.length == 0) return false;
                   try {
-                      int frameBytes = (vadEngineMode != null && vadEngineMode.startsWith("silero")) ? 1024 : 640; // 16 kHz: Silero 512 samples, WebRTC 320 samples
+                      int frameBytes = 1024; // Silero: 512 minta, 16 kHz PCM16
                       vadFrameBuffer.write(pcm16k, 0, pcm16k.length);
                       byte[] all = vadFrameBuffer.toByteArray();
                       int pos = 0;
@@ -1345,9 +1440,8 @@ jobs:
               }
           
               boolean externalVadOverGate(byte[] data, int len) {
-                  if("pass".equals(vadEngineMode)) return true;
                   if(!ensureExternalVadReady()) return false;
-                  return vadIsSpeechOn16k(Arrays.copyOf(data, len));
+                  return vadIsSpeechOn16k(downsample48kTo16kForVad(data, len));
               }
           
               void clearSpeechAudioWindow() {
@@ -1357,7 +1451,7 @@ jobs:
               }
           
               int speechAudioWindowMs() {
-                  synchronized(speechAudioWindowLock) { return pcm16Mono16kMs(speechAudioWindow.size()); }
+                  synchronized(speechAudioWindowLock) { return pcm16Mono48kMs(speechAudioWindow.size()); }
               }
           
               void appendSpeechAudioChunk(byte[] chunk) {
@@ -1393,7 +1487,7 @@ jobs:
                   if(ready != null) transcribeAudioWindow(ready, true);
               }
           
-              byte[] wavFromPcm16k(byte[] pcm) throws Exception {
+              byte[] wavFromPcm48k(byte[] pcm) throws Exception {
                   int dataLen = pcm == null ? 0 : pcm.length;
                   ByteArrayOutputStream out = new ByteArrayOutputStream(44 + dataLen);
                   writeAscii(out, "RIFF"); writeIntLE(out, 36 + dataLen); writeAscii(out, "WAVE");
@@ -1411,7 +1505,7 @@ jobs:
               void transcribeAudioWindow(byte[] pcm, boolean finalFlush) {
                   if(pcm == null || pcm.length == 0 || client == null || !hasKey()) return;
                   try {
-                      byte[] wav = wavFromPcm16k(pcm);
+                      byte[] wav = wavFromPcm48k(pcm);
                       MultipartBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
                           .addFormDataPart("model", "gpt-4o-mini-transcribe")
                           .addFormDataPart("prompt", speechTranscriptionPrompt())
@@ -1517,6 +1611,7 @@ jobs:
                   clearPendingSpeechAudio();
                   clearSpeechAudioWindow();
                   closeExternalVad();
+                  releaseDeepFilterNet();
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception ignored) {}
                   rec = null;
                   vadFrameBuffer.reset();
@@ -1525,11 +1620,16 @@ jobs:
               void audioLoop() {
                   int sr = AUDIO_SAMPLE_RATE;
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-                  int bs = Math.max(min, 4800);
+                  int bs = Math.max(min, AUDIO_SAMPLE_RATE * 2 * 100 / 1000);
           
-                  // V318: 16 kHz PCM16 mono marad. Buffer cél kb. 100 ms.
+                  // V358: natív 48 kHz PCM16 mono bemenet, DeepFilterNet 3 feldolgozással.
+                  if(!initDeepFilterNet()) return;
                   rec = makeBestAudioRecord(sr, bs);
-                  if(rec == null) { runOnUiThread(() -> state.setText("mikrofon hiba")); return; }
+                  if(rec == null) {
+                      releaseDeepFilterNet();
+                      runOnUiThread(() -> state.setText("mikrofon hiba"));
+                      return;
+                  }
                   streaming = true;
                   setSpeechUiLocked(false);
                   rec.startRecording();
@@ -1546,6 +1646,14 @@ jobs:
                               while(streaming && connected && rec != null) {
                           int read = rec.read(buf, 0, buf.length);
                           if(read > 0) {
+                              byte[] filtered = filterWithDeepFilterNet(buf, read);
+                              if(filtered == null) {
+                                  streaming = false;
+                                  connected = false;
+                                  break;
+                              }
+                              if(filtered.length == 0) continue;
+                              int filteredLen = filtered.length;
                               try {
                                   // Tolmács mód nem módosíthatja a bemeneti beszédfelismerést.
                                   // Egyetlen kivétel: kihangosított telefon módnál TTS közben a mikrofon nem küld hangot,
@@ -1558,10 +1666,10 @@ jobs:
                                   }
           
                                   long now = System.currentTimeMillis();
-                                  boolean overGate = externalVadOverGate(buf, read);
+                                  boolean overGate = externalVadOverGate(filtered, filteredLen);
                                   if(overGate) {
                                       if(!voiceSendActive) {
-                                          rememberPendingSpeechAudio(buf, read);
+                                          rememberPendingSpeechAudio(filtered, filteredLen);
                                           if(pendingSpeechAudioDurationMs() < MIN_TRUE_SPEECH_AUDIO_MS) {
                                               continue;
                                           }
@@ -1569,7 +1677,7 @@ jobs:
                                           for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr);
                                           for(byte[] ps : takePendingSpeechAudio()) sendAudioChunk(ps);
                                       } else {
-                                          sendAudioChunk(Arrays.copyOf(buf, read));
+                                          sendAudioChunk(Arrays.copyOf(filtered, filteredLen));
                                       }
                                       voiceSendActive = true;
                                       continue;
@@ -1583,7 +1691,7 @@ jobs:
                                   }
           
                                   clearPendingSpeechAudio();
-                                  rememberPreRollAudio(buf, read);
+                                  rememberPreRollAudio(filtered, filteredLen);
                               } catch(Exception ignored) {}
                           }
                       }
@@ -1626,6 +1734,7 @@ jobs:
                   clearPendingSpeechAudio();
                   clearSpeechAudioWindow();
                   closeExternalVad();
+                  releaseDeepFilterNet();
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception ignored) {}
                   rec = null;
                   speechTranscriptBuffer = "";
@@ -3618,18 +3727,16 @@ jobs:
               }
 
               String noiseAndTranslationLabel() {
-                  return vadEngineLabel() + " / " + modeLabel();
+                  return "DeepFilterNet 3 / " + modeLabel();
               }
 
               void noiseAndTranslationMenu() {
                   if(uiLockedForSpeech || finalizingStop) return;
                   CharSequence[] items = {
-                      menuItem("Zajszűrési motor", vadEngineLabel(), false),
                       menuItem("Tolmácsolás módja", modeLabel(), false)
                   };
-                  showCenteredMenu("Zajszűrés és tolmácsolás", items, (d,w) -> {
-                      if(w==0) chooseVadEngine();
-                      if(w==1) chooseMode();
+                  showCenteredMenu("DeepFilterNet 3 és tolmácsolás", items, (d,w) -> {
+                      if(w==0) chooseMode();
                       updateButtons();
                   });
               }
@@ -3674,8 +3781,7 @@ jobs:
               }
 
               void advancedMenu() {
-                  if(uiLockedForSpeech || finalizingStop) return;
-                  chooseVadEngine();
+                  Toast.makeText(this, "DeepFilterNet 3 aktív – 48 kHz", Toast.LENGTH_SHORT).show();
               }
           
               String speechMenuLabel() {
@@ -3683,7 +3789,7 @@ jobs:
               }
           
               String noiseMenuLabel() {
-                  return vadEngineLabel();
+                  return "DeepFilterNet 3 – 48 kHz";
               }
           
               String interpreterQuickLabel() {
@@ -3902,7 +4008,6 @@ jobs:
               void chooseModel() { chooseFrom("AI modell", models, model, v -> { model = v; save(); restartIfNeeded(); }); }
               void chooseProfile() { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save();  }); }
               void chooseMode() { chooseFrom("Tolmácsolás módja", modes, mode, v -> { mode = v; save();  }); }
-              void chooseVadEngine() { chooseFrom("Zajszűrési módok", vadEngineModes, vadEngineMode, v -> { vadEngineMode = v; save(); closeExternalVad(); restartIfNeeded(); }); }
               void chooseVad() { chooseFrom("Két mondat közötti szünet", vadModes, vadMode, v -> { vadMode = v; save(); restartIfNeeded(); }); }
               void chooseAudioSource() { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }); }
           
@@ -3914,7 +4019,6 @@ jobs:
                         model = "gpt-4o-mini";
                         profile = "general";
                           mode = "natural";
-                              vadEngineMode = "silero_medium";
                         interpreterMode = false;
                         interpreterAudioMode = "off";
                         ttsMuteUntilMs = 0L;
@@ -4045,14 +4149,7 @@ jobs:
 
 
               String vadEngineLabel() {
-                  if("webrtc_quiet".equals(vadEngineMode)) return "WebRTC VAD – csendes";
-                  if("webrtc_medium".equals(vadEngineMode)) return "WebRTC VAD – közepes";
-                  if("webrtc".equals(vadEngineMode)) return "WebRTC VAD – zajos";
-                  if("silero".equals(vadEngineMode)) return "Silero VAD – csendes";
-                  if("silero_medium".equals(vadEngineMode)) return "Silero VAD – közepes";
-                  if("silero_truck".equals(vadEngineMode)) return "Silero VAD – zajos";
-                  if("pass".equals(vadEngineMode)) return "Passz / nincs zajkapu";
-                  return vadEngineMode;
+                  return "DeepFilterNet 3 – 48 kHz";
               }
 
               String nonConversationalLanguageTaskRules() {
@@ -4388,14 +4485,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V357.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V357.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V358.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V358.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V357
+          name: V358
           path: |
             artifact/*.apk
             artifact/*.aab
