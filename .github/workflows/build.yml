@@ -1,4 +1,4 @@
-name: Build Android APK V366
+name: Build Android APK V367
 
 on:
   workflow_dispatch:
@@ -49,7 +49,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 366; versionName = "36.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 367; versionName = "36.7" }
 
               signingConfigs {
                   create("release") {
@@ -81,6 +81,7 @@ jobs:
               implementation("org.json:json:20240303")
               implementation("io.github.kaleyravideo:android-deepfilternet:0.0.8")
               implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
+              implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
               implementation("com.github.gkonovalov.android-vad:silero:2.0.10")
           }
           EOF
@@ -133,7 +134,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V366" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V367" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -220,13 +221,15 @@ jobs:
                */
               @JvmStatic
               fun createReady(context: Context): DeepFilterNet = runBlocking {
-                  suspendCancellableCoroutine { continuation ->
-                      val native = NativeDeepFilterNet(context.applicationContext)
-                      native.onModelLoaded { loaded ->
-                          if (continuation.isActive) continuation.resume(loaded)
-                      }
-                      continuation.invokeOnCancellation {
-                          runCatching { native.release() }
+                  kotlinx.coroutines.withTimeout(20_000L) {
+                      suspendCancellableCoroutine { continuation ->
+                          val native = NativeDeepFilterNet(context.applicationContext)
+                          native.onModelLoaded { loaded ->
+                              if (continuation.isActive) continuation.resume(loaded)
+                          }
+                          continuation.invokeOnCancellation {
+                              runCatching { native.release() }
+                          }
                       }
                   }
               }
@@ -591,7 +594,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V366");
+                  TextView title = label("Fordito_V367");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1681,81 +1684,115 @@ jobs:
               }
           
               void audioLoop() {
-                  int sr = AUDIO_SAMPLE_RATE;
-                  int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-                  int bs = Math.max(min, AUDIO_SAMPLE_RATE * 2 * 100 / 1000);
-          
-                  // V358: natív 48 kHz PCM16 mono bemenet, DeepFilterNet 3 feldolgozással.
-                  if(!initDeepFilterNet()) return;
-                  rec = makeBestAudioRecord(sr, bs);
-                  if(rec == null) {
-                      releaseDeepFilterNet();
-                      runOnUiThread(() -> state.setText("mikrofon hiba"));
-                      return;
-                  }
-                  streaming = true;
-                  setSpeechUiLocked(false);
-                  rec.startRecording();
-                  runOnUiThread(() -> {
-                      state.setText("mikrofon aktív");
-                      scheduleMicLifeSignal();
-                  });
-                  updateButtons();
-          
+                  final int sr = AUDIO_SAMPLE_RATE;
+                  final int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+                  final int bs = Math.max(min, AUDIO_SAMPLE_RATE * 2 * 100 / 1000);
+
+                  // A DeepFilterNet a modellbetöltést Dispatchers.Main-on indítja. Ezért a várakozás
+                  // nem futhat a főszálon: különben a főszál saját callbackjére vár és az app ANR-rel leáll.
                   audioExec.submit(() -> {
-                      byte[] buf = new byte[bs];
-                      clearPreRollAudio();
-                      voiceSendActive = false;
-                              while(streaming && connected && rec != null) {
-                          int read = rec.read(buf, 0, buf.length);
-                          if(read > 0) {
-                              byte[] filtered = filterWithDeepFilterNet(buf, read);
-                              if(filtered == null) {
-                                  streaming = false;
-                                  connected = false;
-                                  break;
+                      AudioRecord localRec = null;
+                      try {
+                          if(!connected) return;
+                          if(!initDeepFilterNet()) {
+                              connected = false;
+                              stopBackgroundForegroundService();
+                              runOnUiThread(() -> updateButtons());
+                              return;
+                          }
+                          if(!connected) {
+                              releaseDeepFilterNet();
+                              return;
+                          }
+
+                          localRec = makeBestAudioRecord(sr, bs);
+                          if(localRec == null) throw new IllegalStateException("AudioRecord nem inicializálható");
+                          rec = localRec;
+                          localRec.startRecording();
+                          if(localRec.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
+                              throw new IllegalStateException("A mikrofon nem indult el");
+                          }
+
+                          streaming = true;
+                          clearPreRollAudio();
+                          voiceSendActive = false;
+                          runOnUiThread(() -> {
+                              setSpeechUiLocked(false);
+                              state.setText("mikrofon aktív");
+                              scheduleMicLifeSignal();
+                              updateButtons();
+                          });
+
+                          byte[] buf = new byte[bs];
+                          while(streaming && connected && rec == localRec) {
+                              int read = localRec.read(buf, 0, buf.length);
+                              if(read == AudioRecord.ERROR_INVALID_OPERATION || read == AudioRecord.ERROR_BAD_VALUE || read == AudioRecord.ERROR_DEAD_OBJECT) {
+                                  throw new IllegalStateException("AudioRecord olvasási hiba: " + read);
                               }
-                              if(filtered.length == 0) continue;
-                              int filteredLen = filtered.length;
-                              try {
-                                  // Tolmács mód nem módosíthatja a bemeneti beszédfelismerést.
-                                  // Egyetlen kivétel: kihangosított telefon módnál TTS közben a mikrofon nem küld hangot,
-                                  // hogy a saját felolvasott fordítás ne kerüljön vissza bemenetként.
-                                  // A pre-rollt nem töröljük, és TTS alatti hangot sem pufferezzük,
-                                  // így a saját felolvasás nem kerülhet vissza később bemenetként.
-                                  if(shouldMuteMicForSpeakerTts()) {
-                                                          voiceSendActive = false;
-                                      continue;
-                                  }
-          
-                                  long now = System.currentTimeMillis();
-                                  boolean overGate = externalVadOverGate(filtered, filteredLen);
-                                  if(overGate) {
-                                      if(!voiceSendActive) {
-                                          rememberPendingSpeechAudio(filtered, filteredLen);
-                                          if(pendingSpeechAudioDurationMs() < MIN_TRUE_SPEECH_AUDIO_MS) {
-                                              continue;
-                                          }
-                                          if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = now;
-                                          for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr);
-                                          for(byte[] ps : takePendingSpeechAudio()) sendAudioChunk(ps);
-                                      } else {
-                                          sendAudioChunk(Arrays.copyOf(filtered, filteredLen));
+                              if(read > 0) {
+                                  byte[] filtered = filterWithDeepFilterNet(buf, read);
+                                  if(filtered == null) throw new IllegalStateException("DeepFilterNet feldolgozás megszakadt");
+                                  if(filtered.length == 0) continue;
+                                  int filteredLen = filtered.length;
+                                  try {
+                                      // Tolmács mód nem módosíthatja a bemeneti beszédfelismerést.
+                                      // Egyetlen kivétel: kihangosított telefon módnál TTS közben a mikrofon nem küld hangot,
+                                      // hogy a saját felolvasott fordítás ne kerüljön vissza bemenetként.
+                                      // A pre-rollt nem töröljük, és TTS alatti hangot sem pufferezzük,
+                                      // így a saját felolvasás nem kerülhet vissza később bemenetként.
+                                      if(shouldMuteMicForSpeakerTts()) {
+                                          voiceSendActive = false;
+                                          continue;
                                       }
-                                      voiceSendActive = true;
-                                      continue;
-                                  }
-          
-                                  if(voiceSendActive) {
-                                      // A VAD saját 300 ms-os nem-beszéd döntése után azonnal lezárjuk a blokkot.
-                                      // Nincs külön 400 ms-os mesterséges nullás farok vagy második várakozási réteg.
-                                      voiceSendActive = false;
-                                      flushSpeechAudioWindow(true);
-                                  }
-          
-                                  clearPendingSpeechAudio();
-                                  rememberPreRollAudio(filtered, filteredLen);
-                              } catch(Exception ignored) {}
+
+                                      long now = System.currentTimeMillis();
+                                      boolean overGate = externalVadOverGate(filtered, filteredLen);
+                                      if(overGate) {
+                                          if(!voiceSendActive) {
+                                              rememberPendingSpeechAudio(filtered, filteredLen);
+                                              if(pendingSpeechAudioDurationMs() < MIN_TRUE_SPEECH_AUDIO_MS) continue;
+                                              if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = now;
+                                              for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr);
+                                              for(byte[] ps : takePendingSpeechAudio()) sendAudioChunk(ps);
+                                          } else {
+                                              sendAudioChunk(Arrays.copyOf(filtered, filteredLen));
+                                          }
+                                          voiceSendActive = true;
+                                          continue;
+                                      }
+
+                                      if(voiceSendActive) {
+                                          voiceSendActive = false;
+                                          flushSpeechAudioWindow(true);
+                                      }
+
+                                      clearPendingSpeechAudio();
+                                      rememberPreRollAudio(filtered, filteredLen);
+                                  } catch(Exception ignored) {}
+                              }
+                          }
+                      } catch(Throwable e) {
+                          final String reason = deepFilterRootCause(e);
+                          streaming = false;
+                          connected = false;
+                          runOnUiThread(() -> {
+                              state.setText("mikrofon indítási hiba");
+                              Toast.makeText(MainActivity.this, "Mikrofon nem indult: " + reason, Toast.LENGTH_LONG).show();
+                              updateButtons();
+                          });
+                      } finally {
+                          try {
+                              if(localRec != null) {
+                                  if(localRec.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) localRec.stop();
+                                  localRec.release();
+                              }
+                          } catch(Throwable ignored) {}
+                          if(rec == localRec) rec = null;
+                          if(!streaming) {
+                              cancelMicLifeSignal();
+                              closeExternalVad();
+                              releaseDeepFilterNet();
+                              stopBackgroundForegroundService();
                           }
                       }
                   });
@@ -4548,14 +4585,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V366.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V366.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V367.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V367.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V366
+          name: V367
           path: |
             artifact/*.apk
             artifact/*.aab
