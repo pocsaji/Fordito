@@ -1,4 +1,4 @@
-name: Build Android APK V360
+name: Build Android APK V361
 
 on:
   workflow_dispatch:
@@ -43,7 +43,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 360; versionName = "36.0" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 361; versionName = "36.1" }
 
               signingConfigs {
                   create("release") {
@@ -118,7 +118,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V360" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V361" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -544,7 +544,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V360");
+                  TextView title = label("Fordito_V361");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1254,34 +1254,97 @@ jobs:
                   return out;
               }
           
+              Object createDeepFilterNetInstance(Class<?> cls) throws Exception {
+                  // A könyvtár Kotlin-os konstruktora Java felől nem garantál valódi
+                  // egyparaméteres Context konstruktort. Először azt keressük, utána
+                  // a Kotlin által generált default-paraméteres szintetikus konstruktort.
+                  for(java.lang.reflect.Constructor<?> c : cls.getDeclaredConstructors()) {
+                      Class<?>[] p = c.getParameterTypes();
+                      if(p.length == 1 && android.content.Context.class.isAssignableFrom(p[0])) {
+                          c.setAccessible(true);
+                          return c.newInstance(getApplicationContext());
+                      }
+                  }
+
+                  for(java.lang.reflect.Constructor<?> c : cls.getDeclaredConstructors()) {
+                      Class<?>[] p = c.getParameterTypes();
+                      if(p.length == 6 &&
+                         android.content.Context.class.isAssignableFrom(p[0]) &&
+                         p[1] == float.class &&
+                         p[4] == int.class) {
+                          c.setAccessible(true);
+                          // Kotlin default maszk: attenuationLimit, dispatchers és modelLoader.
+                          return c.newInstance(getApplicationContext(), 0.0f, null, null, 14, null);
+                      }
+                  }
+
+                  throw new NoSuchMethodException("NativeDeepFilterNet kompatibilis konstruktor nem található");
+              }
+
+              String deepFilterRootCause(Throwable e) {
+                  Throwable root = e;
+                  while(root.getCause() != null && root.getCause() != root) root = root.getCause();
+                  String message = root.getMessage();
+                  if(message == null || message.trim().length() == 0) message = root.getClass().getSimpleName();
+                  return message;
+              }
+
               boolean initDeepFilterNet() {
                   synchronized(deepFilterLock) {
                       releaseDeepFilterNet();
                       try {
+                          runOnUiThread(() -> state.setText("DeepFilterNet modell betöltése"));
+
                           Class<?> cls = Class.forName("com.rikorose.deepfilternet.NativeDeepFilterNet");
-                          deepFilterNetInstance = cls
-                              .getConstructor(android.content.Context.class)
-                              .newInstance(this);
+                          deepFilterNetInstance = createDeepFilterNetInstance(cls);
 
-                          cls.getMethod("setAttenuationLimit", float.class)
-                              .invoke(deepFilterNetInstance, 30.0f);
-
-                          Object frameLength = cls.getMethod("getFrameLength")
-                              .invoke(deepFilterNetInstance);
-                          deepFilterFrameBytes = ((Number)frameLength).intValue();
-                          if(deepFilterFrameBytes <= 0 || (deepFilterFrameBytes & 1) != 0) {
-                              throw new IllegalStateException("Érvénytelen DeepFilterNet frame: " + deepFilterFrameBytes);
-                          }
-
+                          // A hivatalos implementáció aszinkron tölti be a beágyazott modellt.
+                          // A frameLength addig dokumentáltan -1, ezért nem szabad azonnal hibának venni.
+                          java.lang.reflect.Method getFrameLengthMethod = cls.getMethod("getFrameLength");
                           deepFilterProcessFrameMethod = cls.getMethod("processFrame", java.nio.ByteBuffer.class);
                           deepFilterReleaseMethod = cls.getMethod("release");
+
+                          long deadline = android.os.SystemClock.elapsedRealtime() + 15000L;
+                          int frameLength = -1;
+                          while(android.os.SystemClock.elapsedRealtime() < deadline) {
+                              Object value = getFrameLengthMethod.invoke(deepFilterNetInstance);
+                              frameLength = ((Number)value).intValue();
+                              if(frameLength > 0) break;
+                              try { Thread.sleep(50L); }
+                              catch(InterruptedException interrupted) {
+                                  Thread.currentThread().interrupt();
+                                  throw new IllegalStateException("DeepFilterNet betöltése megszakadt", interrupted);
+                              }
+                          }
+
+                          deepFilterFrameBytes = frameLength;
+                          if(deepFilterFrameBytes <= 0 || (deepFilterFrameBytes & 1) != 0) {
+                              throw new IllegalStateException(
+                                  "DeepFilterNet modell nem töltődött be 15 másodpercen belül; frame=" +
+                                  deepFilterFrameBytes
+                              );
+                          }
+
+                          Object attenuationSet = cls.getMethod("setAttenuationLimit", float.class)
+                              .invoke(deepFilterNetInstance, 30.0f);
+                          if(attenuationSet instanceof Boolean && !((Boolean)attenuationSet)) {
+                              throw new IllegalStateException("DeepFilterNet 30 dB beállítása sikertelen");
+                          }
+
                           deepFilterPending.reset();
+                          runOnUiThread(() -> state.setText("DeepFilterNet aktív – 48 kHz"));
                           return true;
-                      } catch(Exception e) {
+                      } catch(Throwable e) {
+                          final String reason = deepFilterRootCause(e);
                           releaseDeepFilterNet();
-                          final String msg = "DeepFilterNet nem indult: " +
-                              (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
-                          runOnUiThread(() -> state.setText(msg));
+                          runOnUiThread(() -> {
+                              state.setText("DeepFilterNet hiba");
+                              Toast.makeText(
+                                  MainActivity.this,
+                                  "DeepFilterNet nem indult: " + reason,
+                                  Toast.LENGTH_LONG
+                              ).show();
+                          });
                           return false;
                       }
                   }
@@ -1338,9 +1401,16 @@ jobs:
                               deepFilterPending.write(all, completeBytes, all.length - completeBytes);
                           }
                           return filtered.toByteArray();
-                      } catch(Exception e) {
-                          final String msg = "DeepFilterNet feldolgozási hiba";
-                          runOnUiThread(() -> state.setText(msg));
+                      } catch(Throwable e) {
+                          final String reason = deepFilterRootCause(e);
+                          runOnUiThread(() -> {
+                              state.setText("DeepFilterNet feldolgozási hiba");
+                              Toast.makeText(
+                                  MainActivity.this,
+                                  "DeepFilterNet feldolgozási hiba: " + reason,
+                                  Toast.LENGTH_LONG
+                              ).show();
+                          });
                           return null;
                       }
                   }
@@ -4489,14 +4559,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V360.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V360.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V361.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V361.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V360
+          name: V361
           path: |
             artifact/*.apk
             artifact/*.aab
