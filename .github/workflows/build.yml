@@ -1,4 +1,4 @@
-name: Build Android APK V368
+name: Build Android APK V369
 
 on:
   workflow_dispatch:
@@ -49,7 +49,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 368; versionName = "36.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 369; versionName = "36.9" }
 
               signingConfigs {
                   create("release") {
@@ -134,7 +134,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V368" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V369" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -318,6 +318,9 @@ jobs:
               static final int MIN_INITIAL_TRANSCRIPT_AGE_MS = 150;
               static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 8000;
               volatile boolean voiceSendActive = false;
+              volatile long lastVadSpeechAtMs = 0L;
+              int vadPositiveMsInBlock = 0;
+              boolean speechTranscriptSourceTop = true;
               final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
               int preRollAudioBytes = 0;
               static final int AUDIO_SAMPLE_RATE = 48000;
@@ -327,7 +330,7 @@ jobs:
               final Object speechAudioWindowLock = new Object();
               ByteArrayOutputStream speechAudioWindow = new ByteArrayOutputStream();
 
-              // V368: az egyetlen zajszűrő motor a DeepFilterNet 3, natív 48 kHz PCM16 mono láncon.
+              // V369: az egyetlen zajszűrő motor a DeepFilterNet 3, natív 48 kHz PCM16 mono láncon.
               final Object deepFilterLock = new Object();
               DeepFilterNet deepFilterNetInstance = null;
               int deepFilterFrameBytes = 0;
@@ -412,6 +415,17 @@ jobs:
                   int retryCount = 0;
                   boolean ttsSpoken = false;
                   int speechSeq = 0;
+              }
+
+              static class SttCandidate {
+                  String language = "";
+                  String text = "";
+                  double averageLogprob = -99.0;
+                  boolean requestOk = false;
+              }
+
+              interface SttCandidateCallback {
+                  void done(int index, SttCandidate candidate);
               }
           
               final ArrayList<TextBlock> textBlocks = new ArrayList<>();
@@ -593,7 +607,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V368");
+                  TextView title = label("Fordito_V369");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1222,18 +1236,6 @@ jobs:
                   updateButtons();
               }
           
-              String speechTranscriptionPrompt() {
-                  String top = code(topLang).toUpperCase(Locale.ROOT);
-                  String bottom = code(bottomLang).toUpperCase(Locale.ROOT);
-                  return "Transcribe only the words that are clearly audible. " +
-                      "The speech language is either " + top + " or " + bottom + ". " +
-                      "Do not translate. Do not paraphrase. Do not repair meaning. " +
-                      "Do not complete unfinished sentences or add a sentence ending. " +
-                      "Do not infer or invent missing words. Keep fragments and incomplete phrases incomplete. " +
-                      "Preserve names, places, numbers, slang and profanity exactly as heard. " +
-                      "If a word is unclear, omit only that unclear word instead of guessing or creating a full sentence.";
-              }
-
               void clearPreRollAudio() {
                   synchronized(preRollAudioChunks) {
                       preRollAudioChunks.clear();
@@ -1428,10 +1430,11 @@ jobs:
                       .invoke(b, enumConst("com.konovalov.vad.silero.config.SampleRate", "SAMPLE_RATE_16K"));
                   b.getClass().getMethod("setFrameSize", Class.forName("com.konovalov.vad.silero.config.FrameSize"))
                       .invoke(b, enumConst("com.konovalov.vad.silero.config.FrameSize", "FRAME_SIZE_512"));
-                  // A Silero gyártói ajánlás szerinti NORMAL módban csak blokkhatárt jelez.
+                  // A Silero csak képkockánként jelzi, van-e beszéd. A tényleges 350/600/900 ms
+                  // blokkzárási időt kizárólag az alkalmazás kezeli, ezért nincs dupla csendkapu.
                   b.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.silero.config.Mode"))
                       .invoke(b, enumConst("com.konovalov.vad.silero.config.Mode", "NORMAL"));
-                  b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, sileroSilenceDurationMs());
+                  b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, 50);
                   b.getClass().getMethod("setSpeechDurationMs", int.class).invoke(b, 50);
                   return b.getClass().getMethod("build").invoke(b);
               }
@@ -1527,7 +1530,7 @@ jobs:
               void flushSpeechAudioWindow(boolean force) {
                   byte[] ready = null;
                   synchronized(speechAudioWindowLock) {
-                      int minBytes = AUDIO_SAMPLE_RATE * 2 * (force ? 400 : 1200) / 1000;
+                      int minBytes = AUDIO_SAMPLE_RATE * 2 * (force ? 900 : 1200) / 1000;
                       if(speechAudioWindow.size() >= minBytes) {
                           ready = speechAudioWindow.toByteArray();
                           speechAudioWindow.reset();
@@ -1551,13 +1554,44 @@ jobs:
               void writeIntLE(ByteArrayOutputStream out, int v) { out.write(v & 255); out.write((v >> 8) & 255); out.write((v >> 16) & 255); out.write((v >> 24) & 255); }
               void writeShortLE(ByteArrayOutputStream out, int v) { out.write(v & 255); out.write((v >> 8) & 255); }
           
-              void transcribeAudioWindow(byte[] pcm, boolean finalFlush) {
-                  if(pcm == null || pcm.length == 0 || client == null || !hasKey()) return;
+              boolean sttCandidateUsable(SttCandidate candidate, int audioMs) {
+                  if(candidate == null || !candidate.requestOk) return false;
+                  String text = candidate.text == null ? "" : candidate.text.trim();
+                  if(text.length() == 0 || candidate.averageLogprob < -1.15) return false;
+
+                  int words = text.split("\\s+").length;
+                  int maxWords = Math.max(5, (int)Math.ceil(audioMs / 180.0) + 3);
+                  int maxChars = Math.max(24, (int)Math.ceil(audioMs * 20.0 / 1000.0) + 24);
+                  return words <= maxWords && text.length() <= maxChars;
+              }
+
+              SttCandidate chooseSttCandidate(SttCandidate top, SttCandidate bottom, int audioMs) {
+                  boolean topOk = sttCandidateUsable(top, audioMs);
+                  boolean bottomOk = sttCandidateUsable(bottom, audioMs);
+                  if(!topOk && !bottomOk) return null;
+                  if(topOk && !bottomOk) return top;
+                  if(bottomOk && !topOk) return bottom;
+
+                  double diff = top.averageLogprob - bottom.averageLogprob;
+                  if(Math.abs(diff) < 0.08) {
+                      String last = apiCode(lastSureSpeechSourceLang);
+                      if(last.equalsIgnoreCase(top.language)) return top;
+                      if(last.equalsIgnoreCase(bottom.language)) return bottom;
+                      return topActive ? top : bottom;
+                  }
+                  return diff >= 0.0 ? top : bottom;
+              }
+
+              void requestSttCandidate(byte[] wav, String languageCode, int index, SttCandidateCallback callback) {
+                  SttCandidate failed = new SttCandidate();
+                  failed.language = languageCode == null ? "" : languageCode;
                   try {
-                      byte[] wav = wavFromPcm48k(pcm);
                       MultipartBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
                           .addFormDataPart("model", "gpt-4o-mini-transcribe")
-                          .addFormDataPart("prompt", speechTranscriptionPrompt())
+                          .addFormDataPart("language", failed.language)
+                          .addFormDataPart("response_format", "json")
+                          .addFormDataPart("temperature", "0")
+                          .addFormDataPart("include[]", "logprobs")
                           .addFormDataPart("file", "speech.wav", RequestBody.create(MediaType.parse("audio/wav"), wav))
                           .build();
                       Request req = new Request.Builder().url("https://api.openai.com/v1/audio/transcriptions")
@@ -1565,28 +1599,80 @@ jobs:
                           .post(body).build();
                       client.newCall(req).enqueue(new Callback() {
                           @Override public void onFailure(Call call, java.io.IOException e) {
-                              runOnUiThread(() -> state.setText("STT kapcsolat hiba"));
+                              callback.done(index, failed);
                           }
                           @Override public void onResponse(Call call, Response response) throws java.io.IOException {
                               String raw = response.body() == null ? "" : response.body().string();
-                              if(!response.isSuccessful()) {
-                                  runOnUiThread(() -> Toast.makeText(MainActivity.this, "STT HTTP " + response.code(), Toast.LENGTH_LONG).show());
-                                  return;
+                              SttCandidate candidate = new SttCandidate();
+                              candidate.language = failed.language;
+                              if(response.isSuccessful()) {
+                                  try {
+                                      JSONObject obj = new JSONObject(raw);
+                                      candidate.text = obj.optString("text", "").trim();
+                                      JSONArray probs = obj.optJSONArray("logprobs");
+                                      if(probs != null && probs.length() > 0) {
+                                          double sum = 0.0;
+                                          int count = 0;
+                                          for(int i=0; i<probs.length(); i++) {
+                                              JSONObject token = probs.optJSONObject(i);
+                                              if(token == null || !token.has("logprob")) continue;
+                                              sum += token.optDouble("logprob", -99.0);
+                                              count++;
+                                          }
+                                          if(count > 0) candidate.averageLogprob = sum / count;
+                                      }
+                                      candidate.requestOk = candidate.text.length() > 0 && candidate.averageLogprob > -90.0;
+                                  } catch(Exception ignored) {}
                               }
-                              try {
-                                  JSONObject obj = new JSONObject(raw);
-                                  String tr = obj.optString("text", "").trim();
-                                  if(tr.length() > 0) runOnUiThread(() -> handleTranscriptCompleted(tr, finalFlush));
-                              } catch(Exception e) {
-                                  runOnUiThread(() -> Toast.makeText(MainActivity.this, "STT válasz nem értelmezhető.", Toast.LENGTH_LONG).show());
-                              }
+                              callback.done(index, candidate);
                           }
                       });
+                  } catch(Exception e) {
+                      callback.done(index, failed);
+                  }
+              }
+
+              void transcribeAudioWindow(byte[] pcm, boolean finalFlush) {
+                  if(pcm == null || pcm.length == 0 || client == null || !hasKey()) return;
+                  try {
+                      final byte[] wav = wavFromPcm48k(pcm);
+                      final int audioMs = pcm16Mono48kMs(pcm.length);
+                      final String topCode = apiCode(topLang);
+                      final String bottomCode = apiCode(bottomLang);
+                      if(topCode.length() != 2 || bottomCode.length() != 2 || topCode.equalsIgnoreCase(bottomCode)) {
+                          runOnUiThread(() -> state.setText("Két külön nyelvet válassz"));
+                          return;
+                      }
+
+                      final Object resultLock = new Object();
+                      final SttCandidate[] results = new SttCandidate[2];
+                      SttCandidateCallback callback = (index, candidate) -> {
+                          SttCandidate chosen = null;
+                          boolean complete;
+                          synchronized(resultLock) {
+                              results[index] = candidate;
+                              complete = results[0] != null && results[1] != null;
+                              if(complete) chosen = chooseSttCandidate(results[0], results[1], audioMs);
+                          }
+                          if(!complete) return;
+
+                          final SttCandidate accepted = chosen;
+                          if(accepted == null) {
+                              runOnUiThread(() -> state.setText("Bizonytalan vagy zajos hang – kihagyva"));
+                              return;
+                          }
+                          final boolean sourceIsTop = accepted.language.equalsIgnoreCase(topCode);
+                          final String text = accepted.text;
+                          runOnUiThread(() -> handleTranscriptCompleted(text, finalFlush, sourceIsTop));
+                      };
+
+                      requestSttCandidate(wav, topCode, 0, callback);
+                      requestSttCandidate(wav, bottomCode, 1, callback);
                   } catch(Exception e) {
                       runOnUiThread(() -> Toast.makeText(this, "STT előkészítési hiba.", Toast.LENGTH_LONG).show());
                   }
               }
-          
+
               void sendAudioChunk(byte[] chunk) throws Exception {
                   appendSpeechAudioChunk(chunk);
               }
@@ -1661,6 +1747,8 @@ jobs:
                   streaming = false;
                   cancelMicLifeSignal();
                   voiceSendActive = false;
+                  lastVadSpeechAtMs = 0L;
+                  vadPositiveMsInBlock = 0;
                   clearPreRollAudio();
                   clearSpeechAudioWindow();
                   speechVadUnavailableForSession = false;
@@ -1731,7 +1819,10 @@ jobs:
                                       if(shouldMuteMicForSpeakerTts()) {
                                           if(voiceSendActive) {
                                               voiceSendActive = false;
-                                              flushSpeechAudioWindow(true);
+                                              lastVadSpeechAtMs = 0L;
+                                              if(vadPositiveMsInBlock >= 180) flushSpeechAudioWindow(true);
+                                              else clearSpeechAudioWindow();
+                                              vadPositiveMsInBlock = 0;
                                           }
                                           clearPreRollAudio();
                                           continue;
@@ -1743,19 +1834,28 @@ jobs:
                                           if(!voiceSendActive) {
                                               if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = now;
                                               for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr);
+                                              voiceSendActive = true;
+                                              vadPositiveMsInBlock = 0;
                                           }
-                                          // A DeepFilterNet által egyszer megtisztított hang változtatás nélkül megy tovább.
+                                          // Egyetlen megtisztított hangfolyam: aktív blokk alatt minden képkocka továbbmegy.
                                           sendAudioChunk(Arrays.copyOf(filtered, filteredLen));
-                                          voiceSendActive = true;
+                                          vadPositiveMsInBlock += pcm16Mono48kMs(filteredLen);
+                                          lastVadSpeechAtMs = now;
                                           continue;
                                       }
 
                                       if(voiceSendActive) {
-                                          // A Silero csak blokkhatárt jelez. A lezáró hangdarab is továbbmegy,
-                                          // ezért a halk szóvég és a mondatvégi lecsengés nem vész el.
+                                          // A halk szóvéget és a mondat lecsengését is megtartjuk. Egyetlen hamis
+                                          // Silero-képkocka nem zárhat blokkot; csak a beállított folyamatos csend.
                                           sendAudioChunk(Arrays.copyOf(filtered, filteredLen));
-                                          voiceSendActive = false;
-                                          flushSpeechAudioWindow(true);
+                                          long silentFor = lastVadSpeechAtMs > 0L ? now - lastVadSpeechAtMs : 0L;
+                                          if(silentFor >= sileroSilenceDurationMs()) {
+                                              voiceSendActive = false;
+                                              lastVadSpeechAtMs = 0L;
+                                              if(vadPositiveMsInBlock >= 180) flushSpeechAudioWindow(true);
+                                              else clearSpeechAudioWindow();
+                                              vadPositiveMsInBlock = 0;
+                                          }
                                           continue;
                                       }
 
@@ -1822,6 +1922,8 @@ jobs:
                   connected = false;
                   ttsMuteUntilMs = 0L;
                   voiceSendActive = false;
+                  lastVadSpeechAtMs = 0L;
+                  vadPositiveMsInBlock = 0;
                   clearPreRollAudio();
                   clearSpeechAudioWindow();
                   closeExternalVad();
@@ -1829,6 +1931,7 @@ jobs:
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception ignored) {}
                   rec = null;
                   speechTranscriptBuffer = "";
+                  speechTranscriptSourceTop = topActive;
                   firstSpeechHeardAt = 0L;
                   speechBufferStartedAt = 0L;
                   speechIdleFlushToken++;
@@ -2031,7 +2134,7 @@ jobs:
                   }
               }
 
-              void handleTranscriptCompleted(String transcript, boolean finalFlush) {
+              void handleTranscriptCompleted(String transcript, boolean finalFlush, boolean sourceIsTop) {
                   if(transcript == null || transcript.trim().length() == 0) {
                       speechIdleFlushToken++;
                       return;
@@ -2048,8 +2151,7 @@ jobs:
                       // ezért ugyanaz az STT-válasz nem tud két-három blokkot egyszerre kiengedni.
                       String b = normalizeAndDeduplicateSpeechBlock(transcript);
                       if(b.length() > 0) {
-                          boolean sourceGuessTop = sourceIsTopBySelectedPair(b, topActive);
-                          int id = addSourceOnlyBlock(sourceGuessTop, b);
+                          int id = addSourceOnlyBlock(sourceIsTop, b);
                           if(id >= 0) {
                               firstSpeechBlockReleased = true;
                               speechTranslateQueue.add(id);
@@ -2066,6 +2168,7 @@ jobs:
 
                   // A beszéd végi, 8 másodpercnél rövidebb maradék továbbra is a meglévő
                   // biztonságos lezárási úton kerül kiadásra.
+                  speechTranscriptSourceTop = sourceIsTop;
                   speechTranscriptBuffer = transcript;
                   int released = flushReadyTranscriptBlocks(true);
                   if(released > 0) lastSpeechBlockReleasedAt = System.currentTimeMillis();
@@ -2078,6 +2181,7 @@ jobs:
                   // puffer/időzítője ne zárhasson rá az új mód szabályaira. A már kiadott blokkok
                   // nem tudja újra behozni ugyanazt a mondatot.
                   speechTranscriptBuffer = "";
+                  speechTranscriptSourceTop = topActive;
                   firstSpeechHeardAt = 0L;
                   speechBufferStartedAt = 0L;
                   speechIdleFlushToken++;
@@ -2110,8 +2214,7 @@ jobs:
                       // AI osztályozó + eredeti nyelvű helyreállító + fordító lépés dönti el.
                       // A helyi oldalbecslés csak ideiglenes kijelzési hely, az AI válasz után
                       // a blokk a tényleges SOURCE_LANG szerinti oldalra kerül.
-                      boolean sourceGuessTop = sourceIsTopBySelectedPair(b, topActive);
-                      int id = addSourceOnlyBlock(sourceGuessTop, b);
+                      int id = addSourceOnlyBlock(speechTranscriptSourceTop, b);
                       if(id < 0) continue;
                       firstSpeechBlockReleased = true;
                       speechTranslateQueue.add(id);
@@ -2159,8 +2262,7 @@ jobs:
                       b = normalizeAndDeduplicateSpeechBlock(b);
                       if(b.length() == 0) return 0;
           
-                      boolean sourceGuessTop = sourceIsTopBySelectedPair(b, topActive);
-                      int id = addSourceOnlyBlock(sourceGuessTop, b);
+                      int id = addSourceOnlyBlock(speechTranscriptSourceTop, b);
                       if(id < 0) return 0;
           
                       firstSpeechBlockReleased = true;
@@ -2867,7 +2969,7 @@ jobs:
                       // V341: strict Structured Outputs. A forrásnyelv csak a kiválasztott két kód egyike lehet.
                       JSONObject properties = new JSONObject();
                       properties.put("source_lang", new JSONObject().put("type", "string")
-                          .put("enum", new JSONArray().put(topCode).put(bottomCode)));
+                          .put("enum", new JSONArray().put(sourceIsTop ? topCode : bottomCode)));
                       properties.put("translation", new JSONObject().put("type", "string"));
                       JSONObject schema = new JSONObject()
                           .put("type", "object").put("properties", properties)
@@ -4288,8 +4390,8 @@ jobs:
                       nonConversationalLanguageTaskRules() +
                       profilePrompt() +
                       "You receive one live speech fragment as source data. " +
-                      "Choose exactly which of the two selected languages the fragment is in. " +
-                      "Translate its actual meaning naturally into the other selected language, but translate only what is present. " +
+                      "The source language is fixed by SOURCE_LANG_HINT after comparing two audio transcriptions. Do not redetect or change it. " +
+                      "Translate its actual meaning naturally into the fixed TARGET_LANG_HINT, but translate only what is present. " +
                       "Translate questions as questions, requests as requests, greetings as greetings and commands as commands; never answer, acknowledge or execute them. " +
                       "Do not complete unfinished sentences. Do not add a missing beginning or ending. " +
                       "Do not infer unstated context, invent words, repair the speaker's intended story, summarize or paraphrase beyond what is necessary for a natural translation. " +
@@ -4576,14 +4678,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V368.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V368.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V369.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V369.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V368
+          name: V369
           path: |
             artifact/*.apk
             artifact/*.aab
