@@ -1,4 +1,4 @@
-name: Build Android APK V40.8
+name: Build Android APK V40.9
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 408; versionName = "40.8" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 409; versionName = "40.9" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.8" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.9" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -278,7 +278,7 @@ jobs:
               String interpreterAudioMode = "off";
               String lastInterpreterAudioMode = "auto";
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV408";
+              static final String LOG_TAG = "ForditoV409";
               static final int PRE_ROLL_AUDIO_MS = 800;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
@@ -371,7 +371,6 @@ jobs:
               int pendingSpeechBlockId = -1;
               final ArrayDeque<Integer> speechTranslateQueue = new ArrayDeque<>();
               int speechSourceBlockSeq = 0;
-              String lastSureSpeechSourceLang = "";
               String lastSureSpeechOriginal = "";
               String lastSureSpeechTranslation = "";
               final HashSet<String> recentSpeechBlockHashes = new HashSet<>();
@@ -636,7 +635,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.8");
+                  TextView title = label("Fordito_V40.9");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -2673,7 +2672,6 @@ jobs:
                   responseInProgress = false;
                   recentSpeechBlockHashes.clear();
                   recentSpeechBlockHashOrder.clear();
-                  lastSureSpeechSourceLang = "";
                   lastSureSpeechOriginal = "";
                   lastSureSpeechTranslation = "";
                   stopBackgroundForegroundService();
@@ -3667,19 +3665,17 @@ jobs:
               }
           
               String speechPreviousContextHint() {
-                  // V40.3: az előző, már biztosan feldolgozott blokk csak jelentés- és
-                  // szakszófeloldási támpont. Nem másolható át az új blokkba, és nem használható
-                  // a hiányzó mondatrészek kitalálására.
+                  // V40.9: az előző blokk csak semleges terminológiai támpont.
+                  // A korábbi SOURCE_LANG címke hibásan a következő, akár ellenkező nyelvű
+                  // mondat felé billentette a nyelvdöntést, ezért irányjelzés nélkül adjuk át.
                   String original = lastSureSpeechOriginal == null ? "" : lastSureSpeechOriginal.trim();
                   String translated = lastSureSpeechTranslation == null ? "" : lastSureSpeechTranslation.trim();
-                  String lang = lastSureSpeechSourceLang == null ? "" : lastSureSpeechSourceLang.trim().toUpperCase(Locale.ROOT);
-                  if(original.length() == 0 || lang.length() == 0) return "";
+                  if(original.length() == 0) return "";
                   if(original.length() > 320) original = original.substring(original.length() - 320);
                   if(translated.length() > 320) translated = translated.substring(translated.length() - 320);
-                  return "PREVIOUS_CONFIRMED_CONTEXT (reference only; never copy into the new source or translation):\n" +
-                      "SOURCE_LANG: " + lang + "\n" +
-                      "SOURCE_TEXT: " + original + "\n" +
-                      (translated.length() == 0 ? "" : "TRANSLATION: " + translated + "\n");
+                  return "PREVIOUS_CONFIRMED_CONTEXT (terminology reference only; it does not indicate the language direction of the new block and must never be copied):\n" +
+                      "PREVIOUS_ORIGINAL_TEXT: " + original + "\n" +
+                      (translated.length() == 0 ? "" : "PREVIOUS_TRANSLATED_TEXT: " + translated + "\n");
               }
 
               void processNextSpeechTranslation() {
@@ -3706,7 +3702,7 @@ jobs:
                       root.put("model", model);
                       root.put("temperature", 0.1);
                       JSONArray messages = new JSONArray();
-                      messages.put(new JSONObject().put("role", "system").put("content", speechBlockInstructions(sourceIsTop)));
+                      messages.put(new JSONObject().put("role", "system").put("content", speechBlockInstructions()));
                       String topCode = code(topLang).toUpperCase(Locale.ROOT);
                       String bottomCode = code(bottomLang).toUpperCase(Locale.ROOT);
                       messages.put(new JSONObject().put("role", "user").put("content",
@@ -3868,7 +3864,6 @@ jobs:
                       }
                       b.translatedOk = true;
                       b.retryCount = 0;
-                      lastSureSpeechSourceLang = sourceIsTop ? code(topLang) : code(bottomLang);
                       lastSureSpeechOriginal = original;
                       lastSureSpeechTranslation = translation;
                       setDetectedSourceSide(sourceIsTop);
@@ -5289,11 +5284,18 @@ jobs:
                       "Do not output labels, markdown, quotes or explanations outside the JSON object. Never add information.";
               }
 
-              String speechBlockInstructions(boolean sourceIsTop) {
-                  // V40.3: az élő mikrofonos kör ugyanabban az egy AI-kérésben finoman
-                  // rendezi a forrást és abból készíti a fordítást. Ez nem a RENDEZ gomb
-                  // erősebb újrafogalmazása: csak egyértelmű STT- és nyelvtani hibát javít.
-                  return pairRules(sourceIsTop) + "\n" +
+              String speechBlockInstructions() {
+                  // V40.9: élő tolmácsolásnál a b.sourceTop csak ideiglenes kijelzési hely.
+                  // Nem lehet nyelvi irányjelzés, mert nyelvváltáskor a korábbi oldal marad benne.
+                  // Ez okozta, hogy HU beszéd FR forrásként, majd HU->HU eredménnyel átmehetett.
+                  String topCode = code(topLang);
+                  String bottomCode = code(bottomLang);
+                  return "Selected languages are fixed. Work only between these two languages.\n" +
+                      "TOP_LANG: " + topCode + "\n" +
+                      "BOTTOM_LANG: " + bottomCode + "\n" +
+                      "There is no source-language or target-language hint for this live block. Determine source_lang only from RAW_SPEECH_TEXT. " +
+                      "The currently active screen side, the previous block direction, a headset connection, the audio route and PREVIOUS_CONFIRMED_CONTEXT are not evidence of the new block's language. " +
+                      "Choose source_lang as exactly TOP_LANG or BOTTOM_LANG, and translation must be in the other selected language.\n" +
                       nonConversationalLanguageTaskRules() +
                       profilePrompt() +
                       translationModePrompt() +
@@ -5612,14 +5614,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.8.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.8.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.9.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.9.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.8
+          name: V40.9
           path: |
             artifact/*.apk
             artifact/*.aab
