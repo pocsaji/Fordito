@@ -1,4 +1,4 @@
-name: Build Android APK V40.4
+name: Build Android APK V40.5
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 404; versionName = "40.4" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 405; versionName = "40.5" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.4" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.5" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -277,7 +277,7 @@ jobs:
               String interpreterAudioMode = "off";
               String lastInterpreterAudioMode = "auto";
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV404";
+              static final String LOG_TAG = "ForditoV405";
               static final int PRE_ROLL_AUDIO_MS = 800;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
@@ -635,7 +635,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.4");
+                  TextView title = label("Fordito_V40.5");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1983,6 +1983,78 @@ jobs:
                   if("communication".equals(audioSourceMode)) return MediaRecorder.AudioSource.VOICE_COMMUNICATION;
                   if("unprocessed".equals(audioSourceMode)) return MediaRecorder.AudioSource.UNPROCESSED;
                   return MediaRecorder.AudioSource.MIC;
+              }
+
+              String audioSourceLabel(int source) {
+                  if(source == MediaRecorder.AudioSource.VOICE_RECOGNITION) return "VOICE_RECOGNITION";
+                  if(source == MediaRecorder.AudioSource.VOICE_COMMUNICATION) return "VOICE_COMMUNICATION";
+                  if(source == MediaRecorder.AudioSource.UNPROCESSED) return "UNPROCESSED";
+                  if(source == MediaRecorder.AudioSource.MIC) return "MIC";
+                  return "source=" + source;
+              }
+
+              AudioRecord createInitializedAudioRecord(int source, int sampleRate, int requestedBufferBytes) {
+                  AudioRecord candidate = null;
+                  try {
+                      int min = AudioRecord.getMinBufferSize(
+                          sampleRate,
+                          AudioFormat.CHANNEL_IN_MONO,
+                          AudioFormat.ENCODING_PCM_16BIT
+                      );
+                      int safeMin = min > 0 ? min : SILERO_FRAME_BYTES * 8;
+                      int bufferBytes = Math.max(requestedBufferBytes, safeMin);
+                      // Legalább több teljes 32 ms-os keret férjen a rendszerpufferbe.
+                      bufferBytes = Math.max(bufferBytes, SILERO_FRAME_BYTES * 8);
+
+                      AudioFormat format = new AudioFormat.Builder()
+                          .setSampleRate(sampleRate)
+                          .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                          .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                          .build();
+
+                      candidate = new AudioRecord.Builder()
+                          .setAudioSource(source)
+                          .setAudioFormat(format)
+                          .setBufferSizeInBytes(bufferBytes)
+                          .build();
+
+                      if(candidate.getState() == AudioRecord.STATE_INITIALIZED) {
+                          android.util.Log.i(LOG_TAG, "AudioRecord initialized with " + audioSourceLabel(source) + ", buffer=" + bufferBytes);
+                          return candidate;
+                      }
+                      android.util.Log.w(LOG_TAG, "AudioRecord remained uninitialized with " + audioSourceLabel(source));
+                  } catch(Exception e) {
+                      android.util.Log.w(LOG_TAG, "AudioRecord creation failed with " + audioSourceLabel(source), e);
+                  }
+                  if(candidate != null) {
+                      try { candidate.release(); }
+                      catch(Exception e) { android.util.Log.w(LOG_TAG, "Failed AudioRecord candidate release", e); }
+                  }
+                  return null;
+              }
+
+              AudioRecord makeBestAudioRecord(int sampleRate, int requestedBufferBytes) {
+                  // A választott forrás az első. Ha azt a készülék/útvonal nem támogatja,
+                  // dokumentált Android hangforrásokra esünk vissza, duplikáció nélkül.
+                  LinkedHashSet<Integer> candidates = new LinkedHashSet<>();
+                  candidates.add(selectedAudioSource());
+                  if(interpreterMode) {
+                      candidates.add(MediaRecorder.AudioSource.VOICE_COMMUNICATION);
+                      candidates.add(MediaRecorder.AudioSource.VOICE_RECOGNITION);
+                      candidates.add(MediaRecorder.AudioSource.MIC);
+                  } else {
+                      candidates.add(MediaRecorder.AudioSource.VOICE_RECOGNITION);
+                      candidates.add(MediaRecorder.AudioSource.MIC);
+                      candidates.add(MediaRecorder.AudioSource.VOICE_COMMUNICATION);
+                  }
+
+                  for(Integer source : candidates) {
+                      if(source == null) continue;
+                      AudioRecord candidate = createInitializedAudioRecord(source, sampleRate, requestedBufferBytes);
+                      if(candidate != null) return candidate;
+                  }
+                  android.util.Log.e(LOG_TAG, "No supported AudioRecord source could be initialized");
+                  return null;
               }
 
               boolean isHeadsetDeviceType(int type) {
@@ -5320,14 +5392,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.4.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.4.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.5.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.5.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.4
+          name: V40.5
           path: |
             artifact/*.apk
             artifact/*.aab
