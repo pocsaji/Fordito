@@ -1,4 +1,4 @@
-name: Build Android APK V40.6
+name: Build Android APK V40.7
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 406; versionName = "40.6" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 407; versionName = "40.7" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.6" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.7" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -216,7 +216,7 @@ jobs:
           
           public class MainActivity extends Activity {
               static final int CLIPBOARD_SPEECH_REQUEST = 7301;
-              TextView state;
+              TextView state, inputRouteState;
               EditText topBox, bottomBox;
               SpeechRecognizer clipboardSpeechRecognizer;
               Intent clipboardSpeechIntent;
@@ -247,8 +247,11 @@ jobs:
               int queuedTtsUtterances = 0;
               final LinkedHashMap<String,TtsJob> ttsJobs = new LinkedHashMap<>();
               AudioManager audioManager;
-              // V40.6: headsetnél normál felismerési hanglánc; hangszórónál egyszerű fél-duplex mikrofonkapu.
-              String activeInterpreterRoute = "off"; // off, headset, speaker_half_duplex
+              AudioDeviceInfo preferredInterpreterInputDevice;
+              boolean interpreterCommunicationFallbackActive = false;
+              int rejectedInterpreterInputDeviceId = -1;
+              // V40.7: elsődlegesen MODE_NORMAL + közvetlen AudioRecord bemenet; kommunikációs út csak tartalék.
+              String activeInterpreterRoute = "off"; // off, headset_direct, headset_communication_fallback, speaker_half_duplex
               String activeCommunicationDeviceLabel = "";
               AudioDeviceCallback interpreterAudioDeviceCallback;
               final Handler interpreterRouteHandler = new Handler(Looper.getMainLooper());
@@ -267,7 +270,7 @@ jobs:
               String interpreterAudioMode = "off";
               String lastInterpreterAudioMode = "auto";
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV406";
+              static final String LOG_TAG = "ForditoV407";
               static final int PRE_ROLL_AUDIO_MS = 800;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
@@ -278,7 +281,7 @@ jobs:
               static final int VAD_SPEECH_START_MS = 50;
               static final int VAD_SPEECH_END_SILENCE_MS = 500;
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
-              // V40.6: tolmács módban sem kerül külön Android hanghatás az AudioRecordra.
+              // V40.7: tolmács módban sem kerül külön Android hanghatás az AudioRecordra.
               // A headset saját hardveres feldolgozását nem szűrjük újra; hangszórónál TTS alatt kapuzzuk a mikrofont.
               static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 8000;
               volatile boolean voiceSendActive = false;
@@ -583,11 +586,11 @@ jobs:
                       sp.edit().putInt("stableDefaultsVersion", 404).apply();
                       save();
                   }
-                  if(last < 406) {
-                      // V40.6: a korábbi tolmács-mód által kikényszerített kommunikációs előfeldolgozás
-                      // nem maradhat meg örökölt beállításként. Egyszer visszaállunk a normál bemenetre.
+                  if(last < 407) {
+                      // V40.7: a tolmács alapútvonala MODE_NORMAL + VOICE_RECOGNITION.
+                      // A kommunikációs mód csak akkor maradhat, ha a közvetlen headsetbemenetet az Android elutasítja.
                       audioSourceMode = "recognition";
-                      sp.edit().putInt("stableDefaultsVersion", 406).apply();
+                      sp.edit().putInt("stableDefaultsVersion", 407).apply();
                       save();
                   }
               }
@@ -625,11 +628,17 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.6");
+                  TextView title = label("Fordito_V40.7");
+                  inputRouteState = label("BEMENET: —");
+                  inputRouteState.setGravity(Gravity.CENTER);
+                  inputRouteState.setSingleLine(true);
+                  inputRouteState.setTextSize(9);
+                  inputRouteState.setEllipsize(TextUtils.TruncateAt.END);
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
-                  bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
-                  bar.addView(state, new LinearLayout.LayoutParams(0,42,1));
+                  bar.addView(title, new LinearLayout.LayoutParams(0,42,0.9f));
+                  bar.addView(inputRouteState, new LinearLayout.LayoutParams(0,42,1.35f));
+                  bar.addView(state, new LinearLayout.LayoutParams(0,42,0.9f));
                   root.addView(bar);
           
                   LinearLayout langRow = row();
@@ -1129,8 +1138,13 @@ jobs:
               void applyTtsAudioAttributes() {
                   if(tts == null) return;
                   try {
+                      // Normál és közvetlen headset útvonalon a TTS médiahang marad.
+                      // USAGE_VOICE_COMMUNICATION kizárólag a tényleges kommunikációs tartalék útvonalhoz kell.
+                      int usage = interpreterCommunicationFallbackActive
+                          ? AudioAttributes.USAGE_VOICE_COMMUNICATION
+                          : AudioAttributes.USAGE_MEDIA;
                       AudioAttributes attributes = new AudioAttributes.Builder()
-                          .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                          .setUsage(usage)
                           .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                           .build();
                       int result = tts.setAudioAttributes(attributes);
@@ -1328,6 +1342,7 @@ jobs:
                   if(withAudio) {
                       if(interpreterMode) configureInterpreterAudioRoute(false);
                       else restoreNormalAudioRoute();
+                      showPlannedInputRoute();
                       // V355: minden mikrofonindítás pontosan egyszer teljesen újranyitja
                       // az AudioRecordot, a VAD-ot és a kapcsolódó puffereket.
                       resetAudioModeState();
@@ -1796,7 +1811,7 @@ jobs:
               }
           
               int selectedAudioSource() {
-                  // V40.6: tolmács módban is ugyanazt a bevált bemenetet használjuk, mint normál módban.
+                  // V40.7: tolmács módban is ugyanazt a bevált AudioRecord forrást használjuk, mint normál módban.
                   // Headsetnél nincs második szoftveres előszűrés; alapérték: VOICE_RECOGNITION.
                   if("recognition".equals(audioSourceMode)) return MediaRecorder.AudioSource.VOICE_RECOGNITION;
                   if("communication".equals(audioSourceMode)) return MediaRecorder.AudioSource.VOICE_COMMUNICATION;
@@ -1852,9 +1867,7 @@ jobs:
                   return null;
               }
 
-              AudioRecord makeBestAudioRecord(int sampleRate, int requestedBufferBytes) {
-                  // A normál és a tolmács mód ugyanazt a bemeneti láncot használja.
-                  // VOICE_COMMUNICATION csak akkor kerül elő, ha azt a felhasználó külön kiválasztotta.
+              AudioRecord tryAudioRecordCandidates(int sampleRate, int requestedBufferBytes, AudioDeviceInfo preferredDevice) {
                   LinkedHashSet<Integer> candidates = new LinkedHashSet<>();
                   candidates.add(selectedAudioSource());
                   candidates.add(MediaRecorder.AudioSource.VOICE_RECOGNITION);
@@ -1863,13 +1876,51 @@ jobs:
                   for(Integer source : candidates) {
                       if(source == null) continue;
                       AudioRecord candidate = createInitializedAudioRecord(source, sampleRate, requestedBufferBytes);
-                      if(candidate != null) return candidate;
+                      if(candidate == null) continue;
+                      if(preferredDevice != null) {
+                          boolean accepted = false;
+                          try {
+                              accepted = candidate.setPreferredDevice(preferredDevice);
+                              android.util.Log.i(LOG_TAG, "Preferred input " + audioDeviceLabel(preferredDevice) + " accepted=" + accepted);
+                          } catch(Exception e) {
+                              android.util.Log.w(LOG_TAG, "Preferred input selection failed", e);
+                          }
+                          if(!accepted) {
+                              try { candidate.release(); } catch(Exception ignored) {}
+                              continue;
+                          }
+                      }
+                      return candidate;
                   }
+                  return null;
+              }
+
+              AudioRecord makeBestAudioRecord(int sampleRate, int requestedBufferBytes) {
+                  // Elsődleges tolmács út: MODE_NORMAL + VOICE_RECOGNITION + közvetlen bemeneti eszköz.
+                  if(interpreterMode && "headset_direct".equals(activeInterpreterRoute) && preferredInterpreterInputDevice != null) {
+                      AudioRecord direct = tryAudioRecordCandidates(sampleRate, requestedBufferBytes, preferredInterpreterInputDevice);
+                      if(direct != null) return direct;
+
+                      rejectedInterpreterInputDeviceId = preferredInterpreterInputDevice.getId();
+                      android.util.Log.w(LOG_TAG, "Direct headset input was rejected; trying communication fallback, deviceId=" + rejectedInterpreterInputDeviceId);
+                      if(activateInterpreterCommunicationFallback()) {
+                          AudioRecord fallback = tryAudioRecordCandidates(sampleRate, requestedBufferBytes, null);
+                          if(fallback != null) return fallback;
+                      } else {
+                          activeInterpreterRoute = "speaker_half_duplex";
+                          activeCommunicationDeviceLabel = "telefon mikrofon";
+                          interpreterCommunicationFallbackActive = false;
+                          applyTtsAudioAttributes();
+                      }
+                  }
+
+                  AudioRecord regular = tryAudioRecordCandidates(sampleRate, requestedBufferBytes, null);
+                  if(regular != null) return regular;
                   android.util.Log.e(LOG_TAG, "No supported AudioRecord source could be initialized");
                   return null;
               }
 
-              boolean isHeadsetDeviceType(int type) {
+              boolean isHeadsetOutputDeviceType(int type) {
                   return type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
                       type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
                       type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
@@ -1880,11 +1931,127 @@ jobs:
                       (Build.VERSION.SDK_INT >= 31 && (type == AudioDeviceInfo.TYPE_BLE_HEADSET || type == AudioDeviceInfo.TYPE_BLE_SPEAKER));
               }
 
+              boolean isHeadsetInputDeviceType(int type) {
+                  return type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                      type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                      type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+                      type == AudioDeviceInfo.TYPE_USB_DEVICE ||
+                      type == AudioDeviceInfo.TYPE_HEARING_AID ||
+                      (Build.VERSION.SDK_INT >= 31 && type == AudioDeviceInfo.TYPE_BLE_HEADSET);
+              }
+
               String audioDeviceLabel(AudioDeviceInfo d) {
                   if(d == null) return "rendszer alapértelmezett";
                   CharSequence name = d.getProductName();
                   String n = name == null ? "" : name.toString().trim();
                   return n.length() > 0 ? n : ("audioeszköz " + d.getType());
+              }
+
+              String audioDeviceTypeShortLabel(int type) {
+                  if(type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) return "BT-SCO";
+                  if(type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) return "BT-A2DP";
+                  if(type == AudioDeviceInfo.TYPE_WIRED_HEADSET) return "vezetékes";
+                  if(type == AudioDeviceInfo.TYPE_USB_HEADSET || type == AudioDeviceInfo.TYPE_USB_DEVICE) return "USB";
+                  if(type == AudioDeviceInfo.TYPE_HEARING_AID) return "hallókészülék";
+                  if(type == AudioDeviceInfo.TYPE_BUILTIN_MIC) return "telefon mikrofon";
+                  if(Build.VERSION.SDK_INT >= 31 && type == AudioDeviceInfo.TYPE_BLE_HEADSET) return "BLE headset";
+                  if(Build.VERSION.SDK_INT >= 31 && type == AudioDeviceInfo.TYPE_BLE_SPEAKER) return "BLE hangszóró";
+                  return "típus " + type;
+              }
+
+              String compactAudioDeviceLabel(AudioDeviceInfo d) {
+                  if(d == null) return "ismeretlen";
+                  String name = audioDeviceLabel(d);
+                  String type = audioDeviceTypeShortLabel(d.getType());
+                  if(name.equalsIgnoreCase(type)) return name;
+                  return name + " / " + type;
+              }
+
+              void setInputRouteHeader(String text) {
+                  if(inputRouteState == null) return;
+                  Runnable update = () -> inputRouteState.setText(text == null || text.trim().isEmpty() ? "BEMENET: —" : text);
+                  if(Looper.myLooper() == Looper.getMainLooper()) update.run();
+                  else runOnUiThread(update);
+              }
+
+              void showPlannedInputRoute() {
+                  if(preferredInterpreterInputDevice != null && "headset_direct".equals(activeInterpreterRoute)) {
+                      setInputRouteHeader("BEMENET: " + compactAudioDeviceLabel(preferredInterpreterInputDevice) + "…");
+                  } else if(interpreterCommunicationFallbackActive) {
+                      setInputRouteHeader("BEMENET: kommunikációs tartalék…");
+                  } else {
+                      setInputRouteHeader("BEMENET: rendszer…");
+                  }
+              }
+
+              void refreshActualInputRoute(AudioRecord recorder) {
+                  if(recorder == null) {
+                      setInputRouteHeader("BEMENET: —");
+                      return;
+                  }
+                  try {
+                      AudioDeviceInfo routed = recorder.getRoutedDevice();
+                      if(routed != null) setInputRouteHeader("BEMENET: " + compactAudioDeviceLabel(routed));
+                      else setInputRouteHeader("BEMENET: útvonal ellenőrzés…");
+                  } catch(Exception e) {
+                      android.util.Log.w(LOG_TAG, "Actual input route query failed", e);
+                      setInputRouteHeader("BEMENET: ismeretlen");
+                  }
+              }
+
+              void registerActualInputRouteUpdates(AudioRecord recorder) {
+                  if(recorder == null || Build.VERSION.SDK_INT < 24) return;
+                  try {
+                      recorder.addOnRoutingChangedListener(new AudioRouting.OnRoutingChangedListener() {
+                          @Override public void onRoutingChanged(AudioRouting router) {
+                              if(rec == recorder) refreshActualInputRoute(recorder);
+                          }
+                      }, new Handler(Looper.getMainLooper()));
+                  } catch(Exception e) {
+                      android.util.Log.w(LOG_TAG, "AudioRecord route listener registration failed", e);
+                  }
+              }
+
+              List<AudioDeviceInfo> availableInputDevicesCompat() {
+                  ArrayList<AudioDeviceInfo> out = new ArrayList<>();
+                  if(audioManager == null || Build.VERSION.SDK_INT < 23) return out;
+                  try { out.addAll(Arrays.asList(audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS))); }
+                  catch(Exception e) { android.util.Log.w(LOG_TAG, "Input device query failed", e); }
+                  return out;
+              }
+
+              int headsetInputPriority(AudioDeviceInfo d) {
+                  if(d == null || !d.isSource()) return -1;
+                  int type = d.getType();
+                  if(Build.VERSION.SDK_INT >= 31 && type == AudioDeviceInfo.TYPE_BLE_HEADSET) return 100;
+                  if(type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) return 90;
+                  if(type == AudioDeviceInfo.TYPE_WIRED_HEADSET) return 80;
+                  if(type == AudioDeviceInfo.TYPE_USB_HEADSET) return 70;
+                  if(type == AudioDeviceInfo.TYPE_USB_DEVICE) return 60;
+                  if(type == AudioDeviceInfo.TYPE_HEARING_AID) return 50;
+                  return -1;
+              }
+
+              boolean isInputDeviceIdPresent(int deviceId) {
+                  if(deviceId < 0) return false;
+                  for(AudioDeviceInfo d : availableInputDevicesCompat()) {
+                      if(d != null && d.getId() == deviceId) return true;
+                  }
+                  return false;
+              }
+
+              AudioDeviceInfo findPreferredInterpreterInputDevice() {
+                  AudioDeviceInfo best = null;
+                  int bestPriority = -1;
+                  for(AudioDeviceInfo d : availableInputDevicesCompat()) {
+                      if(d == null || d.getId() == rejectedInterpreterInputDeviceId) continue;
+                      int priority = headsetInputPriority(d);
+                      if(priority > bestPriority) {
+                          best = d;
+                          bestPriority = priority;
+                      }
+                  }
+                  return best;
               }
 
               List<AudioDeviceInfo> availableCommunicationDevicesCompat() {
@@ -1902,7 +2069,7 @@ jobs:
               AudioDeviceInfo findCommunicationHeadset() {
                   AudioDeviceInfo fallback = null;
                   for(AudioDeviceInfo d : availableCommunicationDevicesCompat()) {
-                      if(d == null || !isHeadsetDeviceType(d.getType())) continue;
+                      if(d == null || !isHeadsetOutputDeviceType(d.getType())) continue;
                       if(d.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
                          (Build.VERSION.SDK_INT >= 31 && d.getType() == AudioDeviceInfo.TYPE_BLE_HEADSET) ||
                          d.getType() == AudioDeviceInfo.TYPE_WIRED_HEADSET || d.getType() == AudioDeviceInfo.TYPE_USB_HEADSET) return d;
@@ -1911,16 +2078,69 @@ jobs:
                   return fallback;
               }
 
-              AudioDeviceInfo findBuiltInSpeaker() {
-                  for(AudioDeviceInfo d : availableCommunicationDevicesCompat()) {
-                      if(d != null && d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) return d;
-                  }
-                  return null;
-              }
-
-              boolean isHeadsetInterpreterRoute() { return "headset".equals(activeInterpreterRoute); }
+              boolean isHeadsetInterpreterRoute() { return activeInterpreterRoute != null && activeInterpreterRoute.startsWith("headset"); }
               boolean isSpeakerInterpreterRoute() { return activeInterpreterRoute != null && activeInterpreterRoute.startsWith("speaker"); }
               boolean isHalfDuplexSpeakerRoute() { return "speaker_half_duplex".equals(activeInterpreterRoute); }
+
+              void clearForcedCommunicationRoute() {
+                  if(audioManager == null) audioManager = (AudioManager)getSystemService(AUDIO_SERVICE);
+                  if(audioManager == null) return;
+                  try {
+                      if(Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice();
+                  } catch(Exception e) {
+                      android.util.Log.w(LOG_TAG, "Communication device clear failed", e);
+                  }
+                  try { audioManager.stopBluetoothSco(); } catch(Exception ignored) {}
+                  try { audioManager.setBluetoothScoOn(false); } catch(Exception ignored) {}
+                  try { audioManager.setSpeakerphoneOn(false); } catch(Exception ignored) {}
+                  try { audioManager.setMode(AudioManager.MODE_NORMAL); }
+                  catch(Exception e) { android.util.Log.w(LOG_TAG, "MODE_NORMAL restore failed", e); }
+              }
+
+              boolean activateInterpreterCommunicationFallback() {
+                  if(!interpreterMode) return false;
+                  if(audioManager == null) audioManager = (AudioManager)getSystemService(AUDIO_SERVICE);
+                  if(audioManager == null) return false;
+                  AudioDeviceInfo headset = findCommunicationHeadset();
+                  if(headset == null) return false;
+
+                  boolean oldReconfiguring = interpreterRouteReconfiguring;
+                  interpreterRouteReconfiguring = true;
+                  boolean accepted = false;
+                  try {
+                      clearForcedCommunicationRoute();
+                      audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+                      if(Build.VERSION.SDK_INT >= 31) {
+                          accepted = audioManager.setCommunicationDevice(headset);
+                      } else {
+                          if(headset.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
+                              try { audioManager.startBluetoothSco(); } catch(Exception e) { android.util.Log.w(LOG_TAG, "Bluetooth SCO start failed", e); }
+                              try { audioManager.setBluetoothScoOn(true); } catch(Exception e) { android.util.Log.w(LOG_TAG, "Bluetooth SCO route failed", e); }
+                          }
+                          try { audioManager.setSpeakerphoneOn(false); } catch(Exception ignored) {}
+                          accepted = true;
+                      }
+
+                      if(accepted) {
+                          preferredInterpreterInputDevice = null;
+                          interpreterCommunicationFallbackActive = true;
+                          activeInterpreterRoute = "headset_communication_fallback";
+                          activeCommunicationDeviceLabel = audioDeviceLabel(headset);
+                          applyTtsAudioAttributes();
+                          refreshInterpreterFloatingButton();
+                          refreshOpenInterpreterMenuButton();
+                          return true;
+                      }
+                  } catch(Exception e) {
+                      android.util.Log.e(LOG_TAG, "Communication fallback activation failed", e);
+                  } finally {
+                      interpreterRouteReconfiguring = oldReconfiguring;
+                  }
+
+                  clearForcedCommunicationRoute();
+                  interpreterCommunicationFallbackActive = false;
+                  return false;
+              }
 
               void configureInterpreterAudioRoute(boolean announce) {
                   if(!interpreterMode) {
@@ -1931,76 +2151,50 @@ jobs:
                   if(audioManager == null) {
                       activeInterpreterRoute = "speaker_half_duplex";
                       activeCommunicationDeviceLabel = "audioút nem érhető el";
+                      preferredInterpreterInputDevice = null;
+                      interpreterCommunicationFallbackActive = false;
                       return;
                   }
+
                   interpreterRouteReconfiguring = true;
                   try {
-                      AudioDeviceInfo headset = findCommunicationHeadset();
-                      boolean useHeadset = headset != null;
-                      boolean routeAccepted = false;
+                      clearForcedCommunicationRoute();
+                      preferredInterpreterInputDevice = findPreferredInterpreterInputDevice();
+                      interpreterCommunicationFallbackActive = false;
 
-                      // A Bluetooth/headset mikrofon és kimenet kiválasztásához a kommunikációs útvonal kell,
-                      // de az AudioRecord forrása továbbra is a normál VOICE_RECOGNITION és nincs külön Android hanghatás.
-                      audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
-                      if(Build.VERSION.SDK_INT >= 31) {
-                          AudioDeviceInfo target = useHeadset ? headset : findBuiltInSpeaker();
-                          if(target != null) routeAccepted = audioManager.setCommunicationDevice(target);
-                          if(useHeadset && !routeAccepted) {
-                              AudioDeviceInfo speakerFallback = findBuiltInSpeaker();
-                              if(speakerFallback != null && audioManager.setCommunicationDevice(speakerFallback)) {
-                                  useHeadset = false;
-                                  target = speakerFallback;
-                                  routeAccepted = true;
-                              }
-                          }
-                          if(!routeAccepted && !useHeadset) {
-                              try { audioManager.setSpeakerphoneOn(true); } catch(Exception ignored) {}
-                          }
-                          activeCommunicationDeviceLabel = audioDeviceLabel(target);
-                      } else {
-                          if(useHeadset && headset.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
-                              try { audioManager.startBluetoothSco(); } catch(Exception e) { android.util.Log.w(LOG_TAG, "Bluetooth SCO start failed", e); }
-                              try { audioManager.setBluetoothScoOn(true); } catch(Exception e) { android.util.Log.w(LOG_TAG, "Bluetooth SCO route failed", e); }
-                          } else {
-                              try { audioManager.setBluetoothScoOn(false); } catch(Exception ignored) {}
-                          }
-                          try { audioManager.setSpeakerphoneOn(!useHeadset); } catch(Exception e) { android.util.Log.w(LOG_TAG, "Legacy speaker route failed", e); }
-                          routeAccepted = true;
-                          activeCommunicationDeviceLabel = useHeadset ? audioDeviceLabel(headset) : "telefon hangszóró";
+                      if(preferredInterpreterInputDevice != null) {
+                          activeInterpreterRoute = "headset_direct";
+                          activeCommunicationDeviceLabel = audioDeviceLabel(preferredInterpreterInputDevice);
+                      } else if(!activateInterpreterCommunicationFallback()) {
+                          activeInterpreterRoute = "speaker_half_duplex";
+                          activeCommunicationDeviceLabel = "telefon mikrofon / hangszóró";
                       }
 
-                      activeInterpreterRoute = useHeadset ? "headset" : "speaker_half_duplex";
-                      if(Build.VERSION.SDK_INT >= 31 && !routeAccepted)
-                          android.util.Log.w(LOG_TAG, "Communication device selection was not accepted");
                       applyTtsAudioAttributes();
+                      showPlannedInputRoute();
                       refreshInterpreterFloatingButton();
                       refreshOpenInterpreterMenuButton();
                       if(announce) Toast.makeText(this, interpreterLabel(), Toast.LENGTH_SHORT).show();
                   } catch(Exception e) {
                       android.util.Log.e(LOG_TAG, "Interpreter audio route configuration failed", e);
+                      clearForcedCommunicationRoute();
+                      preferredInterpreterInputDevice = null;
+                      interpreterCommunicationFallbackActive = false;
                       activeInterpreterRoute = "speaker_half_duplex";
                       activeCommunicationDeviceLabel = "biztonságos váltott mód";
+                      applyTtsAudioAttributes();
                   } finally {
                       interpreterRouteReconfiguring = false;
                   }
               }
 
               void restoreNormalAudioRoute() {
-                  if(audioManager != null) {
-                      try {
-                          if(Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice();
-                          else {
-                              try { audioManager.stopBluetoothSco(); } catch(Exception ignored) {}
-                              try { audioManager.setBluetoothScoOn(false); } catch(Exception ignored) {}
-                              try { audioManager.setSpeakerphoneOn(false); } catch(Exception ignored) {}
-                          }
-                          audioManager.setMode(AudioManager.MODE_NORMAL);
-                      } catch(Exception e) {
-                          android.util.Log.w(LOG_TAG, "Normal audio route restore failed", e);
-                      }
-                  }
+                  clearForcedCommunicationRoute();
+                  preferredInterpreterInputDevice = null;
+                  interpreterCommunicationFallbackActive = false;
                   activeInterpreterRoute = "off";
                   activeCommunicationDeviceLabel = "";
+                  applyTtsAudioAttributes();
               }
 
               void beginHalfDuplexTtsGuard() {
@@ -2050,9 +2244,13 @@ jobs:
                   interpreterRouteHandler.removeCallbacksAndMessages(null);
                   interpreterRouteHandler.postDelayed(() -> {
                       if(!interpreterMode || interpreterRouteReconfiguring || finalizingStop) return;
-                      boolean headsetNow = findCommunicationHeadset() != null;
-                      boolean headsetWas = isHeadsetInterpreterRoute();
-                      if(headsetNow == headsetWas) return;
+                      if(rejectedInterpreterInputDeviceId >= 0 && !isInputDeviceIdPresent(rejectedInterpreterInputDeviceId))
+                          rejectedInterpreterInputDeviceId = -1;
+                      boolean directNow = findPreferredInterpreterInputDevice() != null;
+                      boolean directWas = "headset_direct".equals(activeInterpreterRoute);
+                      boolean anyHeadsetNow = directNow || findCommunicationHeadset() != null;
+                      boolean anyHeadsetWas = isHeadsetInterpreterRoute();
+                      if(directNow == directWas && anyHeadsetNow == anyHeadsetWas) return;
                       boolean wasStreaming = streaming;
                       if(wasStreaming) stop(false);
                       configureInterpreterAudioRoute(false);
@@ -2084,7 +2282,7 @@ jobs:
                   if(rec == null) {
                       connected = false;
                       stopBackgroundForegroundService();
-                      runOnUiThread(() -> { state.setText("mikrofon nem inicializálható"); updateButtons(); });
+                      runOnUiThread(() -> { state.setText("mikrofon nem inicializálható"); setInputRouteHeader("BEMENET: HIBA"); updateButtons(); });
                       return;
                   }
                   try {
@@ -2097,11 +2295,20 @@ jobs:
                           try { rec.release(); } catch(Exception releaseError) { android.util.Log.w(LOG_TAG, "AudioRecord release failed", releaseError); }
                       rec = null;
                       stopBackgroundForegroundService();
-                      runOnUiThread(() -> { state.setText("mikrofon indítási hiba"); updateButtons(); });
+                      runOnUiThread(() -> { state.setText("mikrofon indítási hiba"); setInputRouteHeader("BEMENET: HIBA"); updateButtons(); });
                       return;
                   }
 
                   streaming = true;
+                  final AudioRecord activeRec = rec;
+                  registerActualInputRouteUpdates(activeRec);
+                  refreshActualInputRoute(activeRec);
+                  new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                      if(rec == activeRec && streaming) refreshActualInputRoute(activeRec);
+                  }, 450L);
+                  new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                      if(rec == activeRec && streaming) refreshActualInputRoute(activeRec);
+                  }, 1400L);
                   setSpeechUiLocked(false);
                   runOnUiThread(() -> {
                       String base = vadFallbackActive ? "mikrofon aktív – VAD tartalék mód" : "mikrofon aktív";
@@ -2111,7 +2318,6 @@ jobs:
                       updateButtons();
                   });
 
-                  final AudioRecord activeRec = rec;
                   audioExec.submit(() -> {
                       byte[] buf = new byte[SILERO_FRAME_BYTES];
                       clearPreRollAudio();
@@ -2187,6 +2393,7 @@ jobs:
 
                   AudioRecord stoppingRec = rec;
                   rec = null;
+                  setInputRouteHeader("BEMENET: —");
                   try {
                       if(stoppingRec != null) stoppingRec.stop();
                   } catch(Exception e) {
@@ -4300,11 +4507,13 @@ jobs:
                   if(uiLockedForSpeech || finalizingStop) return;
                   CharSequence[] items = {
                       menuItem("Zajszűrési motor", vadEngineLabel(), false),
-                      menuItem("Fordítás stílusa", modeLabel(), false)
+                      menuItem("Fordítás stílusa", modeLabel(), false),
+                      menuItem("Bluetooth hang reset", "beragadt audioút elengedése és újranyitása", false)
                   };
                   showCenteredMenu("Zajszűrés és tolmácsolás", items, (d,w) -> {
                       if(w==0) chooseVadEngine();
                       if(w==1) chooseMode();
+                      if(w==2) resetBluetoothAudio();
                       updateButtons();
                   });
               }
@@ -4398,7 +4607,8 @@ jobs:
               }
           
               String interpreterRuntimeShortLabel() {
-                  if("headset".equals(activeInterpreterRoute)) return "headset – normál bemenet";
+                  if("headset_direct".equals(activeInterpreterRoute)) return "headset – közvetlen bemenet";
+                  if("headset_communication_fallback".equals(activeInterpreterRoute)) return "headset – kommunikációs tartalék";
                   if("speaker_half_duplex".equals(activeInterpreterRoute)) return "hangszóró – váltott";
                   return "automatikus tolmács";
               }
@@ -4410,7 +4620,7 @@ jobs:
 
               int interpreterSharedColor() {
                   if(!interpreterMode) return Color.rgb(85,85,85);
-                  if("headset".equals(activeInterpreterRoute)) return Color.rgb(15,75,145);
+                  if(isHeadsetInterpreterRoute()) return Color.rgb(15,75,145);
                   if("speaker_half_duplex".equals(activeInterpreterRoute)) return Color.rgb(170,95,15);
                   return Color.rgb(80,105,75);
               }
@@ -4442,6 +4652,7 @@ jobs:
                   interpreterMode = true;
                   interpreterAudioMode = "auto";
                   lastInterpreterAudioMode = "auto";
+                  rejectedInterpreterInputDeviceId = -1;
                   configureInterpreterAudioRoute(false);
                   save();
                   ensureInterpreterFloatingButton();
@@ -4461,6 +4672,7 @@ jobs:
                   if(!interpreterMode || finalizingStop) return;
                   boolean wasStreaming = streaming;
                   if(wasStreaming) stop(false);
+                  rejectedInterpreterInputDeviceId = -1;
                   configureInterpreterAudioRoute(false);
                   restartAfterInterpreterSettingChange(wasStreaming);
                   refreshInterpreterFloatingButton();
@@ -4471,6 +4683,46 @@ jobs:
 
               // Régi hivatkozások kompatibilitása: módváltás helyett automatikus újraellenőrzés.
               void toggleInterpreterAudioMode() { recheckInterpreterAudioRoute(true); }
+
+              void resetBluetoothAudio() {
+                  if(finalizingStop) return;
+                  boolean wasStreaming = streaming;
+                  if(wasStreaming) stop(false);
+                  try { if(tts != null) tts.stop(); } catch(Exception e) { android.util.Log.w(LOG_TAG, "TTS stop during Bluetooth reset failed", e); }
+                  clearSpeakState();
+
+                  boolean oldReconfiguring = interpreterRouteReconfiguring;
+                  interpreterRouteReconfiguring = true;
+                  try {
+                      clearForcedCommunicationRoute();
+                      preferredInterpreterInputDevice = null;
+                      interpreterCommunicationFallbackActive = false;
+                      rejectedInterpreterInputDeviceId = -1;
+                      activeInterpreterRoute = "off";
+                      activeCommunicationDeviceLabel = "";
+                      applyTtsAudioAttributes();
+                  } finally {
+                      interpreterRouteReconfiguring = oldReconfiguring;
+                  }
+
+                  state.setText("Bluetooth hang reset");
+                  setInputRouteHeader("BEMENET: reset…");
+                  refreshInterpreterFloatingButton();
+                  refreshOpenInterpreterMenuButton();
+                  updateButtons();
+                  Toast.makeText(this, "Bluetooth audioút elengedve, újranyitás folyamatban.", Toast.LENGTH_SHORT).show();
+
+                  new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                      if(interpreterMode) configureInterpreterAudioRoute(false);
+                      else restoreNormalAudioRoute();
+                      if(wasStreaming) start(true);
+                      else {
+                          state.setText("készenlét");
+                          setInputRouteHeader("BEMENET: —");
+                          updateButtons();
+                      }
+                  }, 700L);
+              }
 
               void toggleDisplayModeQuick() {
                   mirrorBottomMode = !mirrorBottomMode;
@@ -4669,7 +4921,8 @@ jobs:
           
               String interpreterLabel() {
                   if(!interpreterMode) return "kikapcsolva – csak szöveges fordítás";
-                  if("headset".equals(activeInterpreterRoute)) return "Automatikus tolmács – headset, normál felismerés, folyamatos mikrofon";
+                  if("headset_direct".equals(activeInterpreterRoute)) return "Automatikus tolmács – headset, közvetlen normál bemenet";
+                  if("headset_communication_fallback".equals(activeInterpreterRoute)) return "Automatikus tolmács – headset, kommunikációs tartalék út";
                   if("speaker_half_duplex".equals(activeInterpreterRoute)) return "Automatikus tolmács – hangszóró, TTS alatt mikrofonkapu";
                   return "Automatikus tolmács – audioút előkészítés";
               }
@@ -4677,7 +4930,7 @@ jobs:
               void chooseInterpreterMode() {
                   String[][] data = {
                       {"Kikapcsolva", "off", "csak szöveges fordítás, nincs felolvasás"},
-                      {"Automatikus tolmács", "auto", "headsetnél normál, szűretlen bemenet; hangszórónál TTS alatt mikrofonkapu"}
+                      {"Automatikus tolmács", "auto", "headsetnél közvetlen MODE_NORMAL bemenet; csak hiba esetén kommunikációs tartalék; hangszórónál TTS alatt mikrofonkapu"}
                   };
                   CharSequence[] labels = new CharSequence[data.length];
                   for(int i=0;i<data.length;i++) {
@@ -5169,14 +5422,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.6.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.6.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.7.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.7.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.6
+          name: V40.7
           path: |
             artifact/*.apk
             artifact/*.aab
