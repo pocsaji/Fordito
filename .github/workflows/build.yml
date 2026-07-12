@@ -1,4 +1,4 @@
-name: Build Android APK V40.15
+name: Build Android APK V40.16
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4015; versionName = "40.15" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4016; versionName = "40.16" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.15" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.16" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -648,7 +648,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.15");
+                  TextView title = label("Fordito_V40.16");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -5358,10 +5358,12 @@ jobs:
               }
 
               String sharedTextCleanupInstructions() {
-                  // V40.2: a beszélgetési profil a RENDEZ bemeneti javítását is segíti.
+                  // V40.16: a RENDEZ kimenetében minden teljes mondat külön sorba kerül.
                   return nonConversationalLanguageTaskRules() +
                       profilePrompt() +
                       cleanupBehaviorRules() +
+                      "Format the result for readability: put every complete sentence on its own line, and start each following complete sentence on a new line. " +
+                      "Do not insert a line break inside abbreviations, initials, decimal numbers, dates, URLs or unfinished fragments. " +
                       "Keep the original language. Return only the cleaned source text, with no labels, markdown, explanation or quotation marks.";
               }
 
@@ -5724,14 +5726,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.15.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.15.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.16.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.16.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.15
+          name: V40.16
           path: |
             artifact/*.apk
             artifact/*.aab
