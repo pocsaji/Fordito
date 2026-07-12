@@ -1,4 +1,4 @@
-name: Build Android APK V40.5
+name: Build Android APK V40.6
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 405; versionName = "40.5" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 406; versionName = "40.6" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.5" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.6" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -192,8 +192,6 @@ jobs:
           import android.content.pm.PackageManager;
           import android.graphics.Color;
           import android.media.*;
-          import android.media.audiofx.AcousticEchoCanceler;
-          import android.media.audiofx.NoiseSuppressor;
           import android.speech.RecognizerIntent;
           import android.speech.SpeechRecognizer;
           import android.speech.RecognitionListener;
@@ -248,22 +246,14 @@ jobs:
               String currentTtsUtteranceId = "";
               int queuedTtsUtterances = 0;
               final LinkedHashMap<String,TtsJob> ttsJobs = new LinkedHashMap<>();
-              String activeTtsEchoText = "";
-              String activeTtsEchoLang = "";
-              final ArrayDeque<TtsEchoRef> recentTtsEchoRefs = new ArrayDeque<>();
-
               AudioManager audioManager;
-              AcousticEchoCanceler acousticEchoCanceler;
-              NoiseSuppressor captureNoiseSuppressor;
-              boolean interpreterAecEnabled = false;
-              boolean interpreterNoiseSuppressorEnabled = false;
-              String activeInterpreterRoute = "off"; // off, headset, speaker_pending, speaker_aec, speaker_half_duplex
+              // V40.6: headsetnél normál felismerési hanglánc; hangszórónál egyszerű fél-duplex mikrofonkapu.
+              String activeInterpreterRoute = "off"; // off, headset, speaker_half_duplex
               String activeCommunicationDeviceLabel = "";
               AudioDeviceCallback interpreterAudioDeviceCallback;
               final Handler interpreterRouteHandler = new Handler(Looper.getMainLooper());
               boolean interpreterRouteReconfiguring = false;
-              int aecEchoLeakCount = 0;
-              long aecEchoLeakWindowStartedMs = 0L;
+              boolean activityInForeground = false;
           
               boolean connected = false;
               boolean streaming = false;
@@ -277,7 +267,7 @@ jobs:
               String interpreterAudioMode = "off";
               String lastInterpreterAudioMode = "auto";
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV405";
+              static final String LOG_TAG = "ForditoV406";
               static final int PRE_ROLL_AUDIO_MS = 800;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
@@ -288,9 +278,8 @@ jobs:
               static final int VAD_SPEECH_START_MS = 50;
               static final int VAD_SPEECH_END_SILENCE_MS = 500;
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
-              // VOICE_COMMUNICATION sok készüléken eleve tartalmaz zajfeldolgozást.
-              // Külön NoiseSuppressor alapból kikapcsolva, hogy ne csillapítsa túl a halk beszédet.
-              static final boolean ENABLE_INTERPRETER_NOISE_SUPPRESSOR = false;
+              // V40.6: tolmács módban sem kerül külön Android hanghatás az AudioRecordra.
+              // A headset saját hardveres feldolgozását nem szűrjük újra; hangszórónál TTS alatt kapuzzuk a mikrofont.
               static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 8000;
               volatile boolean voiceSendActive = false;
               final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
@@ -333,7 +322,9 @@ jobs:
               final Runnable micLifeSignalRunnable = new Runnable() {
                   @Override public void run() {
                       if(!streaming || micLifeSignalMinutes <= 0) return;
-                      playMicLifeSignal();
+                      // Előtérben a kijelzőn látszik, hogy a mikrofon aktív, ezért ott nem zavarunk.
+                      // Hang és rezgés csak háttérben vagy lezárt kijelzőn jelez.
+                      if(shouldPlayMicLifeSignalNow()) playMicLifeSignal();
                       scheduleMicLifeSignal();
                   }
               };
@@ -401,15 +392,6 @@ jobs:
                   int ttsQueuedRevision = 0;
                   int ttsStartedRevision = 0;
                   int ttsCompletedRevision = 0;
-              }
-
-              static class TtsEchoRef {
-                  final String text;
-                  final long expiresAtMs;
-                  TtsEchoRef(String text, long expiresAtMs) {
-                      this.text = text == null ? "" : text;
-                      this.expiresAtMs = expiresAtMs;
-                  }
               }
 
               static class TtsJob {
@@ -500,6 +482,7 @@ jobs:
 
               final String[][] micLifeSignalModes = {
                   {"Kikapcsolva","0"},
+                  {"2 perc","2"},
                   {"5 perc","5"},
                   {"10 perc","10"},
                   {"20 perc","20"},
@@ -571,7 +554,7 @@ jobs:
                   mirrorBottomMode = sp.getBoolean("mirrorBottomMode", false);
                   floatingTranslatorEnabled = sp.getBoolean("floatingTranslatorEnabled", false);
                   micLifeSignalMinutes = sp.getInt("micLifeSignalMinutes", 0);
-                  if(micLifeSignalMinutes != 0 && micLifeSignalMinutes != 5 && micLifeSignalMinutes != 10 && micLifeSignalMinutes != 20 && micLifeSignalMinutes != 30) micLifeSignalMinutes = 0;
+                  if(micLifeSignalMinutes != 0 && micLifeSignalMinutes != 2 && micLifeSignalMinutes != 5 && micLifeSignalMinutes != 10 && micLifeSignalMinutes != 20 && micLifeSignalMinutes != 30) micLifeSignalMinutes = 0;
                   floatingButtonX = sp.getInt("floatingButtonX", 24);
                   floatingButtonY = sp.getInt("floatingButtonY", 0);
                   interpreterFloatingX = sp.getInt("interpreterFloatingX", 24);
@@ -598,6 +581,13 @@ jobs:
                       interpreterAudioMode = interpreterMode ? "auto" : "off";
                       lastInterpreterAudioMode = "auto";
                       sp.edit().putInt("stableDefaultsVersion", 404).apply();
+                      save();
+                  }
+                  if(last < 406) {
+                      // V40.6: a korábbi tolmács-mód által kikényszerített kommunikációs előfeldolgozás
+                      // nem maradhat meg örökölt beállításként. Egyszer visszaállunk a normál bemenetre.
+                      audioSourceMode = "recognition";
+                      sp.edit().putInt("stableDefaultsVersion", 406).apply();
                       save();
                   }
               }
@@ -635,7 +625,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.5");
+                  TextView title = label("Fordito_V40.6");
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
                   bar.addView(title, new LinearLayout.LayoutParams(0,42,1));
@@ -1166,8 +1156,6 @@ jobs:
                   currentTtsUtteranceId = utteranceId;
                   ttsPlaybackActive = true;
                   ttsSpeaking = true;
-                  activeTtsEchoText = job.text;
-                  activeTtsEchoLang = job.lang;
                   if(isHalfDuplexSpeakerRoute()) beginHalfDuplexTtsGuard();
               }
 
@@ -1185,13 +1173,10 @@ jobs:
                               // Hiba vagy megszakítás után a blokk nem számít felolvasottnak.
                               job.block.ttsQueuedRevision = 0;
                           }
-                          if(job.started && isSpeakerInterpreterRoute()) rememberRecentTtsEcho(job.text);
                       }
 
                       if(utteranceId != null && utteranceId.equals(currentTtsUtteranceId)) {
                           currentTtsUtteranceId = "";
-                          activeTtsEchoText = "";
-                          activeTtsEchoLang = "";
                           ttsPlaybackActive = false;
                           if(isHalfDuplexSpeakerRoute()) ttsMuteUntilMs = System.currentTimeMillis() + 450L;
                       }
@@ -1297,171 +1282,6 @@ jobs:
                   ttsQueued = false;
                   ttsPlaybackActive = false;
                   ttsSpeaking = false;
-                  activeTtsEchoText = "";
-                  activeTtsEchoLang = "";
-                  recentTtsEchoRefs.clear();
-              }
-
-              String normalizeTtsEchoText(String text) {
-                  if(text == null) return "";
-                  String s = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFD)
-                      .replaceAll("\\p{M}+", "")
-                      .toLowerCase(Locale.ROOT)
-                      .replaceAll("[^a-z0-9\\s]", " ")
-                      .replaceAll("\\s+", " ").trim();
-                  return s;
-              }
-
-              void purgeExpiredTtsEchoRefs(long now) {
-                  while(!recentTtsEchoRefs.isEmpty() && recentTtsEchoRefs.peekFirst().expiresAtMs < now)
-                      recentTtsEchoRefs.removeFirst();
-              }
-
-              void rememberRecentTtsEcho(String text) {
-                  String value = text == null ? "" : text.trim();
-                  if(value.isEmpty()) return;
-                  long now = System.currentTimeMillis();
-                  purgeExpiredTtsEchoRefs(now);
-                  recentTtsEchoRefs.addLast(new TtsEchoRef(value, now + 30000L));
-                  while(recentTtsEchoRefs.size() > 8) recentTtsEchoRefs.removeFirst();
-              }
-
-              ArrayList<String> currentOwnTtsEchoReferences() {
-                  ArrayList<String> refs = new ArrayList<>();
-                  if(!interpreterMode || !isSpeakerInterpreterRoute()) return refs;
-                  long now = System.currentTimeMillis();
-                  purgeExpiredTtsEchoRefs(now);
-                  if(ttsPlaybackActive && activeTtsEchoText != null && !activeTtsEchoText.trim().isEmpty())
-                      refs.add(activeTtsEchoText);
-                  for(TtsEchoRef ref : recentTtsEchoRefs) {
-                      if(ref == null || ref.text.trim().isEmpty()) continue;
-                      boolean duplicate = false;
-                      String candidate = normalizeTtsEchoText(ref.text);
-                      for(String existing : refs) {
-                          if(candidate.equals(normalizeTtsEchoText(existing))) { duplicate = true; break; }
-                      }
-                      if(!duplicate) refs.add(ref.text);
-                  }
-                  return refs;
-              }
-
-              boolean isLikelyOwnTtsEcho(String transcript, String reference) {
-                  String heard = normalizeTtsEchoText(transcript);
-                  String spoken = normalizeTtsEchoText(reference);
-                  if(heard.isEmpty() || spoken.isEmpty()) return false;
-                  if(heard.equals(spoken)) return true;
-                  if(heard.length() < 18 || spoken.length() < 18) return false;
-                  int min = Math.min(heard.length(), spoken.length());
-                  int max = Math.max(heard.length(), spoken.length());
-                  if((heard.contains(spoken) || spoken.contains(heard)) && min * 100 / Math.max(1, max) >= 86) return true;
-
-                  String[] heardWords = heard.split(" ");
-                  String[] spokenWords = spoken.split(" ");
-                  if(heardWords.length < 4 || spokenWords.length < 4) return false;
-                  HashSet<String> spokenSet = new HashSet<>(Arrays.asList(spokenWords));
-                  int matched = 0;
-                  for(String word : heardWords) if(word.length() > 1 && spokenSet.contains(word)) matched++;
-                  return matched * 100 / Math.max(1, heardWords.length) >= 90 && min * 100 / Math.max(1, max) >= 68;
-              }
-
-              String filterOwnTtsEchoAgainstReference(String transcript, String reference) {
-                  String raw = transcript == null ? "" : transcript.trim();
-                  if(raw.isEmpty() || reference == null || reference.trim().isEmpty()) return raw;
-
-                  String spokenNorm = normalizeTtsEchoText(reference);
-                  String[] spokenWords = spokenNorm.isEmpty() ? new String[0] : spokenNorm.split(" ");
-                  String[] rawTokens = raw.split("\\s+");
-                  ArrayList<String> heardWords = new ArrayList<>();
-                  ArrayList<Integer> rawTokenIndex = new ArrayList<>();
-                  for(int i=0;i<rawTokens.length;i++) {
-                      String tokenNorm = normalizeTtsEchoText(rawTokens[i]);
-                      if(tokenNorm.isEmpty()) continue;
-                      for(String part : tokenNorm.split(" ")) {
-                          if(part.isEmpty()) continue;
-                          heardWords.add(part);
-                          rawTokenIndex.add(i);
-                      }
-                  }
-
-                  // Saját TTS + egyidejű emberi válasz: csak a TTS-részt vesszük ki.
-                  if(spokenWords.length >= 1 && heardWords.size() > spokenWords.length) {
-                      int requiredPercent = spokenWords.length < 4 ? 100 : 88;
-                      int prefixMatches = 0;
-                      for(int i=0;i<spokenWords.length;i++) {
-                          if(spokenWords[i].equals(heardWords.get(i))) prefixMatches++;
-                      }
-                      if(prefixMatches * 100 / spokenWords.length >= requiredPercent) {
-                          int cutRawIndex = rawTokenIndex.get(spokenWords.length - 1) + 1;
-                          if(cutRawIndex < rawTokens.length) {
-                              StringBuilder kept = new StringBuilder();
-                              for(int i=cutRawIndex;i<rawTokens.length;i++) {
-                                  if(kept.length() > 0) kept.append(' ');
-                                  kept.append(rawTokens[i]);
-                              }
-                              String result = kept.toString().trim();
-                              if(normalizeTtsEchoText(result).length() >= 2) return result;
-                          }
-                      }
-
-                      int heardStart = heardWords.size() - spokenWords.length;
-                      int suffixMatches = 0;
-                      for(int i=0;i<spokenWords.length;i++) {
-                          if(spokenWords[i].equals(heardWords.get(heardStart + i))) suffixMatches++;
-                      }
-                      if(suffixMatches * 100 / spokenWords.length >= requiredPercent) {
-                          int firstEchoRawIndex = rawTokenIndex.get(heardStart);
-                          if(firstEchoRawIndex > 0) {
-                              StringBuilder kept = new StringBuilder();
-                              for(int i=0;i<firstEchoRawIndex;i++) {
-                                  if(kept.length() > 0) kept.append(' ');
-                                  kept.append(rawTokens[i]);
-                              }
-                              String result = kept.toString().trim();
-                              if(normalizeTtsEchoText(result).length() >= 2) return result;
-                          }
-                      }
-                  }
-
-                  return isLikelyOwnTtsEcho(raw, reference) ? "" : raw;
-              }
-
-              String filterOwnTtsEchoFromTranscript(String transcript) {
-                  String filtered = transcript == null ? "" : transcript.trim();
-                  if(filtered.isEmpty()) return "";
-                  for(String reference : currentOwnTtsEchoReferences()) {
-                      filtered = filterOwnTtsEchoAgainstReference(filtered, reference);
-                      if(filtered.trim().isEmpty()) return "";
-                  }
-                  return filtered.trim();
-              }
-
-              void resetAecEchoLeakMonitor() {
-                  aecEchoLeakCount = 0;
-                  aecEchoLeakWindowStartedMs = 0L;
-              }
-
-              void noteOwnTtsEchoLeak() {
-                  if(!"speaker_aec".equals(activeInterpreterRoute)) return;
-                  long now = System.currentTimeMillis();
-                  if(aecEchoLeakWindowStartedMs == 0L || now - aecEchoLeakWindowStartedMs > 60000L) {
-                      aecEchoLeakWindowStartedMs = now;
-                      aecEchoLeakCount = 0;
-                  }
-                  aecEchoLeakCount++;
-                  if(aecEchoLeakCount < 2) return;
-
-                  // Az AEC elérhetőnek jelezte magát, de a saját TTS ismét átjutott az STT-ig.
-                  // Biztonságosan áttérünk a fél-duplex kapura; az emberi válasz a TTS után azonnal újra hallható.
-                  releaseCaptureEffects();
-                  activeInterpreterRoute = "speaker_half_duplex";
-                  ttsMuteUntilMs = 0L;
-                  resetAecEchoLeakMonitor();
-                  runOnUiThread(() -> {
-                      refreshInterpreterFloatingButton();
-                      refreshOpenInterpreterMenuButton();
-                      if(streaming) state.setText("Tolmács: hangszóró – biztonságos váltott beszéd");
-                      Toast.makeText(MainActivity.this, "A visszhangszűrés nem volt elég hatásos; biztonságos váltott mód aktív.", Toast.LENGTH_LONG).show();
-                  });
               }
 
               void reqMic() {
@@ -1976,9 +1796,8 @@ jobs:
               }
           
               int selectedAudioSource() {
-                  // Teljes duplex tolmácsolásnál a kommunikációs hangforrás adja a platform AEC-hez
-                  // illeszkedő bemeneti feldolgozást. Normál fordításnál megmarad a bevált VOICE_RECOGNITION.
-                  if(interpreterMode) return MediaRecorder.AudioSource.VOICE_COMMUNICATION;
+                  // V40.6: tolmács módban is ugyanazt a bevált bemenetet használjuk, mint normál módban.
+                  // Headsetnél nincs második szoftveres előszűrés; alapérték: VOICE_RECOGNITION.
                   if("recognition".equals(audioSourceMode)) return MediaRecorder.AudioSource.VOICE_RECOGNITION;
                   if("communication".equals(audioSourceMode)) return MediaRecorder.AudioSource.VOICE_COMMUNICATION;
                   if("unprocessed".equals(audioSourceMode)) return MediaRecorder.AudioSource.UNPROCESSED;
@@ -2034,19 +1853,12 @@ jobs:
               }
 
               AudioRecord makeBestAudioRecord(int sampleRate, int requestedBufferBytes) {
-                  // A választott forrás az első. Ha azt a készülék/útvonal nem támogatja,
-                  // dokumentált Android hangforrásokra esünk vissza, duplikáció nélkül.
+                  // A normál és a tolmács mód ugyanazt a bemeneti láncot használja.
+                  // VOICE_COMMUNICATION csak akkor kerül elő, ha azt a felhasználó külön kiválasztotta.
                   LinkedHashSet<Integer> candidates = new LinkedHashSet<>();
                   candidates.add(selectedAudioSource());
-                  if(interpreterMode) {
-                      candidates.add(MediaRecorder.AudioSource.VOICE_COMMUNICATION);
-                      candidates.add(MediaRecorder.AudioSource.VOICE_RECOGNITION);
-                      candidates.add(MediaRecorder.AudioSource.MIC);
-                  } else {
-                      candidates.add(MediaRecorder.AudioSource.VOICE_RECOGNITION);
-                      candidates.add(MediaRecorder.AudioSource.MIC);
-                      candidates.add(MediaRecorder.AudioSource.VOICE_COMMUNICATION);
-                  }
+                  candidates.add(MediaRecorder.AudioSource.VOICE_RECOGNITION);
+                  candidates.add(MediaRecorder.AudioSource.MIC);
 
                   for(Integer source : candidates) {
                       if(source == null) continue;
@@ -2122,23 +1934,23 @@ jobs:
                       return;
                   }
                   interpreterRouteReconfiguring = true;
-                  resetAecEchoLeakMonitor();
                   try {
-                      audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
                       AudioDeviceInfo headset = findCommunicationHeadset();
                       boolean useHeadset = headset != null;
                       boolean routeAccepted = false;
+
+                      // A Bluetooth/headset mikrofon és kimenet kiválasztásához a kommunikációs útvonal kell,
+                      // de az AudioRecord forrása továbbra is a normál VOICE_RECOGNITION és nincs külön Android hanghatás.
+                      audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
                       if(Build.VERSION.SDK_INT >= 31) {
                           AudioDeviceInfo target = useHeadset ? headset : findBuiltInSpeaker();
                           if(target != null) routeAccepted = audioManager.setCommunicationDevice(target);
                           if(useHeadset && !routeAccepted) {
                               AudioDeviceInfo speakerFallback = findBuiltInSpeaker();
-                              if(speakerFallback != null) {
-                                  routeAccepted = audioManager.setCommunicationDevice(speakerFallback);
-                                  if(routeAccepted) {
-                                      useHeadset = false;
-                                      target = speakerFallback;
-                                  }
+                              if(speakerFallback != null && audioManager.setCommunicationDevice(speakerFallback)) {
+                                  useHeadset = false;
+                                  target = speakerFallback;
+                                  routeAccepted = true;
                               }
                           }
                           if(!routeAccepted && !useHeadset) {
@@ -2156,8 +1968,10 @@ jobs:
                           routeAccepted = true;
                           activeCommunicationDeviceLabel = useHeadset ? audioDeviceLabel(headset) : "telefon hangszóró";
                       }
-                      activeInterpreterRoute = useHeadset ? "headset" : "speaker_pending";
-                      if(Build.VERSION.SDK_INT >= 31 && !routeAccepted) android.util.Log.w(LOG_TAG, "Communication device selection was not accepted");
+
+                      activeInterpreterRoute = useHeadset ? "headset" : "speaker_half_duplex";
+                      if(Build.VERSION.SDK_INT >= 31 && !routeAccepted)
+                          android.util.Log.w(LOG_TAG, "Communication device selection was not accepted");
                       applyTtsAudioAttributes();
                       refreshInterpreterFloatingButton();
                       refreshOpenInterpreterMenuButton();
@@ -2172,7 +1986,6 @@ jobs:
               }
 
               void restoreNormalAudioRoute() {
-                  releaseCaptureEffects();
                   if(audioManager != null) {
                       try {
                           if(Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice();
@@ -2188,59 +2001,6 @@ jobs:
                   }
                   activeInterpreterRoute = "off";
                   activeCommunicationDeviceLabel = "";
-                  resetAecEchoLeakMonitor();
-                  interpreterAecEnabled = false;
-                  interpreterNoiseSuppressorEnabled = false;
-              }
-
-              void configureCaptureEffects(AudioRecord recorder) {
-                  releaseCaptureEffects();
-                  if(!interpreterMode || recorder == null) return;
-                  if(isHeadsetInterpreterRoute()) return;
-                  boolean aecOk = false;
-                  try {
-                      if(AcousticEchoCanceler.isAvailable()) {
-                          acousticEchoCanceler = AcousticEchoCanceler.create(recorder.getAudioSessionId());
-                          if(acousticEchoCanceler != null) {
-                              acousticEchoCanceler.setEnabled(true);
-                              aecOk = acousticEchoCanceler.getEnabled();
-                          }
-                      }
-                  } catch(Exception e) {
-                      android.util.Log.w(LOG_TAG, "AEC activation failed", e);
-                      aecOk = false;
-                  }
-                  interpreterAecEnabled = aecOk;
-
-                  try {
-                      if(ENABLE_INTERPRETER_NOISE_SUPPRESSOR && aecOk && NoiseSuppressor.isAvailable()) {
-                          captureNoiseSuppressor = NoiseSuppressor.create(recorder.getAudioSessionId());
-                          if(captureNoiseSuppressor != null) {
-                              captureNoiseSuppressor.setEnabled(true);
-                              interpreterNoiseSuppressorEnabled = captureNoiseSuppressor.getEnabled();
-                          }
-                      }
-                  } catch(Exception e) {
-                      android.util.Log.w(LOG_TAG, "NoiseSuppressor activation failed", e);
-                      interpreterNoiseSuppressorEnabled = false;
-                  }
-
-                  activeInterpreterRoute = aecOk ? "speaker_aec" : "speaker_half_duplex";
-                  runOnUiThread(() -> {
-                      refreshInterpreterFloatingButton();
-                      refreshOpenInterpreterMenuButton();
-                  });
-              }
-
-              void releaseCaptureEffects() {
-                  try { if(acousticEchoCanceler != null) acousticEchoCanceler.release(); }
-                  catch(Exception e) { android.util.Log.w(LOG_TAG, "AEC release failed", e); }
-                  acousticEchoCanceler = null;
-                  try { if(captureNoiseSuppressor != null) captureNoiseSuppressor.release(); }
-                  catch(Exception e) { android.util.Log.w(LOG_TAG, "NoiseSuppressor release failed", e); }
-                  captureNoiseSuppressor = null;
-                  interpreterAecEnabled = false;
-                  interpreterNoiseSuppressorEnabled = false;
               }
 
               void beginHalfDuplexTtsGuard() {
@@ -2311,7 +2071,6 @@ jobs:
                   closeExternalVad();
                   resetCapturedFrameState();
                   resetSttOrderingForNewSession();
-                  releaseCaptureEffects();
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception e) { android.util.Log.w(LOG_TAG, "AudioRecord reset failed", e); }
                   rec = null;
               }
@@ -2330,14 +2089,12 @@ jobs:
                   }
                   try {
                       ensureExternalVadReady();
-                      configureCaptureEffects(rec);
                       rec.startRecording();
                       if(rec.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) throw new IllegalStateException("AudioRecord did not enter recording state");
                   } catch(Exception e) {
                       android.util.Log.e(LOG_TAG, "Microphone start failed", e);
                       connected = false;
-                      releaseCaptureEffects();
-                      try { rec.release(); } catch(Exception releaseError) { android.util.Log.w(LOG_TAG, "AudioRecord release failed", releaseError); }
+                          try { rec.release(); } catch(Exception releaseError) { android.util.Log.w(LOG_TAG, "AudioRecord release failed", releaseError); }
                       rec = null;
                       stopBackgroundForegroundService();
                       runOnUiThread(() -> { state.setText("mikrofon indítási hiba"); updateButtons(); });
@@ -2435,7 +2192,6 @@ jobs:
                   } catch(Exception e) {
                       android.util.Log.w(LOG_TAG, "AudioRecord stop failed", e);
                   }
-                  releaseCaptureEffects();
 
                   if(flushRemaining) {
                       finalizingStop = true;
@@ -2715,19 +2471,6 @@ jobs:
                   if(transcript == null || transcript.trim().length() == 0) {
                       speechIdleFlushToken++;
                       return;
-                  }
-
-                  String echoFilteredTranscript = filterOwnTtsEchoFromTranscript(transcript);
-                  if(echoFilteredTranscript.trim().isEmpty()) {
-                      noteOwnTtsEchoLeak();
-                      android.util.Log.i(LOG_TAG, "Own TTS echo discarded before translation");
-                      speechIdleFlushToken++;
-                      return;
-                  }
-                  if(!echoFilteredTranscript.equals(transcript)) {
-                      noteOwnTtsEchoLeak();
-                      android.util.Log.i(LOG_TAG, "Own TTS echo removed; simultaneous new speech preserved");
-                      transcript = echoFilteredTranscript;
                   }
 
                   if(isAlreadyReleasedTranscript(transcript)) {
@@ -4567,7 +4310,9 @@ jobs:
               }
 
               String micLifeSignalLabel() {
-                  return micLifeSignalMinutes <= 0 ? "kikapcsolva" : micLifeSignalMinutes + " percenként – hang + rezgés";
+                  return micLifeSignalMinutes <= 0
+                      ? "kikapcsolva"
+                      : micLifeSignalMinutes + " percenként – csak háttérben/lezárt kijelzőn";
               }
 
               void chooseMicLifeSignal() {
@@ -4590,19 +4335,53 @@ jobs:
                   micLifeSignalHandler.removeCallbacks(micLifeSignalRunnable);
               }
 
+              boolean shouldPlayMicLifeSignalNow() {
+                  if(!streaming || micLifeSignalMinutes <= 0) return false;
+                  boolean screenInteractive = true;
+                  boolean keyguardLocked = false;
+                  try {
+                      PowerManager pm = (PowerManager)getSystemService(POWER_SERVICE);
+                      if(pm != null) screenInteractive = pm.isInteractive();
+                  } catch(Exception e) {
+                      android.util.Log.w(LOG_TAG, "Screen state check failed", e);
+                  }
+                  try {
+                      KeyguardManager km = (KeyguardManager)getSystemService(KEYGUARD_SERVICE);
+                      if(km != null) keyguardLocked = km.isKeyguardLocked();
+                  } catch(Exception e) {
+                      android.util.Log.w(LOG_TAG, "Keyguard state check failed", e);
+                  }
+                  return !activityInForeground || !screenInteractive || keyguardLocked;
+              }
+
               void playMicLifeSignal() {
                   try {
                       android.os.Vibrator vibrator = (android.os.Vibrator)getSystemService(VIBRATOR_SERVICE);
                       if(vibrator != null && vibrator.hasVibrator()) {
-                          if(Build.VERSION.SDK_INT >= 26) vibrator.vibrate(android.os.VibrationEffect.createOneShot(180, android.os.VibrationEffect.DEFAULT_AMPLITUDE));
-                          else vibrator.vibrate(180);
+                          long[] pattern = new long[]{0L, 220L, 120L, 300L};
+                          if(Build.VERSION.SDK_INT >= 26) {
+                              int[] amplitudes = new int[]{0, 220, 0, 255};
+                              vibrator.vibrate(android.os.VibrationEffect.createWaveform(pattern, amplitudes, -1));
+                          } else {
+                              vibrator.vibrate(pattern, -1);
+                          }
                       }
-                  } catch(Exception ignored) {}
+                  } catch(Exception e) {
+                      android.util.Log.w(LOG_TAG, "Mic life vibration failed", e);
+                  }
                   try {
-                      final android.media.ToneGenerator tone = new android.media.ToneGenerator(AudioManager.STREAM_MUSIC, 75);
-                      tone.startTone(android.media.ToneGenerator.TONE_PROP_BEEP2, 180);
-                      micLifeSignalHandler.postDelayed(() -> { try { tone.release(); } catch(Exception ignored) {} }, 350);
-                  } catch(Exception ignored) {}
+                      final android.media.ToneGenerator tone = new android.media.ToneGenerator(AudioManager.STREAM_MUSIC, 100);
+                      tone.startTone(android.media.ToneGenerator.TONE_PROP_BEEP2, 260);
+                      micLifeSignalHandler.postDelayed(() -> {
+                          try { tone.startTone(android.media.ToneGenerator.TONE_PROP_BEEP2, 300); }
+                          catch(Exception e) { android.util.Log.w(LOG_TAG, "Second mic life beep failed", e); }
+                      }, 380L);
+                      micLifeSignalHandler.postDelayed(() -> {
+                          try { tone.release(); } catch(Exception ignored) {}
+                      }, 850L);
+                  } catch(Exception e) {
+                      android.util.Log.w(LOG_TAG, "Mic life beep failed", e);
+                  }
               }
 
               void advancedMenu() {
@@ -4619,10 +4398,8 @@ jobs:
               }
           
               String interpreterRuntimeShortLabel() {
-                  if("headset".equals(activeInterpreterRoute)) return "headset – folyamatos";
-                  if("speaker_aec".equals(activeInterpreterRoute)) return "hangszóró – AEC";
+                  if("headset".equals(activeInterpreterRoute)) return "headset – normál bemenet";
                   if("speaker_half_duplex".equals(activeInterpreterRoute)) return "hangszóró – váltott";
-                  if("speaker_pending".equals(activeInterpreterRoute)) return "hangszóró – ellenőrzés";
                   return "automatikus tolmács";
               }
 
@@ -4634,7 +4411,6 @@ jobs:
               int interpreterSharedColor() {
                   if(!interpreterMode) return Color.rgb(85,85,85);
                   if("headset".equals(activeInterpreterRoute)) return Color.rgb(15,75,145);
-                  if("speaker_aec".equals(activeInterpreterRoute)) return Color.rgb(10,115,55);
                   if("speaker_half_duplex".equals(activeInterpreterRoute)) return Color.rgb(170,95,15);
                   return Color.rgb(80,105,75);
               }
@@ -4893,16 +4669,15 @@ jobs:
           
               String interpreterLabel() {
                   if(!interpreterMode) return "kikapcsolva – csak szöveges fordítás";
-                  if("headset".equals(activeInterpreterRoute)) return "Automatikus tolmács – headset, folyamatos mikrofon";
-                  if("speaker_aec".equals(activeInterpreterRoute)) return "Automatikus tolmács – hangszóró, visszhangszűrés aktív";
-                  if("speaker_half_duplex".equals(activeInterpreterRoute)) return "Automatikus tolmács – hangszóró, biztonságos váltott beszéd";
+                  if("headset".equals(activeInterpreterRoute)) return "Automatikus tolmács – headset, normál felismerés, folyamatos mikrofon";
+                  if("speaker_half_duplex".equals(activeInterpreterRoute)) return "Automatikus tolmács – hangszóró, TTS alatt mikrofonkapu";
                   return "Automatikus tolmács – audioút előkészítés";
               }
 
               void chooseInterpreterMode() {
                   String[][] data = {
                       {"Kikapcsolva", "off", "csak szöveges fordítás, nincs felolvasás"},
-                      {"Automatikus tolmács", "auto", "headsetnél folyamatos; hangszórónál AEC, szükség esetén váltott beszéd"}
+                      {"Automatikus tolmács", "auto", "headsetnél normál, szűretlen bemenet; hangszórónál TTS alatt mikrofonkapu"}
                   };
                   CharSequence[] labels = new CharSequence[data.length];
                   for(int i=0;i<data.length;i++) {
@@ -5316,12 +5091,14 @@ jobs:
               }
           
               @Override public void onPause() {
+                  activityInForeground = false;
                   super.onPause();
                   if(floatingTranslatorEnabled) new Handler().postDelayed(() -> ensureFloatingTranslator(), 250); if(interpreterMode) new Handler().postDelayed(() -> ensureInterpreterFloatingButton(), 250);
               }
           
               @Override public void onResume() {
                   super.onResume();
+                  activityInForeground = true;
                   if(!streaming && !finalizingStop) {
                       setSpeechUiLocked(false);
                       updateButtons();
@@ -5392,14 +5169,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.5.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.5.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.6.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.6.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.5
+          name: V40.6
           path: |
             artifact/*.apk
             artifact/*.aab
