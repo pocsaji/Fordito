@@ -1,4 +1,4 @@
-name: Build Android APK V40.11
+name: Build Android APK V40.13
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 411; versionName = "40.11" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 413; versionName = "40.13" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.11" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.13" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -274,11 +274,15 @@ jobs:
               boolean finalizingStop = false;
               volatile boolean stopAudioDrainPending = false;
               boolean interpreterMode = false;
+              // V40.12: a mikrofon futása és a tolmács felolvasása külön kapcsolható.
+              // V40.13: kizárólag a főmenü megnevezései lettek pontosítva; működési logika nem változott.
+              // A lebegő Bluetooth/hangszóró gomb kizárólag ezt a kimeneti állapotot váltja.
+              boolean interpreterSpeechOutputEnabled = true;
               // V40.4: egyetlen látható automatikus mód. A belső útvonal headset / AEC / fél-duplex.
               String interpreterAudioMode = "off";
               String lastInterpreterAudioMode = "auto";
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV411";
+              static final String LOG_TAG = "ForditoV412";
               static final int PRE_ROLL_AUDIO_MS = 800;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
@@ -322,7 +326,6 @@ jobs:
               boolean mirrorBottomMode = false;
               boolean backgroundScreenAllowed = true;
               boolean floatingTranslatorEnabled = false;
-              Handler floatingLongPressHandler = new Handler();
               android.view.WindowManager floatingWindowManager;
               android.view.View floatingButtonView;
               android.view.View floatingResultView;
@@ -561,9 +564,10 @@ jobs:
                   interpreterMode = interpreterMode && !"off".equals(storedInterpreterMode);
                   interpreterAudioMode = interpreterMode ? "auto" : "off";
                   lastInterpreterAudioMode = "auto";
+                  interpreterSpeechOutputEnabled = sp.getBoolean("interpreterSpeechOutputEnabled", true);
                   mirrorBottomMode = sp.getBoolean("mirrorBottomMode", false);
                   floatingTranslatorEnabled = sp.getBoolean("floatingTranslatorEnabled", false);
-                  micLifeSignalMinutes = sp.getInt("micLifeSignalMinutes", 0);
+                  micLifeSignalMinutes = sp.getInt("micLifeSignalMinutes", 2);
                   if(micLifeSignalMinutes != 0 && micLifeSignalMinutes != 2 && micLifeSignalMinutes != 5 && micLifeSignalMinutes != 10 && micLifeSignalMinutes != 20 && micLifeSignalMinutes != 30) micLifeSignalMinutes = 0;
                   floatingButtonX = sp.getInt("floatingButtonX", 24);
                   floatingButtonY = sp.getInt("floatingButtonY", 0);
@@ -600,6 +604,13 @@ jobs:
                       sp.edit().putInt("stableDefaultsVersion", 408).apply();
                       save();
                   }
+                  if(last < 412) {
+                      // V40.12: telepítés/frissítés után egyszer bekapcsoljuk a 2 perces mikrofon-életjelzést.
+                      // Ezután a felhasználó továbbra is szabadon átállíthatja vagy kikapcsolhatja.
+                      micLifeSignalMinutes = 2;
+                      sp.edit().putInt("stableDefaultsVersion", 412).apply();
+                      save();
+                  }
               }
           
               void save() {
@@ -615,6 +626,7 @@ jobs:
                     .putBoolean("interpreterMode", interpreterMode)
                     .putString("interpreterAudioMode", interpreterMode ? "auto" : "off")
                     .putString("lastInterpreterAudioMode", "auto")
+                    .putBoolean("interpreterSpeechOutputEnabled", interpreterSpeechOutputEnabled)
                     .putBoolean("mirrorBottomMode", mirrorBottomMode)
                     .putBoolean("floatingTranslatorEnabled", floatingTranslatorEnabled)
                     .putInt("micLifeSignalMinutes", micLifeSignalMinutes)
@@ -635,7 +647,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.11");
+                  TextView title = label("Fordito_V40.13");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -1255,7 +1267,7 @@ jobs:
 
               synchronized void speakFinalBlockOnce(TextBlock b) {
                   try {
-                      if(b == null || !interpreterMode || !ttsReady || tts == null) return;
+                      if(b == null || !interpreterMode || !interpreterSpeechOutputEnabled || !ttsReady || tts == null) return;
                       if(!b.finalReady || !b.translatedOk || !b.pendingSourceText.trim().isEmpty()) return;
                       int revision = b.finalRevision;
                       if(revision <= 0 || b.finalTranslation.trim().isEmpty() || b.finalTranslationHash.isEmpty()) return;
@@ -4125,7 +4137,7 @@ jobs:
                   box.setPadding(10, 10, 10, 10);
                   box.setBackgroundColor(Color.rgb(35,38,44));
           
-                  Button interpreterBtn = addMenuButton(box, "Tolmács mód", interpreterQuickLabel(), interpreterMode, v -> {
+                  Button interpreterBtn = addMenuButton(box, "Kihangosítás", interpreterQuickLabel(), interpreterMode, v -> {
                       toggleInterpreterEnabled();
                       refreshInterpreterMenuButton((Button)v);
                       updateButtons();
@@ -4138,9 +4150,9 @@ jobs:
                       return true;
                   });
                   refreshInterpreterMenuButton(interpreterBtn);
-                  addMenuButton(box, "Lebegő gomb", floatingTranslatorLabel(), floatingTranslatorEnabled, v -> {
+                  addMenuButton(box, "Háttérből → előtérbe", floatingTranslatorLabel(), floatingTranslatorEnabled, v -> {
                       toggleFloatingTranslator();
-                      refreshMenuButton((Button)v, "Lebegő gomb", floatingTranslatorLabel(), floatingTranslatorEnabled);
+                      refreshMenuButton((Button)v, "Háttérből → előtérbe", floatingTranslatorLabel(), floatingTranslatorEnabled);
                       updateButtons();
                   });
                   addMenuButton(box, "Mikrofon életjel", micLifeSignalLabel(), micLifeSignalMinutes > 0, v -> chooseMicLifeSignal());
@@ -4245,7 +4257,7 @@ jobs:
           
           
               String floatingTranslatorLabel() {
-                  return floatingTranslatorEnabled ? "pici gomb – alkalmazás előtérbe hozása" : "kikapcsolva";
+                  return floatingTranslatorEnabled ? "lebegő gomb bekapcsolva" : "lebegő gomb kikapcsolva";
               }
           
               boolean canDrawOverlayNow() {
@@ -4653,37 +4665,27 @@ jobs:
                       InterpreterFloatingButton b = new InterpreterFloatingButton(this);
                       final android.view.WindowManager.LayoutParams lp=floatingParams(116,116,Gravity.LEFT|Gravity.CENTER_VERTICAL);
                       lp.x=interpreterFloatingX; lp.y=interpreterFloatingY;
-                      final int[] down=new int[4]; final boolean[] moved=new boolean[1]; final boolean[] longDone=new boolean[1];
-                      final Runnable modeLongPress = () -> {
-                          if(!moved[0]) {
-                              longDone[0] = true;
-                              try { b.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); } catch(Exception ignored) {}
-                              toggleInterpreterAudioModeFromFloating();
-                          }
-                      };
+                      final int[] down=new int[4]; final boolean[] moved=new boolean[1];
                       b.setOnTouchListener((v,ev)->{
                           if(ev.getAction()==android.view.MotionEvent.ACTION_DOWN){
-                              down[0]=lp.x;down[1]=lp.y;down[2]=(int)ev.getRawX();down[3]=(int)ev.getRawY();moved[0]=false;longDone[0]=false;
-                              floatingLongPressHandler.removeCallbacks(modeLongPress);
-                              floatingLongPressHandler.postDelayed(modeLongPress,1800);
+                              down[0]=lp.x;down[1]=lp.y;down[2]=(int)ev.getRawX();down[3]=(int)ev.getRawY();moved[0]=false;
                               return true;
                           }
                           if(ev.getAction()==android.view.MotionEvent.ACTION_MOVE){
                               int dx=(int)ev.getRawX()-down[2],dy=(int)ev.getRawY()-down[3];
-                              if(Math.abs(dx)>24||Math.abs(dy)>24){moved[0]=true;floatingLongPressHandler.removeCallbacks(modeLongPress);}
+                              if(Math.abs(dx)>24||Math.abs(dy)>24) moved[0]=true;
                               if(moved[0]){lp.x=Math.max(0,down[0]+dx);lp.y=down[1]+dy;try{floatingWindowManager.updateViewLayout(b,lp);}catch(Exception ignored){}}
                               return true;
                           }
                           if(ev.getAction()==android.view.MotionEvent.ACTION_UP){
-                              floatingLongPressHandler.removeCallbacks(modeLongPress);
                               interpreterFloatingX=lp.x;interpreterFloatingY=lp.y;save();
-                              if(!moved[0] && !longDone[0]) {
+                              if(!moved[0]) {
                                   try { b.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP); } catch(Exception ignored) {}
-                                  toggleInterpreterFloatingRun();
+                                  toggleInterpreterSpeechOutput();
                               }
                               return true;
                           }
-                          if(ev.getAction()==android.view.MotionEvent.ACTION_CANCEL){floatingLongPressHandler.removeCallbacks(modeLongPress);return true;}
+                          if(ev.getAction()==android.view.MotionEvent.ACTION_CANCEL) return true;
                           return true;
                       });
                       interpreterFloatingView=b;
@@ -4699,17 +4701,22 @@ jobs:
               }
           
           
-              void toggleInterpreterAudioModeFromFloating() {
-                  if(!interpreterMode) return;
-                  recheckInterpreterAudioRoute(true);
-              }
-          
-              void toggleInterpreterFloatingRun() {
+              void toggleInterpreterSpeechOutput() {
                   if(!interpreterMode || finalizingStop) return;
-                  if(streaming) stop(); else start(true);
+                  interpreterSpeechOutputEnabled = !interpreterSpeechOutputEnabled;
+                  if(!interpreterSpeechOutputEnabled) {
+                      ttsMuteUntilMs = 0L;
+                      try { if(tts != null) tts.stop(); }
+                      catch(Exception e) { android.util.Log.w(LOG_TAG, "TTS stop during output mute failed", e); }
+                      clearSpeakState();
+                  }
+                  save();
                   refreshInterpreterFloatingButton();
-                  new Handler().postDelayed(() -> refreshInterpreterFloatingButton(),250);
-                  new Handler().postDelayed(() -> refreshInterpreterFloatingButton(),900);
+                  refreshOpenInterpreterMenuButton();
+                  updateButtons();
+                  Toast.makeText(this, interpreterSpeechOutputEnabled
+                      ? "Felolvasás bekapcsolva – a mikrofon állapota nem változott."
+                      : "Felolvasás kikapcsolva – a mikrofon tovább működik.", Toast.LENGTH_SHORT).show();
               }
           
               void hideInterpreterFloatingButton() {
@@ -4877,11 +4884,13 @@ jobs:
 
               String interpreterQuickLabel() {
                   if(!interpreterMode) return "kikapcsolva – csak szöveges fordítás";
+                  if(!interpreterSpeechOutputEnabled) return "AUTOMATIKUS • FELOLVASÁS KI • mikrofon változatlan";
                   return "AUTOMATIKUS • " + interpreterRuntimeShortLabel().toUpperCase(Locale.ROOT);
               }
 
               int interpreterSharedColor() {
                   if(!interpreterMode) return Color.rgb(85,85,85);
+                  if(!interpreterSpeechOutputEnabled) return Color.rgb(85,85,85);
                   if(isHeadsetInterpreterRoute()) return Color.rgb(15,75,145);
                   if("speaker_half_duplex".equals(activeInterpreterRoute)) return Color.rgb(170,95,15);
                   return Color.rgb(80,105,75);
@@ -4913,6 +4922,7 @@ jobs:
                   if(wasStreaming) stop(false);
                   interpreterMode = true;
                   interpreterAudioMode = "auto";
+                  interpreterSpeechOutputEnabled = true;
                   lastInterpreterAudioMode = "auto";
                   rejectedInterpreterInputDeviceId = -1;
                   configureInterpreterAudioRoute(false);
@@ -5184,6 +5194,7 @@ jobs:
           
               String interpreterLabel() {
                   if(!interpreterMode) return "kikapcsolva – csak szöveges fordítás";
+                  if(!interpreterSpeechOutputEnabled) return "Automatikus tolmács – felolvasás kikapcsolva, mikrofon változatlan";
                   if("headset_output_phone_mic".equals(activeInterpreterRoute)) return "Automatikus tolmács – headset kimenet, telefon mikrofon";
                   if("headset_direct".equals(activeInterpreterRoute)) return "Automatikus tolmács – headset, közvetlen normál bemenet";
                   if("headset_communication_fallback".equals(activeInterpreterRoute)) return "Automatikus tolmács – headset, kommunikációs tartalék út";
@@ -5695,14 +5706,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.11.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.11.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.13.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.13.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.11
+          name: V40.13
           path: |
             artifact/*.apk
             artifact/*.aab
