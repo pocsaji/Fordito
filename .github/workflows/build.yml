@@ -1,4 +1,4 @@
-name: Build Android APK V40.17
+name: Build Android APK V40.18
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4017; versionName = "40.17" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4018; versionName = "40.18" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.17" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.18" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -230,6 +230,8 @@ jobs:
               // Erre azért van szükség, hogy a lebegő gombon végzett hangmódváltás
               // azonnal visszafrissüljön a még nyitva lévő menüben is.
               Button openInterpreterMenuButton;
+              // V40.18: a nyitott főmenü profilgombja azonnal frissül a profilválasztóból visszatérve.
+              Button openProfileMenuButton;
               SharedPreferences sp;
               OkHttpClient client;
               AudioRecord rec;
@@ -273,6 +275,10 @@ jobs:
               boolean uiLockedForSpeech = false;
               boolean finalizingStop = false;
               volatile boolean stopAudioDrainPending = false;
+              // V40.18: a mikrofon gomb csak az első érvényes PCM beérkezése és legalább 800 ms után lesz zöld.
+              volatile boolean microphoneStarting = false;
+              volatile boolean microphonePcmReady = false;
+              volatile long microphoneStartUiEarliestMs = 0L;
               boolean interpreterMode = false;
               // V40.12: a mikrofon futása és a tolmács felolvasása külön kapcsolható.
               // V40.13: kizárólag a főmenü megnevezései lettek pontosítva; működési logika nem változott.
@@ -283,7 +289,7 @@ jobs:
               String interpreterAudioMode = "off";
               String lastInterpreterAudioMode = "auto";
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV415";
+              static final String LOG_TAG = "ForditoV418";
               static final int PRE_ROLL_AUDIO_MS = 800;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
@@ -514,6 +520,7 @@ jobs:
                   {"WebRTC VAD – csendes", "webrtc_quiet"},
                   {"WebRTC VAD – közepes", "webrtc_medium"},
                   {"WebRTC VAD – zajos", "webrtc"},
+                  {"Silero VAD – OFF / extra érzékeny, csak csendben", "silero_off"},
                   {"Silero VAD – NORMAL / ajánlott", "silero"},
                   {"Silero VAD – AGGRESSIVE", "silero_medium"},
                   {"Silero VAD – VERY AGGRESSIVE", "silero_truck"},
@@ -558,7 +565,7 @@ jobs:
                   vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "xhigh");
                   vadEngineMode = sp.getString("vadEngineMode", "silero");
-                  if(!"webrtc_quiet".equals(vadEngineMode) && !"webrtc_medium".equals(vadEngineMode) && !"webrtc".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode) && !"pass".equals(vadEngineMode)) vadEngineMode = "silero";
+                  if(!"webrtc_quiet".equals(vadEngineMode) && !"webrtc_medium".equals(vadEngineMode) && !"webrtc".equals(vadEngineMode) && !"silero_off".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode) && !"pass".equals(vadEngineMode)) vadEngineMode = "silero";
                   audioSourceMode = sp.getString("audioSourceMode", "recognition");
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   String storedInterpreterMode = sp.getString("interpreterAudioMode", interpreterMode ? "auto" : "off");
@@ -648,7 +655,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.17");
+                  TextView title = label("Fordito_V40.18");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -1366,7 +1373,11 @@ jobs:
                       // V355: minden mikrofonindítás pontosan egyszer teljesen újranyitja
                       // az AudioRecordot, a VAD-ot és a kapcsolódó puffereket.
                       resetAudioModeState();
+                      microphoneStarting = true;
+                      microphonePcmReady = false;
+                      microphoneStartUiEarliestMs = android.os.SystemClock.elapsedRealtime() + 800L;
                       state.setText("mikrofon előkészítés");
+                      updateButtons();
                       audioLoop();
                   } else {
                       state.setText("fordítás");
@@ -1501,14 +1512,15 @@ jobs:
                       b.getClass().getMethod("setSpeechDurationMs", int.class).invoke(b, VAD_SPEECH_START_MS);
                       return b.getClass().getMethod("build").invoke(b);
                   }
-                  if("silero".equals(mode) || "silero_medium".equals(mode) || "silero_truck".equals(mode)) {
+                  if("silero_off".equals(mode) || "silero".equals(mode) || "silero_medium".equals(mode) || "silero_truck".equals(mode)) {
                       Class<?> vadClass = Class.forName("com.konovalov.vad.silero.Vad");
                       Object b = vadClass.getMethod("builder").invoke(null);
                       b.getClass().getMethod("setContext", android.content.Context.class).invoke(b, this);
                       b.getClass().getMethod("setSampleRate", Class.forName("com.konovalov.vad.silero.config.SampleRate")).invoke(b, enumConst("com.konovalov.vad.silero.config.SampleRate", "SAMPLE_RATE_16K"));
                       b.getClass().getMethod("setFrameSize", Class.forName("com.konovalov.vad.silero.config.FrameSize")).invoke(b, enumConst("com.konovalov.vad.silero.config.FrameSize", "FRAME_SIZE_512"));
-                      String sileroModeName = "silero".equals(mode) ? "NORMAL"
-                          : ("silero_medium".equals(mode) ? "AGGRESSIVE" : "VERY_AGGRESSIVE");
+                      String sileroModeName = "silero_off".equals(mode) ? "OFF"
+                          : ("silero".equals(mode) ? "NORMAL"
+                          : ("silero_medium".equals(mode) ? "AGGRESSIVE" : "VERY_AGGRESSIVE"));
                       b.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.silero.config.Mode")).invoke(b, enumConst("com.konovalov.vad.silero.config.Mode", sileroModeName));
                       b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, VAD_SPEECH_END_SILENCE_MS);
                       b.getClass().getMethod("setSpeechDurationMs", int.class).invoke(b, VAD_SPEECH_START_MS);
@@ -1530,7 +1542,7 @@ jobs:
 
               boolean ensureExternalVadReady() {
                   if("pass".equals(vadEngineMode) || vadFallbackActive) return true;
-                  if(!"webrtc_quiet".equals(vadEngineMode) && !"webrtc_medium".equals(vadEngineMode) && !"webrtc".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode)) {
+                  if(!"webrtc_quiet".equals(vadEngineMode) && !"webrtc_medium".equals(vadEngineMode) && !"webrtc".equals(vadEngineMode) && !"silero_off".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode)) {
                       activateVadFallback("Unknown VAD mode: " + vadEngineMode, null);
                       return true;
                   }
@@ -2466,6 +2478,9 @@ jobs:
           
               void resetAudioModeState() {
                   streaming = false;
+                  microphoneStarting = false;
+                  microphonePcmReady = false;
+                  microphoneStartUiEarliestMs = 0L;
                   cancelMicLifeSignal();
                   voiceSendActive = false;
                   clearPreRollAudio();
@@ -2543,6 +2558,20 @@ jobs:
                   });
               }
           
+              void markMicrophoneUiReady(AudioRecord activeRec) {
+                  if(!microphoneStarting || !microphonePcmReady || !streaming || rec != activeRec) return;
+                  long waitMs = Math.max(0L, microphoneStartUiEarliestMs - android.os.SystemClock.elapsedRealtime());
+                  new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                      if(!microphoneStarting || !microphonePcmReady || !streaming || rec != activeRec) return;
+                      microphoneStarting = false;
+                      String base = vadFallbackActive ? "mikrofon aktív – VAD tartalék mód" : "mikrofon aktív";
+                      if(interpreterMode) base += " – " + interpreterRuntimeShortLabel();
+                      state.setText(base);
+                      scheduleMicLifeSignal();
+                      updateButtons();
+                  }, waitMs);
+              }
+
               void audioLoop() {
                   int sr = AUDIO_SAMPLE_RATE;
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
@@ -2551,6 +2580,8 @@ jobs:
                   rec = makeBestAudioRecord(sr, bs);
                   if(rec == null) {
                       connected = false;
+                      microphoneStarting = false;
+                      microphonePcmReady = false;
                       stopBackgroundForegroundService();
                       runOnUiThread(() -> { state.setText("mikrofon nem inicializálható"); setInputRouteHeader("BEMENET: HIBA"); updateButtons(); });
                       return;
@@ -2562,6 +2593,8 @@ jobs:
                   } catch(Exception e) {
                       android.util.Log.e(LOG_TAG, "Microphone start failed", e);
                       connected = false;
+                      microphoneStarting = false;
+                      microphonePcmReady = false;
                           try { rec.release(); } catch(Exception releaseError) { android.util.Log.w(LOG_TAG, "AudioRecord release failed", releaseError); }
                       rec = null;
                       stopBackgroundForegroundService();
@@ -2581,10 +2614,7 @@ jobs:
                   }, 1400L);
                   setSpeechUiLocked(false);
                   runOnUiThread(() -> {
-                      String base = vadFallbackActive ? "mikrofon aktív – VAD tartalék mód" : "mikrofon aktív";
-                      if(interpreterMode) base += " – " + interpreterRuntimeShortLabel();
-                      state.setText(base);
-                      scheduleMicLifeSignal();
+                      state.setText("mikrofon előkészítés");
                       updateButtons();
                   });
 
@@ -2610,6 +2640,10 @@ jobs:
                               try {
                                   byte[] pcm16k = normalizeCapturedPcmTo16k(buf, read);
                                   if(pcm16k.length == 0) continue;
+                                  if(!microphonePcmReady) {
+                                      microphonePcmReady = true;
+                                      markMicrophoneUiReady(activeRec);
+                                  }
                                   monitorDirectBleSignal(pcm16k, pcm16k.length);
                                   synchronized(audioProcessingLock) {
                                       processCapturedAudio(pcm16k, pcm16k.length);
@@ -2663,6 +2697,9 @@ jobs:
                   if(finalizingStop && flushRemaining) return;
                   streaming = false;
                   connected = false;
+                  microphoneStarting = false;
+                  microphonePcmReady = false;
+                  microphoneStartUiEarliestMs = 0L;
                   cancelMicLifeSignal();
                   ttsMuteUntilMs = 0L;
 
@@ -4164,7 +4201,8 @@ jobs:
                       refreshMenuButton((Button)v, "Tükör mód", displayModeLabel(), mirrorBottomMode);
                       updateButtons();
                   });
-                  addMenuButton(box, "Beszélgetési profil", profileLabel(), false, v -> chooseProfile());
+                  Button profileBtn = addMenuButton(box, "Beszélgetési profil", profileLabel(), false, v -> chooseProfile());
+                  openProfileMenuButton = profileBtn;
                   addMenuButton(box, "Zajszűrés és tolmácsolás", noiseAndTranslationLabel(), false, v -> noiseAndTranslationMenu());
                   addMenuButton(box, "Ablakkezelés", "másolás, teljes törlés", false, v -> windowMenu());
                   addMenuButton(box, "OpenAI API kulcs és modell", hasKey() ? "kulcs mentve / " + modelLabel() : "nincs kulcs / " + modelLabel(), false, v -> showApi());
@@ -4173,6 +4211,7 @@ jobs:
                   AlertDialog dlg = new AlertDialog.Builder(this).setView(box).create();
                   dlg.setOnDismissListener(di -> {
                       if(openInterpreterMenuButton == interpreterBtn) openInterpreterMenuButton = null;
+                      if(openProfileMenuButton == profileBtn) openProfileMenuButton = null;
                   });
                   dlg.setOnShowListener(di -> {
                       try {
@@ -4268,6 +4307,16 @@ jobs:
                   runOnUiThread(() -> {
                       if(openInterpreterMenuButton == b && b.isAttachedToWindow()) {
                           refreshInterpreterMenuButton(b);
+                      }
+                  });
+              }
+
+              void refreshOpenProfileMenuButton() {
+                  final Button b = openProfileMenuButton;
+                  if(b == null) return;
+                  runOnUiThread(() -> {
+                      if(openProfileMenuButton == b && b.isAttachedToWindow()) {
+                          refreshMenuButton(b, "Beszélgetési profil", profileLabel(), false);
                       }
                   });
               }
@@ -5178,7 +5227,7 @@ jobs:
               }
           
               void chooseModel() { chooseFrom("AI modell", models, model, v -> { model = v; save(); restartIfNeeded(); }); }
-              void chooseProfile() { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save();  }); }
+              void chooseProfile() { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save(); refreshOpenProfileMenuButton(); }); }
               void chooseMode() { chooseFrom("Fordítás stílusa", modes, mode, v -> { mode = v; save();  }); }
               void chooseVadEngine() { chooseFrom("Beszéddarabolás / VAD", vadEngineModes, vadEngineMode, v -> { vadEngineMode = v; save(); closeExternalVad(); restartIfNeeded(); }); }
               void chooseVad() { chooseFrom("Két mondat közötti szünet", vadModes, vadMode, v -> { vadMode = v; save(); restartIfNeeded(); }); }
@@ -5327,6 +5376,7 @@ jobs:
                   if("webrtc_quiet".equals(vadEngineMode)) return "WebRTC VAD – csendes";
                   if("webrtc_medium".equals(vadEngineMode)) return "WebRTC VAD – közepes";
                   if("webrtc".equals(vadEngineMode)) return "WebRTC VAD – zajos";
+                  if("silero_off".equals(vadEngineMode)) return "Silero VAD – OFF / extra érzékeny";
                   if("silero".equals(vadEngineMode)) return "Silero VAD – NORMAL / ajánlott";
                   if("silero_medium".equals(vadEngineMode)) return "Silero VAD – AGGRESSIVE";
                   if("silero_truck".equals(vadEngineMode)) return "Silero VAD – VERY AGGRESSIVE";
@@ -5381,6 +5431,7 @@ jobs:
 
               String sharedTextCleanupInstructions() {
                   // V40.17: a RENDEZ és a FORDÍT ugyanazt az egysoros mondattagolást használja.
+                  // V40.18: négy Silero fokozat, késleltetett mikrofon-kész jelzés és azonnali profilmenü-frissítés.
                   return nonConversationalLanguageTaskRules() +
                       profilePrompt() +
                       cleanupBehaviorRules() +
@@ -5576,6 +5627,9 @@ jobs:
                   if(finalizingStop) {
                       micBtn.setText("VÁRJ");
                       setOvalButtonColor(micBtn, Color.rgb(170,105,30));
+                  } else if(microphoneStarting) {
+                      micBtn.setText("VÁRJ");
+                      setOvalButtonColor(micBtn, Color.rgb(170,105,30));
                   } else {
                       micBtn.setText(streaming ? "STOP" : "MIKROFON");
                       setOvalButtonColor(micBtn, streaming ? Color.rgb(20,190,70) : Color.rgb(220,35,35));
@@ -5748,14 +5802,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.17.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.17.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.18.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.18.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.17
+          name: V40.18
           path: |
             artifact/*.apk
             artifact/*.aab
