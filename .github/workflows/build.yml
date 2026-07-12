@@ -1,4 +1,4 @@
-name: Build Android APK V40.7
+name: Build Android APK V40.8
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 407; versionName = "40.7" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 408; versionName = "40.8" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.7" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.8" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -250,7 +250,15 @@ jobs:
               AudioDeviceInfo preferredInterpreterInputDevice;
               boolean interpreterCommunicationFallbackActive = false;
               int rejectedInterpreterInputDeviceId = -1;
-              // V40.7: elsődlegesen MODE_NORMAL + közvetlen AudioRecord bemenet; kommunikációs út csak tartalék.
+              // V40.8: a BLE headset közvetlen útja natív 32 kHz/MIC felvételt használ,
+              // majd egyetlen lépésben 16 kHz-re alakítja a meglévő VAD/STT lánc előtt.
+              int activeCaptureSampleRate = 16000;
+              int activeCaptureChannelCount = 1;
+              boolean directBleCaptureActive = false;
+              final ByteArrayOutputStream captureRateRemainder = new ByteArrayOutputStream();
+              long directBleDigitalSilenceMs = 0L;
+              boolean directBleFallbackRequested = false;
+              int activeCommunicationDeviceId = -1;
               String activeInterpreterRoute = "off"; // off, headset_direct, headset_communication_fallback, speaker_half_duplex
               String activeCommunicationDeviceLabel = "";
               AudioDeviceCallback interpreterAudioDeviceCallback;
@@ -270,7 +278,7 @@ jobs:
               String interpreterAudioMode = "off";
               String lastInterpreterAudioMode = "auto";
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV407";
+              static final String LOG_TAG = "ForditoV408";
               static final int PRE_ROLL_AUDIO_MS = 800;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
@@ -586,11 +594,11 @@ jobs:
                       sp.edit().putInt("stableDefaultsVersion", 404).apply();
                       save();
                   }
-                  if(last < 407) {
-                      // V40.7: a tolmács alapútvonala MODE_NORMAL + VOICE_RECOGNITION.
-                      // A kommunikációs mód csak akkor maradhat, ha a közvetlen headsetbemenetet az Android elutasítja.
+                  if(last < 408) {
+                      // V40.8: BLE headsetnél MODE_NORMAL + MIC 32 kHz az elsődleges út, belső 16 kHz átalakítással.
+                      // A kommunikációs mód csak elutasított vagy digitálisan néma közvetlen bemenetnél maradhat.
                       audioSourceMode = "recognition";
-                      sp.edit().putInt("stableDefaultsVersion", 407).apply();
+                      sp.edit().putInt("stableDefaultsVersion", 408).apply();
                       save();
                   }
               }
@@ -628,7 +636,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.7");
+                  TextView title = label("Fordito_V40.8");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -1828,22 +1836,27 @@ jobs:
               }
 
               AudioRecord createInitializedAudioRecord(int source, int sampleRate, int requestedBufferBytes) {
+                  return createInitializedAudioRecord(source, sampleRate, requestedBufferBytes, AudioFormat.CHANNEL_IN_MONO);
+              }
+
+              AudioRecord createInitializedAudioRecord(int source, int sampleRate, int requestedBufferBytes, int channelMask) {
                   AudioRecord candidate = null;
                   try {
                       int min = AudioRecord.getMinBufferSize(
                           sampleRate,
-                          AudioFormat.CHANNEL_IN_MONO,
+                          channelMask,
                           AudioFormat.ENCODING_PCM_16BIT
                       );
-                      int safeMin = min > 0 ? min : SILERO_FRAME_BYTES * 8;
+                      int channelCount = channelMask == AudioFormat.CHANNEL_IN_STEREO ? 2 : 1;
+                      int safeMin = min > 0 ? min : SILERO_FRAME_BYTES * 8 * channelCount;
                       int bufferBytes = Math.max(requestedBufferBytes, safeMin);
                       // Legalább több teljes 32 ms-os keret férjen a rendszerpufferbe.
-                      bufferBytes = Math.max(bufferBytes, SILERO_FRAME_BYTES * 8);
+                      bufferBytes = Math.max(bufferBytes, SILERO_FRAME_BYTES * 8 * channelCount);
 
                       AudioFormat format = new AudioFormat.Builder()
                           .setSampleRate(sampleRate)
                           .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                          .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                          .setChannelMask(channelMask)
                           .build();
 
                       candidate = new AudioRecord.Builder()
@@ -1853,7 +1866,8 @@ jobs:
                           .build();
 
                       if(candidate.getState() == AudioRecord.STATE_INITIALIZED) {
-                          android.util.Log.i(LOG_TAG, "AudioRecord initialized with " + audioSourceLabel(source) + ", buffer=" + bufferBytes);
+                          android.util.Log.i(LOG_TAG, "AudioRecord initialized with " + audioSourceLabel(source) +
+                              ", sampleRate=" + sampleRate + ", channels=" + channelCount + ", buffer=" + bufferBytes);
                           return candidate;
                       }
                       android.util.Log.w(LOG_TAG, "AudioRecord remained uninitialized with " + audioSourceLabel(source));
@@ -1867,6 +1881,29 @@ jobs:
                   return null;
               }
 
+              AudioRecord tryPreferredAudioRecord(int source, int sampleRate, int requestedBufferBytes, AudioDeviceInfo preferredDevice) {
+                  return tryPreferredAudioRecord(source, sampleRate, requestedBufferBytes, preferredDevice, AudioFormat.CHANNEL_IN_MONO);
+              }
+
+              AudioRecord tryPreferredAudioRecord(int source, int sampleRate, int requestedBufferBytes,
+                                                   AudioDeviceInfo preferredDevice, int channelMask) {
+                  AudioRecord candidate = createInitializedAudioRecord(source, sampleRate, requestedBufferBytes, channelMask);
+                  if(candidate == null) return null;
+                  if(preferredDevice == null) return candidate;
+                  boolean accepted = false;
+                  try {
+                      accepted = candidate.setPreferredDevice(preferredDevice);
+                      android.util.Log.i(LOG_TAG, "Preferred input " + audioDeviceLabel(preferredDevice) +
+                          " accepted=" + accepted + ", source=" + audioSourceLabel(source) + ", sampleRate=" + sampleRate +
+                          ", channels=" + (channelMask == AudioFormat.CHANNEL_IN_STEREO ? 2 : 1));
+                  } catch(Exception e) {
+                      android.util.Log.w(LOG_TAG, "Preferred input selection failed", e);
+                  }
+                  if(accepted) return candidate;
+                  try { candidate.release(); } catch(Exception ignored) {}
+                  return null;
+              }
+
               AudioRecord tryAudioRecordCandidates(int sampleRate, int requestedBufferBytes, AudioDeviceInfo preferredDevice) {
                   LinkedHashSet<Integer> candidates = new LinkedHashSet<>();
                   candidates.add(selectedAudioSource());
@@ -1875,41 +1912,97 @@ jobs:
 
                   for(Integer source : candidates) {
                       if(source == null) continue;
-                      AudioRecord candidate = createInitializedAudioRecord(source, sampleRate, requestedBufferBytes);
-                      if(candidate == null) continue;
-                      if(preferredDevice != null) {
-                          boolean accepted = false;
-                          try {
-                              accepted = candidate.setPreferredDevice(preferredDevice);
-                              android.util.Log.i(LOG_TAG, "Preferred input " + audioDeviceLabel(preferredDevice) + " accepted=" + accepted);
-                          } catch(Exception e) {
-                              android.util.Log.w(LOG_TAG, "Preferred input selection failed", e);
-                          }
-                          if(!accepted) {
-                              try { candidate.release(); } catch(Exception ignored) {}
-                              continue;
-                          }
-                      }
-                      return candidate;
+                      AudioRecord candidate = tryPreferredAudioRecord(source, sampleRate, requestedBufferBytes, preferredDevice);
+                      if(candidate != null) return candidate;
                   }
                   return null;
               }
 
+              boolean isBleHeadsetInput(AudioDeviceInfo device) {
+                  return device != null && Build.VERSION.SDK_INT >= 31 && device.getType() == AudioDeviceInfo.TYPE_BLE_HEADSET;
+              }
+
+              boolean deviceAdvertisesSampleRate(AudioDeviceInfo device, int sampleRate) {
+                  if(device == null) return false;
+                  try {
+                      int[] rates = device.getSampleRates();
+                      if(rates == null || rates.length == 0) return true;
+                      for(int rate : rates) if(rate == sampleRate) return true;
+                  } catch(Exception e) {
+                      android.util.Log.w(LOG_TAG, "Input sample-rate query failed", e);
+                      return true;
+                  }
+                  return false;
+              }
+
+              int preferredBleChannelMask(AudioDeviceInfo device) {
+                  if(device == null) return AudioFormat.CHANNEL_IN_MONO;
+                  try {
+                      int[] counts = device.getChannelCounts();
+                      if(counts == null || counts.length == 0) return AudioFormat.CHANNEL_IN_MONO;
+                      boolean stereo = false;
+                      for(int count : counts) if(count >= 2) stereo = true;
+                      // A BLE Audio útmutató szerint támogatott kétcsatornás bemenetnél
+                      // sztereót kérünk, majd a beszédfeldolgozás előtt monóra keverjük.
+                      if(stereo) return AudioFormat.CHANNEL_IN_STEREO;
+                  } catch(Exception e) {
+                      android.util.Log.w(LOG_TAG, "Input channel-count query failed", e);
+                  }
+                  return AudioFormat.CHANNEL_IN_MONO;
+              }
+
               AudioRecord makeBestAudioRecord(int sampleRate, int requestedBufferBytes) {
-                  // Elsődleges tolmács út: MODE_NORMAL + VOICE_RECOGNITION + közvetlen bemeneti eszköz.
+                  activeCaptureSampleRate = AUDIO_SAMPLE_RATE;
+                  activeCaptureChannelCount = 1;
+                  directBleCaptureActive = false;
+                  directBleDigitalSilenceMs = 0L;
+                  directBleFallbackRequested = false;
+                  synchronized(captureRateRemainder) { captureRateRemainder.reset(); }
+
                   if(interpreterMode && "headset_direct".equals(activeInterpreterRoute) && preferredInterpreterInputDevice != null) {
-                      AudioRecord direct = tryAudioRecordCandidates(sampleRate, requestedBufferBytes, preferredInterpreterInputDevice);
-                      if(direct != null) return direct;
+                      AudioRecord direct = null;
+                      if(isBleHeadsetInput(preferredInterpreterInputDevice)) {
+                          // Az Android BLE Audio rögzítési útmutatója MIC + 32 kHz felvételt használ.
+                          // A 16 kHz-es VOICE_RECOGNITION közvetlen BLE út Samsung/Buds eszközön
+                          // elfogadott útvonal mellett is néma PCM-et adhat.
+                          int bleChannelMask = preferredBleChannelMask(preferredInterpreterInputDevice);
+                          int bleChannels = bleChannelMask == AudioFormat.CHANNEL_IN_STEREO ? 2 : 1;
+                          if(deviceAdvertisesSampleRate(preferredInterpreterInputDevice, 32000)) {
+                              direct = tryPreferredAudioRecord(MediaRecorder.AudioSource.MIC, 32000,
+                                  Math.max(requestedBufferBytes * 2 * bleChannels, SILERO_FRAME_BYTES * 16 * bleChannels),
+                                  preferredInterpreterInputDevice, bleChannelMask);
+                              if(direct != null) {
+                                  activeCaptureSampleRate = 32000;
+                                  activeCaptureChannelCount = bleChannels;
+                                  directBleCaptureActive = true;
+                                  return direct;
+                              }
+                          }
+                          direct = tryPreferredAudioRecord(MediaRecorder.AudioSource.MIC, AUDIO_SAMPLE_RATE,
+                              Math.max(requestedBufferBytes * bleChannels, SILERO_FRAME_BYTES * 8 * bleChannels),
+                              preferredInterpreterInputDevice, bleChannelMask);
+                          if(direct != null) {
+                              activeCaptureSampleRate = AUDIO_SAMPLE_RATE;
+                              activeCaptureChannelCount = bleChannels;
+                              directBleCaptureActive = true;
+                              return direct;
+                          }
+                      } else {
+                          direct = tryAudioRecordCandidates(sampleRate, requestedBufferBytes, preferredInterpreterInputDevice);
+                          if(direct != null) return direct;
+                      }
 
                       rejectedInterpreterInputDeviceId = preferredInterpreterInputDevice.getId();
                       android.util.Log.w(LOG_TAG, "Direct headset input was rejected; trying communication fallback, deviceId=" + rejectedInterpreterInputDeviceId);
                       if(activateInterpreterCommunicationFallback()) {
+                          waitForCommunicationDeviceActivation(1800L);
                           AudioRecord fallback = tryAudioRecordCandidates(sampleRate, requestedBufferBytes, null);
                           if(fallback != null) return fallback;
                       } else {
                           activeInterpreterRoute = "speaker_half_duplex";
                           activeCommunicationDeviceLabel = "telefon mikrofon";
                           interpreterCommunicationFallbackActive = false;
+                          activeCommunicationDeviceId = -1;
                           applyTtsAudioAttributes();
                       }
                   }
@@ -1991,8 +2084,12 @@ jobs:
                   }
                   try {
                       AudioDeviceInfo routed = recorder.getRoutedDevice();
-                      if(routed != null) setInputRouteHeader("BEMENET: " + compactAudioDeviceLabel(routed));
-                      else setInputRouteHeader("BEMENET: útvonal ellenőrzés…");
+                      if(routed != null) {
+                          String suffix = directBleCaptureActive && activeCaptureSampleRate == 32000 ?
+                              (activeCaptureChannelCount > 1 ? " • 32k sztereó→16k" : " • 32→16 kHz") :
+                              (interpreterCommunicationFallbackActive ? " • kommunikációs" : "");
+                          setInputRouteHeader("BEMENET: " + compactAudioDeviceLabel(routed) + suffix);
+                      } else setInputRouteHeader("BEMENET: útvonal ellenőrzés…");
                   } catch(Exception e) {
                       android.util.Log.w(LOG_TAG, "Actual input route query failed", e);
                       setInputRouteHeader("BEMENET: ismeretlen");
@@ -2084,6 +2181,7 @@ jobs:
 
               void clearForcedCommunicationRoute() {
                   if(audioManager == null) audioManager = (AudioManager)getSystemService(AUDIO_SERVICE);
+                  activeCommunicationDeviceId = -1;
                   if(audioManager == null) return;
                   try {
                       if(Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice();
@@ -2095,6 +2193,24 @@ jobs:
                   try { audioManager.setSpeakerphoneOn(false); } catch(Exception ignored) {}
                   try { audioManager.setMode(AudioManager.MODE_NORMAL); }
                   catch(Exception e) { android.util.Log.w(LOG_TAG, "MODE_NORMAL restore failed", e); }
+              }
+
+              boolean waitForCommunicationDeviceActivation(long timeoutMs) {
+                  if(!interpreterCommunicationFallbackActive || Build.VERSION.SDK_INT < 31 || audioManager == null || activeCommunicationDeviceId < 0)
+                      return true;
+                  long deadline = SystemClock.elapsedRealtime() + Math.max(0L, timeoutMs);
+                  while(SystemClock.elapsedRealtime() < deadline) {
+                      try {
+                          AudioDeviceInfo current = audioManager.getCommunicationDevice();
+                          if(current != null && current.getId() == activeCommunicationDeviceId) return true;
+                      } catch(Exception e) {
+                          android.util.Log.w(LOG_TAG, "Communication route status query failed", e);
+                          return false;
+                      }
+                      SystemClock.sleep(60L);
+                  }
+                  android.util.Log.w(LOG_TAG, "Communication device activation timed out, deviceId=" + activeCommunicationDeviceId);
+                  return false;
               }
 
               boolean activateInterpreterCommunicationFallback() {
@@ -2126,6 +2242,7 @@ jobs:
                           interpreterCommunicationFallbackActive = true;
                           activeInterpreterRoute = "headset_communication_fallback";
                           activeCommunicationDeviceLabel = audioDeviceLabel(headset);
+                          activeCommunicationDeviceId = headset.getId();
                           applyTtsAudioAttributes();
                           refreshInterpreterFloatingButton();
                           refreshOpenInterpreterMenuButton();
@@ -2139,6 +2256,7 @@ jobs:
 
                   clearForcedCommunicationRoute();
                   interpreterCommunicationFallbackActive = false;
+                  activeCommunicationDeviceId = -1;
                   return false;
               }
 
@@ -2192,6 +2310,7 @@ jobs:
                   clearForcedCommunicationRoute();
                   preferredInterpreterInputDevice = null;
                   interpreterCommunicationFallbackActive = false;
+                  activeCommunicationDeviceId = -1;
                   activeInterpreterRoute = "off";
                   activeCommunicationDeviceLabel = "";
                   applyTtsAudioAttributes();
@@ -2268,9 +2387,74 @@ jobs:
                   clearSpeechAudioWindow();
                   closeExternalVad();
                   resetCapturedFrameState();
+                  synchronized(captureRateRemainder) { captureRateRemainder.reset(); }
+                  activeCaptureSampleRate = AUDIO_SAMPLE_RATE;
+                  activeCaptureChannelCount = 1;
+                  directBleCaptureActive = false;
+                  directBleDigitalSilenceMs = 0L;
+                  directBleFallbackRequested = false;
                   resetSttOrderingForNewSession();
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception e) { android.util.Log.w(LOG_TAG, "AudioRecord reset failed", e); }
                   rec = null;
+              }
+
+              byte[] normalizeCapturedPcmTo16k(byte[] data, int len) {
+                  if(data == null || len <= 0) return new byte[0];
+                  synchronized(captureRateRemainder) {
+                      captureRateRemainder.write(data, 0, len);
+                      byte[] all = captureRateRemainder.toByteArray();
+                      int rateRatio = activeCaptureSampleRate == 32000 ? 2 : 1;
+                      int channels = Math.max(1, activeCaptureChannelCount);
+                      int inputGroupBytes = rateRatio * channels * 2;
+                      int usable = all.length - (all.length % inputGroupBytes);
+                      if(usable <= 0) return new byte[0];
+                      ByteArrayOutputStream out = new ByteArrayOutputStream(usable / (rateRatio * channels));
+                      for(int i=0;i<usable;i+=inputGroupBytes) {
+                          long sum = 0L;
+                          int sampleCount = rateRatio * channels;
+                          int pos = i;
+                          for(int n=0;n<sampleCount;n++) {
+                              short sample = (short)(((all[pos+1] & 0xff) << 8) | (all[pos] & 0xff));
+                              sum += sample;
+                              pos += 2;
+                          }
+                          int avg = (int)(sum / Math.max(1, sampleCount));
+                          out.write(avg & 0xff);
+                          out.write((avg >> 8) & 0xff);
+                      }
+                      captureRateRemainder.reset();
+                      if(usable < all.length) captureRateRemainder.write(all, usable, all.length - usable);
+                      return out.toByteArray();
+                  }
+              }
+
+              void monitorDirectBleSignal(byte[] pcm16k, int len) {
+                  if(!directBleCaptureActive || directBleFallbackRequested || !interpreterMode ||
+                     !"headset_direct".equals(activeInterpreterRoute) || pcm16k == null || len < 2) return;
+                  int maxAbs = 0;
+                  for(int i=0;i+1<len;i+=2) {
+                      short sample = (short)(((pcm16k[i+1] & 0xff) << 8) | (pcm16k[i] & 0xff));
+                      int abs = Math.abs((int)sample);
+                      if(abs > maxAbs) maxAbs = abs;
+                  }
+                  int ms = pcm16Mono16kMs(len);
+                  if(maxAbs <= 2) directBleDigitalSilenceMs += ms;
+                  else directBleDigitalSilenceMs = 0L;
+                  if(directBleDigitalSilenceMs < 5000L) return;
+
+                  directBleFallbackRequested = true;
+                  final int rejectedId = preferredInterpreterInputDevice == null ? -1 : preferredInterpreterInputDevice.getId();
+                  android.util.Log.w(LOG_TAG, "Direct BLE route produced digital silence; switching to communication fallback, deviceId=" + rejectedId);
+                  runOnUiThread(() -> {
+                      if(!streaming || !interpreterMode || !"headset_direct".equals(activeInterpreterRoute)) return;
+                      stop(false);
+                      if(rejectedId >= 0) rejectedInterpreterInputDeviceId = rejectedId;
+                      state.setText("headset bemenet néma – tartalék út");
+                      setInputRouteHeader("BEMENET: kommunikációs váltás…");
+                      new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                          if(interpreterMode && !streaming && !finalizingStop) start(true);
+                      }, 850L);
+                  });
               }
           
               void audioLoop() {
@@ -2319,7 +2503,9 @@ jobs:
                   });
 
                   audioExec.submit(() -> {
-                      byte[] buf = new byte[SILERO_FRAME_BYTES];
+                      int rateRatio = activeCaptureSampleRate == 32000 ? 2 : 1;
+                      int captureFrameBytes = SILERO_FRAME_BYTES * rateRatio * Math.max(1, activeCaptureChannelCount);
+                      byte[] buf = new byte[captureFrameBytes];
                       clearPreRollAudio();
                       clearPendingSpeechAudio();
                       clearSpeechAudioWindow();
@@ -2336,8 +2522,11 @@ jobs:
                           if(read > 0) {
                               if(!streaming && !finalizingStop) break;
                               try {
+                                  byte[] pcm16k = normalizeCapturedPcmTo16k(buf, read);
+                                  if(pcm16k.length == 0) continue;
+                                  monitorDirectBleSignal(pcm16k, pcm16k.length);
                                   synchronized(audioProcessingLock) {
-                                      processCapturedAudio(buf, read);
+                                      processCapturedAudio(pcm16k, pcm16k.length);
                                   }
                               } catch(Exception e) {
                                   android.util.Log.e(LOG_TAG, "Audio processing failed", e);
@@ -4697,6 +4886,7 @@ jobs:
                       clearForcedCommunicationRoute();
                       preferredInterpreterInputDevice = null;
                       interpreterCommunicationFallbackActive = false;
+                      activeCommunicationDeviceId = -1;
                       rejectedInterpreterInputDeviceId = -1;
                       activeInterpreterRoute = "off";
                       activeCommunicationDeviceLabel = "";
@@ -4930,7 +5120,7 @@ jobs:
               void chooseInterpreterMode() {
                   String[][] data = {
                       {"Kikapcsolva", "off", "csak szöveges fordítás, nincs felolvasás"},
-                      {"Automatikus tolmács", "auto", "headsetnél közvetlen MODE_NORMAL bemenet; csak hiba esetén kommunikációs tartalék; hangszórónál TTS alatt mikrofonkapu"}
+                      {"Automatikus tolmács", "auto", "BLE headsetnél közvetlen MIC 32 kHz → 16 kHz; néma/elutasított bemenetnél kommunikációs tartalék; hangszórónál TTS alatt mikrofonkapu"}
                   };
                   CharSequence[] labels = new CharSequence[data.length];
                   for(int i=0;i<data.length;i++) {
@@ -5422,14 +5612,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.7.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.7.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.8.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.8.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.7
+          name: V40.8
           path: |
             artifact/*.apk
             artifact/*.aab
