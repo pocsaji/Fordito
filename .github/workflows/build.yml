@@ -1,4 +1,4 @@
-name: Build Android APK V40.9
+name: Build Android APK V40.10
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 409; versionName = "40.9" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 410; versionName = "40.10" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.9" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.10" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -278,7 +278,7 @@ jobs:
               String interpreterAudioMode = "off";
               String lastInterpreterAudioMode = "auto";
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV409";
+              static final String LOG_TAG = "ForditoV410";
               static final int PRE_ROLL_AUDIO_MS = 800;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
@@ -635,7 +635,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.9");
+                  TextView title = label("Fordito_V40.10");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -1370,12 +1370,15 @@ jobs:
                   String top = code(topLang).toUpperCase(Locale.ROOT);
                   String bottom = code(bottomLang).toUpperCase(Locale.ROOT);
                   return "Transcribe only the words that are clearly audible. " +
-                      "The speech language is either " + top + " or " + bottom + ". " +
+                      "The speech language is exactly one of these two languages: " + top + " or " + bottom + ". " +
+                      "For ordinary speech, never output words from a third language and never create a mixed-language transcription. " +
+                      "If an unclear sound cannot be written confidently as a word in either selected language, omit only that unclear sound. " +
+                      "Clearly spoken person, place, company and product names may keep their real spelling. " +
                       transcriptionProfilePrompt() +
                       "Do not translate. Do not paraphrase. Do not repair meaning. " +
                       "Do not complete unfinished sentences or add a sentence ending. " +
                       "Do not infer or invent missing words. Keep fragments and incomplete phrases incomplete. " +
-                      "Preserve names, places, numbers, slang and profanity exactly as heard. " +
+                      "Preserve clearly audible names, numbers, slang and profanity exactly as heard. " +
                       "If a word is unclear, omit only that unclear word instead of guessing or creating a full sentence.";
               }
 
@@ -3715,9 +3718,12 @@ jobs:
                       // V341: strict Structured Outputs. A forrásnyelv csak a kiválasztott két kód egyike lehet.
                       JSONObject properties = new JSONObject();
                       properties.put("source_lang", new JSONObject().put("type", "string")
-                          .put("enum", new JSONArray().put(topCode).put(bottomCode)));
-                      properties.put("clean_source", new JSONObject().put("type", "string"));
-                      properties.put("translation", new JSONObject().put("type", "string"));
+                          .put("enum", new JSONArray().put(topCode).put(bottomCode))
+                          .put("description", "The detected source language. It must be exactly one of the two selected language codes."));
+                      properties.put("clean_source", new JSONObject().put("type", "string")
+                          .put("description", "Corrected transcription entirely in source_lang. No ordinary words from a third language and no target-language mixture; only genuine proper names may retain their real spelling."));
+                      properties.put("translation", new JSONObject().put("type", "string")
+                          .put("description", "Translation entirely in the other selected language, without source-language or third-language mixture except genuine proper names."));
                       JSONObject schema = new JSONObject()
                           .put("type", "object").put("properties", properties)
                           .put("required", new JSONArray().put("source_lang").put("clean_source").put("translation"))
@@ -5285,9 +5291,9 @@ jobs:
               }
 
               String speechBlockInstructions() {
-                  // V40.9: élő tolmácsolásnál a b.sourceTop csak ideiglenes kijelzési hely.
-                  // Nem lehet nyelvi irányjelzés, mert nyelvváltáskor a korábbi oldal marad benne.
-                  // Ez okozta, hogy HU beszéd FR forrásként, majd HU->HU eredménnyel átmehetett.
+                  // V40.10: élő tolmácsolásnál a b.sourceTop csak ideiglenes kijelzési hely,
+                  // és a kiválasztott nyelvpár kemény határ: harmadik nyelvű STT-zaj nem mehet át clean_source-ként.
+                  // A blokk továbbra is egyetlen meglévő tisztítási/fordítási kör marad.
                   String topCode = code(topLang);
                   String bottomCode = code(bottomLang);
                   return "Selected languages are fixed. Work only between these two languages.\n" +
@@ -5301,9 +5307,11 @@ jobs:
                       translationModePrompt() +
                       "You receive one live speech fragment as source data. " +
                       "Choose exactly which of the two selected languages the RAW_SPEECH_TEXT is in. " +
-                      "First produce clean_source in that same detected source language. Lightly clean it: correct only clear speech-recognition errors, malformed words, punctuation, grammar, word order, accidental repetitions and isolated recognition debris when the fragment itself or the supplied context supports one clear correction. " +
+                      "First produce clean_source entirely in that same detected source language. Lightly clean it: correct only clear speech-recognition errors, malformed words, punctuation, grammar, word order, accidental repetitions and isolated recognition debris when the fragment itself or the supplied context supports one clear correction. " +
+                      "The selected pair is a hard language boundary: ordinary words in clean_source must belong to source_lang, and ordinary words in translation must belong to the other selected language. Never pass through a third-language word or a mixture of the two selected languages merely because it appeared in RAW_SPEECH_TEXT. " +
+                      "A token that looks like a third language or the wrong selected language, but is not a clearly intended person, place, company or product name, is recognition debris. Correct it to the most probable wording in source_lang only when the current fragment or supplied context supports one clear correction; otherwise omit only that token. " +
                       "Use the conversation/domain profile and PREVIOUS_CONFIRMED_CONTEXT only to resolve terminology or an otherwise clear ambiguity. Never copy earlier context into clean_source or translation. " +
-                      "Do not rewrite for style, summarize, beautify, add information, combine it with an earlier block, or replace a plausible word merely because another word fits the profile better. When uncertain, preserve the audible wording rather than guess. " +
+                      "Do not rewrite for style, summarize, beautify, add information, combine it with an earlier block, or replace a plausible source-language word merely because another word fits the profile better. When uncertainty remains between plausible words in source_lang, preserve the closer audible wording rather than inventing content. " +
                       "Preserve every substantive fact, name, number, time, negation, condition, grammatical person, politeness level, tone and intention. " +
                       "Do not complete unfinished sentences or add a missing beginning or ending. If the input is a fragment, clean_source and translation must remain fragments because the next block may continue it. " +
                       "Then translate clean_source only into the other selected language and follow TRANSLATION_STYLE. " +
@@ -5614,14 +5622,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.9.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.9.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.10.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.10.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.9
+          name: V40.10
           path: |
             artifact/*.apk
             artifact/*.aab
