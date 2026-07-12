@@ -1,4 +1,4 @@
-name: Build Android APK V40.14
+name: Build Android APK V40.15
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 414; versionName = "40.14" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 415; versionName = "40.15" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.14" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.15" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -276,14 +276,14 @@ jobs:
               boolean interpreterMode = false;
               // V40.12: a mikrofon futása és a tolmács felolvasása külön kapcsolható.
               // V40.13: kizárólag a főmenü megnevezései lettek pontosítva; működési logika nem változott.
-              // V40.14: a Tolmács menügomb a lebegő gomb láthatóságát, a lebegő gomb színe a felolvasás állapotát mutatja.
+              // V40.15: a Tolmács menügomb azonnal követi a lebegő gomb létét, és annak aktív/inaktív színét.
               // A lebegő Bluetooth/hangszóró gomb kizárólag ezt a kimeneti állapotot váltja.
               boolean interpreterSpeechOutputEnabled = true;
               // V40.4: egyetlen látható automatikus mód. A belső útvonal headset / AEC / fél-duplex.
               String interpreterAudioMode = "off";
               String lastInterpreterAudioMode = "auto";
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV414";
+              static final String LOG_TAG = "ForditoV415";
               static final int PRE_ROLL_AUDIO_MS = 800;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
@@ -648,7 +648,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.14");
+                  TextView title = label("Fordito_V40.15");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -4227,7 +4227,10 @@ jobs:
               }
           
               boolean isInterpreterFloatingButtonVisible() {
-                  return interpreterFloatingView != null && interpreterFloatingView.isAttachedToWindow();
+                  // Az overlay referenciája már a WindowManager.addView() előtt létrejön.
+                  // Így a menü az első kattintásra azonnal GOMB KINT állapotot mutat,
+                  // nem csak a következő lebegőgomb-érintés után.
+                  return interpreterFloatingView != null;
               }
 
               String interpreterFloatingVisibilityLabel() {
@@ -4240,7 +4243,7 @@ jobs:
                   String text = title + "\n" + sub;
                   SpannableString ss = new SpannableString(text);
           
-                  // V40.14: ez a gomb kizárólag a lebegő tolmácsgomb láthatóságát jelzi.
+                  // V40.15: a felirat a lebegő gomb létét, a szín a felolvasás állapotát követi.
                   ss.setSpan(new AbsoluteSizeSpan(13, true), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   ss.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                   int st = title.length() + 1;
@@ -4248,7 +4251,11 @@ jobs:
                   ss.setSpan(new StyleSpan(android.graphics.Typeface.BOLD), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
           
                   ss.setSpan(new ForegroundColorSpan(Color.WHITE), st, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                  b.setBackgroundColor(isInterpreterFloatingButtonVisible() ? Color.rgb(30,140,70) : Color.rgb(95,95,95));
+                  boolean floatingVisible = isInterpreterFloatingButtonVisible();
+                  int menuColor = !floatingVisible
+                      ? Color.rgb(95,95,95)
+                      : (interpreterSpeechOutputEnabled ? Color.rgb(30,140,70) : Color.BLACK);
+                  b.setBackgroundColor(menuColor);
           
                   b.setText(ss);
               }
@@ -4713,7 +4720,7 @@ jobs:
               void refreshInterpreterFloatingButton() {
                   if(!(interpreterFloatingView instanceof InterpreterFloatingButton)) return;
                   InterpreterFloatingButton b=(InterpreterFloatingButton)interpreterFloatingView;
-                  // V40.14: fekete = felolvasás kikapcsolva, zöld = felolvasás aktív.
+                  // V40.15: fekete = felolvasás kikapcsolva, zöld = felolvasás aktív.
                   int outputColor = interpreterSpeechOutputEnabled ? Color.rgb(30,140,70) : Color.BLACK;
                   b.setState(outputColor, isHeadsetInterpreterRoute());
               }
@@ -5717,14 +5724,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.14.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.14.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.15.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.15.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.14
+          name: V40.15
           path: |
             artifact/*.apk
             artifact/*.aab
