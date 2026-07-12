@@ -1,4 +1,4 @@
-name: Build Android APK V40.10
+name: Build Android APK V40.11
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 410; versionName = "40.10" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 411; versionName = "40.11" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.10" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.11" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -278,7 +278,7 @@ jobs:
               String interpreterAudioMode = "off";
               String lastInterpreterAudioMode = "auto";
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV410";
+              static final String LOG_TAG = "ForditoV411";
               static final int PRE_ROLL_AUDIO_MS = 800;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
@@ -635,7 +635,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.10");
+                  TextView title = label("Fordito_V40.11");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -1961,6 +1961,15 @@ jobs:
                   directBleFallbackRequested = false;
                   synchronized(captureRateRemainder) { captureRateRemainder.reset(); }
 
+                  // V40.11: tolmács módban a headset marad a TTS kimenete, de a külső beszélőt
+                  // a telefon mikrofonja veszi. A Buds mikrofonja közelbeszélő/nyalábformált bemenet,
+                  // ezért a távolabbi beszédet és a hangszóróból érkező hangot háttérzajként elnyomhatja.
+                  if(interpreterMode && "headset_output_phone_mic".equals(activeInterpreterRoute) && preferredInterpreterInputDevice != null) {
+                      AudioRecord phoneMic = tryAudioRecordCandidates(sampleRate, requestedBufferBytes, preferredInterpreterInputDevice);
+                      if(phoneMic != null) return phoneMic;
+                      android.util.Log.w(LOG_TAG, "Built-in interpreter microphone preference was rejected; using normal system input");
+                  }
+
                   if(interpreterMode && "headset_direct".equals(activeInterpreterRoute) && preferredInterpreterInputDevice != null) {
                       AudioRecord direct = null;
                       if(isBleHeadsetInput(preferredInterpreterInputDevice)) {
@@ -2070,7 +2079,10 @@ jobs:
               }
 
               void showPlannedInputRoute() {
-                  if(preferredInterpreterInputDevice != null && "headset_direct".equals(activeInterpreterRoute)) {
+                  if(preferredInterpreterInputDevice != null && "headset_output_phone_mic".equals(activeInterpreterRoute)) {
+                      setInputRouteHeader("BEMENET: " + compactAudioDeviceLabel(preferredInterpreterInputDevice) +
+                          " • kimenet: " + activeCommunicationDeviceLabel);
+                  } else if(preferredInterpreterInputDevice != null && "headset_direct".equals(activeInterpreterRoute)) {
                       setInputRouteHeader("BEMENET: " + compactAudioDeviceLabel(preferredInterpreterInputDevice) + "…");
                   } else if(interpreterCommunicationFallbackActive) {
                       setInputRouteHeader("BEMENET: kommunikációs tartalék…");
@@ -2087,9 +2099,14 @@ jobs:
                   try {
                       AudioDeviceInfo routed = recorder.getRoutedDevice();
                       if(routed != null) {
-                          String suffix = directBleCaptureActive && activeCaptureSampleRate == 32000 ?
-                              (activeCaptureChannelCount > 1 ? " • 32k sztereó→16k" : " • 32→16 kHz") :
-                              (interpreterCommunicationFallbackActive ? " • kommunikációs" : "");
+                          String suffix;
+                          if("headset_output_phone_mic".equals(activeInterpreterRoute)) {
+                              suffix = " • kimenet: " + activeCommunicationDeviceLabel;
+                          } else if(directBleCaptureActive && activeCaptureSampleRate == 32000) {
+                              suffix = activeCaptureChannelCount > 1 ? " • 32k sztereó→16k" : " • 32→16 kHz";
+                          } else {
+                              suffix = interpreterCommunicationFallbackActive ? " • kommunikációs" : "";
+                          }
                           setInputRouteHeader("BEMENET: " + compactAudioDeviceLabel(routed) + suffix);
                       } else setInputRouteHeader("BEMENET: útvonal ellenőrzés…");
                   } catch(Exception e) {
@@ -2117,6 +2134,46 @@ jobs:
                   try { out.addAll(Arrays.asList(audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS))); }
                   catch(Exception e) { android.util.Log.w(LOG_TAG, "Input device query failed", e); }
                   return out;
+              }
+
+              AudioDeviceInfo findBuiltInInterpreterMic() {
+                  for(AudioDeviceInfo d : availableInputDevicesCompat()) {
+                      if(d != null && d.isSource() && d.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC) return d;
+                  }
+                  return null;
+              }
+
+              List<AudioDeviceInfo> availableOutputDevicesCompat() {
+                  ArrayList<AudioDeviceInfo> out = new ArrayList<>();
+                  if(audioManager == null || Build.VERSION.SDK_INT < 23) return out;
+                  try { out.addAll(Arrays.asList(audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS))); }
+                  catch(Exception e) { android.util.Log.w(LOG_TAG, "Output device query failed", e); }
+                  return out;
+              }
+
+              int interpreterHeadsetOutputPriority(AudioDeviceInfo d) {
+                  if(d == null || !d.isSink()) return -1;
+                  int type = d.getType();
+                  if(Build.VERSION.SDK_INT >= 31 && type == AudioDeviceInfo.TYPE_BLE_HEADSET) return 100;
+                  if(type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) return 95;
+                  if(type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) return 90;
+                  if(type == AudioDeviceInfo.TYPE_WIRED_HEADSET || type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES) return 80;
+                  if(type == AudioDeviceInfo.TYPE_USB_HEADSET || type == AudioDeviceInfo.TYPE_USB_DEVICE) return 70;
+                  if(type == AudioDeviceInfo.TYPE_HEARING_AID) return 60;
+                  return -1;
+              }
+
+              AudioDeviceInfo findPreferredInterpreterOutputDevice() {
+                  AudioDeviceInfo best = null;
+                  int bestPriority = -1;
+                  for(AudioDeviceInfo d : availableOutputDevicesCompat()) {
+                      int priority = interpreterHeadsetOutputPriority(d);
+                      if(priority > bestPriority) {
+                          best = d;
+                          bestPriority = priority;
+                      }
+                  }
+                  return best;
               }
 
               int headsetInputPriority(AudioDeviceInfo d) {
@@ -2279,15 +2336,27 @@ jobs:
                   interpreterRouteReconfiguring = true;
                   try {
                       clearForcedCommunicationRoute();
-                      preferredInterpreterInputDevice = findPreferredInterpreterInputDevice();
+                      AudioDeviceInfo headsetOutput = findPreferredInterpreterOutputDevice();
+                      AudioDeviceInfo phoneMic = findBuiltInInterpreterMic();
+                      preferredInterpreterInputDevice = null;
                       interpreterCommunicationFallbackActive = false;
 
-                      if(preferredInterpreterInputDevice != null) {
-                          activeInterpreterRoute = "headset_direct";
-                          activeCommunicationDeviceLabel = audioDeviceLabel(preferredInterpreterInputDevice);
-                      } else if(!activateInterpreterCommunicationFallback()) {
-                          activeInterpreterRoute = "speaker_half_duplex";
-                          activeCommunicationDeviceLabel = "telefon mikrofon / hangszóró";
+                      // V40.11: külső beszélgetésnél a headset csak kimenet. A telefon mikrofonja
+                      // szélesebb térből vesz, ezért nem nyomja el a másik személyt vagy a tesztként
+                      // használt tablet hangszóróját úgy, mint a Buds közelbeszélő mikrofonlánca.
+                      if(headsetOutput != null && phoneMic != null) {
+                          preferredInterpreterInputDevice = phoneMic;
+                          activeInterpreterRoute = "headset_output_phone_mic";
+                          activeCommunicationDeviceLabel = audioDeviceLabel(headsetOutput);
+                      } else {
+                          preferredInterpreterInputDevice = findPreferredInterpreterInputDevice();
+                          if(preferredInterpreterInputDevice != null) {
+                              activeInterpreterRoute = "headset_direct";
+                              activeCommunicationDeviceLabel = audioDeviceLabel(preferredInterpreterInputDevice);
+                          } else if(!activateInterpreterCommunicationFallback()) {
+                              activeInterpreterRoute = "speaker_half_duplex";
+                              activeCommunicationDeviceLabel = "telefon mikrofon / hangszóró";
+                          }
                       }
 
                       applyTtsAudioAttributes();
@@ -2367,11 +2436,13 @@ jobs:
                       if(!interpreterMode || interpreterRouteReconfiguring || finalizingStop) return;
                       if(rejectedInterpreterInputDeviceId >= 0 && !isInputDeviceIdPresent(rejectedInterpreterInputDeviceId))
                           rejectedInterpreterInputDeviceId = -1;
-                      boolean directNow = findPreferredInterpreterInputDevice() != null;
+                      boolean headsetOutputNow = findPreferredInterpreterOutputDevice() != null;
+                      boolean phoneMicHeadsetWas = "headset_output_phone_mic".equals(activeInterpreterRoute);
+                      boolean directNow = !headsetOutputNow && findPreferredInterpreterInputDevice() != null;
                       boolean directWas = "headset_direct".equals(activeInterpreterRoute);
-                      boolean anyHeadsetNow = directNow || findCommunicationHeadset() != null;
+                      boolean anyHeadsetNow = headsetOutputNow || directNow || findCommunicationHeadset() != null;
                       boolean anyHeadsetWas = isHeadsetInterpreterRoute();
-                      if(directNow == directWas && anyHeadsetNow == anyHeadsetWas) return;
+                      if(headsetOutputNow == phoneMicHeadsetWas && directNow == directWas && anyHeadsetNow == anyHeadsetWas) return;
                       boolean wasStreaming = streaming;
                       if(wasStreaming) stop(false);
                       configureInterpreterAudioRoute(false);
@@ -4797,6 +4868,7 @@ jobs:
               }
           
               String interpreterRuntimeShortLabel() {
+                  if("headset_output_phone_mic".equals(activeInterpreterRoute)) return "headset kimenet – telefon mikrofon";
                   if("headset_direct".equals(activeInterpreterRoute)) return "headset – közvetlen bemenet";
                   if("headset_communication_fallback".equals(activeInterpreterRoute)) return "headset – kommunikációs tartalék";
                   if("speaker_half_duplex".equals(activeInterpreterRoute)) return "hangszóró – váltott";
@@ -5112,6 +5184,7 @@ jobs:
           
               String interpreterLabel() {
                   if(!interpreterMode) return "kikapcsolva – csak szöveges fordítás";
+                  if("headset_output_phone_mic".equals(activeInterpreterRoute)) return "Automatikus tolmács – headset kimenet, telefon mikrofon";
                   if("headset_direct".equals(activeInterpreterRoute)) return "Automatikus tolmács – headset, közvetlen normál bemenet";
                   if("headset_communication_fallback".equals(activeInterpreterRoute)) return "Automatikus tolmács – headset, kommunikációs tartalék út";
                   if("speaker_half_duplex".equals(activeInterpreterRoute)) return "Automatikus tolmács – hangszóró, TTS alatt mikrofonkapu";
@@ -5121,7 +5194,7 @@ jobs:
               void chooseInterpreterMode() {
                   String[][] data = {
                       {"Kikapcsolva", "off", "csak szöveges fordítás, nincs felolvasás"},
-                      {"Automatikus tolmács", "auto", "BLE headsetnél közvetlen MIC 32 kHz → 16 kHz; néma/elutasított bemenetnél kommunikációs tartalék; hangszórónál TTS alatt mikrofonkapu"}
+                      {"Automatikus tolmács", "auto", "headsetnél a felolvasás a headseten szól, a külső beszélgetést a telefon mikrofonja veszi; közvetlen headsetbemenet csak tartalék"}
                   };
                   CharSequence[] labels = new CharSequence[data.length];
                   for(int i=0;i<data.length;i++) {
@@ -5622,14 +5695,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.10.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.10.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.11.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.11.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.10
+          name: V40.11
           path: |
             artifact/*.apk
             artifact/*.aab
