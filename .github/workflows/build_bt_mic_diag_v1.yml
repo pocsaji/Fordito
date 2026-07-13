@@ -1,4 +1,4 @@
-name: Build BT Mic Diagnosztika V1.0
+name: Build BT Mic Diagnosztika V1.2
 
 on:
   workflow_dispatch:
@@ -40,11 +40,11 @@ jobs:
               compileSdk = 35
           
               defaultConfig {
-                  applicationId = "hu.pocsaji.btmicdiag"
+                  applicationId = "hu.pocsaji.btmicdiag.v12"
                   minSdk = 26
                   targetSdk = 35
-                  versionCode = 100
-                  versionName = "1.0"
+                  versionCode = 102
+                  versionName = "1.2"
               }
           
               signingConfigs {
@@ -106,7 +106,7 @@ jobs:
           
               <application
                   android:allowBackup="false"
-                  android:label="BT mikrofon diagnosztika"
+                  android:label="BT mikrofon diagnosztika V1.2"
                   android:icon="@drawable/ic_launcher_mic"
                   android:roundIcon="@drawable/ic_launcher_mic"
                   android:supportsRtl="true"
@@ -140,6 +140,7 @@ jobs:
           import android.text.InputType;
           import android.view.Gravity;
           import android.view.View;
+          import android.view.WindowInsets;
           import android.widget.*;
           
           import org.json.JSONObject;
@@ -155,7 +156,7 @@ jobs:
           import okhttp3.*;
           
           public class MainActivity extends Activity {
-              static final String APP_VERSION = "1.0";
+              static final String APP_VERSION = "1.2";
               static final int REQ_PERMISSIONS = 1001;
               static final int TARGET_RATE = 16000;
               static final int SILERO_FRAME_BYTES = 512 * 2;
@@ -227,6 +228,7 @@ jobs:
               String lastError = "";
               String lastReset = "—";
               String apiKey = "";
+              boolean missingApiLogged = false;
           
               Object sileroVad;
               final ByteArrayOutputStream frameRemainder = new ByteArrayOutputStream();
@@ -251,7 +253,7 @@ jobs:
           
               @Override public void onCreate(Bundle state) {
                   super.onCreate(state);
-                  prefs = getSharedPreferences("bt_mic_diag", MODE_PRIVATE);
+                  prefs = getSharedPreferences("bt_mic_diag_v12", MODE_PRIVATE);
                   apiKey = prefs.getString("apiKey", "");
                   http = new OkHttpClient.Builder().callTimeout(java.time.Duration.ofSeconds(45)).build();
                   audioManager = (AudioManager)getSystemService(AUDIO_SERVICE);
@@ -267,6 +269,24 @@ jobs:
                   root.setOrientation(LinearLayout.VERTICAL);
                   root.setPadding(dp(6), dp(6), dp(6), dp(6));
                   root.setBackgroundColor(Color.rgb(16, 19, 24));
+                  // Android 15 alatt a rendszer navigációs sávja fölött maradjanak a vezérlőgombok.
+                  if(Build.VERSION.SDK_INT >= 30) {
+                      getWindow().setDecorFitsSystemWindows(false);
+                      root.setOnApplyWindowInsetsListener((v, insets) -> {
+                          android.graphics.Insets bars = insets.getInsets(
+                              WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout()
+                          );
+                          v.setPadding(
+                              dp(6) + bars.left,
+                              dp(6) + bars.top,
+                              dp(6) + bars.right,
+                              dp(14) + bars.bottom
+                          );
+                          return insets;
+                      });
+                  } else {
+                      root.setFitsSystemWindows(true);
+                  }
           
                   header = new TextView(this);
                   header.setTextColor(Color.WHITE);
@@ -278,7 +298,7 @@ jobs:
                   rawText = new EditText(this);
                   rawText.setTextColor(Color.WHITE);
                   rawText.setHintTextColor(Color.GRAY);
-                  rawText.setHint("Nyers magyar STT-szöveg jelenik meg itt…");
+                  rawText.setHint("Nyers magyar STT-szöveg itt jelenik meg. Kulcs nélkül a teljes mikrofon- és Bluetooth-diagnosztika továbbra is működik.");
                   rawText.setTextSize(20);
                   rawText.setGravity(Gravity.TOP | Gravity.START);
                   rawText.setBackgroundColor(Color.rgb(28, 32, 40));
@@ -312,7 +332,7 @@ jobs:
                   Button recReset = actionButton("REC RESET", Color.rgb(90, 90, 100));
                   Button routeReset = actionButton("ÚT RESET", Color.rgb(90, 90, 100));
                   Button scoReset = actionButton("SCO RESET", Color.rgb(90, 90, 100));
-                  Button apiButton = actionButton("API / MÁSOL", Color.rgb(120, 75, 30));
+                  Button apiButton = actionButton("STT KULCS", Color.rgb(120, 75, 30));
                   addWeighted(row2, recReset);
                   addWeighted(row2, routeReset);
                   addWeighted(row2, scoReset);
@@ -756,8 +776,10 @@ jobs:
               void sendStt(byte[] pcm) {
                   if(pcm == null || pcm.length == 0) return;
                   if(apiKey.trim().isEmpty()) {
-                      logEvent("STT kihagyva: nincs API-kulcs");
-                      main.post(() -> Toast.makeText(this, "Adj meg OpenAI API-kulcsot", Toast.LENGTH_SHORT).show());
+                      if(!missingApiLogged) {
+                          missingApiLogged = true;
+                          logEvent("STT kikapcsolva: nincs API-kulcs; a hangdiagnosztika tovább működik");
+                      }
                       return;
                   }
                   final int seq;
@@ -1042,10 +1064,11 @@ jobs:
                   key.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
                   box.addView(key, new LinearLayout.LayoutParams(-1, -2));
                   new AlertDialog.Builder(this)
-                      .setTitle("API-kulcs / diagnosztika")
+                      .setTitle("STT API-kulcs (csak a nyers szöveghez)")
                       .setView(box)
                       .setPositiveButton("MENTÉS", (d, w) -> {
                           apiKey = key.getText().toString().trim();
+                          missingApiLogged = false;
                           prefs.edit().putString("apiKey", apiKey).apply();
                           logEvent("API-kulcs " + (apiKey.isEmpty() ? "törölve" : "mentve"));
                       })
@@ -1068,6 +1091,9 @@ jobs:
                   StringBuilder s = new StringBuilder();
                   s.append("ÁLLAPOT\n");
                   s.append("idő: ").append(timeNow()).append('\n');
+                  s.append("STT: ").append(apiKey.trim().isEmpty()
+                      ? "KI — nincs API-kulcs (hangdiagnosztika aktív)"
+                      : "BE — OpenAI nyers átírás aktív").append('\n');
                   s.append("kért út: ").append(routeLabel(routeMode)).append('\n');
                   s.append("running/start: ").append(running).append('/').append(startRequested).append('\n');
                   s.append("AudioManager mód: ").append(audioModeLabel(audioManager == null ? -1 : audioManager.getMode())).append('\n');
@@ -1302,14 +1328,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/BT_Mic_Diag_V1.0.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/BT_Mic_Diag_V1.0.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/BT_Mic_Diag_V1.2.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/BT_Mic_Diag_V1.2.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: BT_Mic_Diag_V1.0
+          name: BT_Mic_Diag_V1.2
           path: |
             artifact/*.apk
             artifact/*.aab
