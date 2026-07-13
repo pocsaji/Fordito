@@ -1,4 +1,4 @@
-name: Build Android APK V40.18
+name: Build Android APK V40.19
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4018; versionName = "40.18" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4019; versionName = "40.19" }
 
               signingConfigs {
                   create("release") {
@@ -60,7 +60,6 @@ jobs:
           dependencies {
               implementation("com.squareup.okhttp3:okhttp:4.12.0")
               implementation("org.json:json:20240303")
-              implementation("com.github.gkonovalov.android-vad:webrtc:2.0.10")
               implementation("com.github.gkonovalov.android-vad:silero:2.0.10")
           }
           EOF
@@ -115,7 +114,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.18" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.19" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -289,32 +288,45 @@ jobs:
               String interpreterAudioMode = "off";
               String lastInterpreterAudioMode = "auto";
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV418";
+              static final String LOG_TAG = "ForditoV419";
               static final int PRE_ROLL_AUDIO_MS = 800;
-              // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
-              // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
+              // V40.19: a gyári Silero út marad 16 kHz / 512 minta / 32 ms kerettel.
+              // A mondatrész 50 ms igazolt beszéd után nyit és 300 ms csend után zár.
               static final int SILERO_FRAME_SAMPLES = 512;
               static final int SILERO_FRAME_BYTES = SILERO_FRAME_SAMPLES * 2;
-              static final int WEBRTC_FRAME_SAMPLES = 320;
-              static final int WEBRTC_FRAME_BYTES = WEBRTC_FRAME_SAMPLES * 2;
+              static final int SILERO_FRAME_MS = 32;
               static final int VAD_SPEECH_START_MS = 50;
-              static final int VAD_SPEECH_END_SILENCE_MS = 500;
+              static final int VAD_SPEECH_END_SILENCE_MS = 300;
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
-              // V40.7: tolmács módban sem kerül külön Android hanghatás az AudioRecordra.
-              // A headset saját hardveres feldolgozását nem szűrjük újra; hangszórónál TTS alatt kapuzzuk a mikrofont.
-              static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 8000;
-              volatile boolean voiceSendActive = false;
-              final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
-              int preRollAudioBytes = 0;
-              final ArrayDeque<byte[]> pendingSpeechAudioChunks = new ArrayDeque<>();
-              int pendingSpeechAudioMs = 0;
+              // A telefon fő felvétele 48 kHz. Ugyanabból a 32 ms-os keretből készül
+              // 16 kHz a Silero számára és 24 kHz az OpenAI Realtime számára.
+              static final int CAPTURE_SAMPLE_RATE = 48000;
               static final int AUDIO_SAMPLE_RATE = 16000;
-              static final int BLOCK_WINDOW_MS = 8000;
-              static final int BLOCK_ACCEPT_MS = 8000;
-              static final int BLOCK_OVERLAP_MS = 1000;
+              static final int REALTIME_SAMPLE_RATE = 24000;
+              static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 8000;
+              static final int BLOCK_WINDOW_MS = MAX_CONTINUOUS_SPEECH_BLOCK_MS;
+              static final int BLOCK_ACCEPT_MS = MAX_CONTINUOUS_SPEECH_BLOCK_MS;
+              static final int BLOCK_OVERLAP_MS = 0;
+              volatile boolean voiceSendActive = false;
+
+              static class PcmFramePair {
+                  final byte[] pcm16k;
+                  final byte[] pcm24k;
+                  PcmFramePair(byte[] pcm16k, byte[] pcm24k) {
+                      this.pcm16k = pcm16k == null ? new byte[0] : pcm16k;
+                      this.pcm24k = pcm24k == null ? new byte[0] : pcm24k;
+                  }
+              }
+
+              final ArrayDeque<PcmFramePair> preRollAudioFrames = new ArrayDeque<>();
+              int preRollAudioMs = 0;
+              final ArrayDeque<PcmFramePair> pendingSpeechAudioFrames = new ArrayDeque<>();
+              int pendingSpeechAudioMs = 0;
               final Object speechAudioWindowLock = new Object();
               ByteArrayOutputStream speechAudioWindow = new ByteArrayOutputStream();
-              String vadEngineMode = "silero"; // V40.0 alap: dokumentált Silero NORMAL
+              boolean currentTurnRealtimeEligible = false;
+              int currentTurnRealtimeBytes = 0;
+              String vadEngineMode = "silero"; // dokumentált Silero NORMAL alap
               Object speechVadInstance = null;
               String speechVadInstanceMode = "";
               final Object capturedFrameLock = new Object();
@@ -440,6 +452,39 @@ jobs:
                       this.error = error == null ? "" : error;
                   }
               }
+
+              static class RealtimeTurn {
+                  final int session;
+                  final int seq;
+                  final byte[] fallbackPcm16k;
+                  String itemId = "";
+                  String partialText = "";
+                  String finalText = "";
+                  String error = "";
+                  boolean completed = false;
+                  boolean fallbackStarted = false;
+                  TextBlock partialBlock;
+                  RealtimeTurn(int session, int seq, byte[] fallbackPcm16k) {
+                      this.session = session;
+                      this.seq = seq;
+                      this.fallbackPcm16k = fallbackPcm16k == null ? new byte[0] : fallbackPcm16k;
+                  }
+              }
+
+              OkHttpClient realtimeClient;
+              WebSocket realtimeSocket;
+              final Object realtimeLock = new Object();
+              volatile boolean realtimeSocketOpen = false;
+              volatile boolean realtimeSessionReady = false;
+              volatile boolean realtimeReconnectScheduled = false;
+              int realtimeGeneration = 0;
+              int realtimeTurnSeq = 0;
+              int realtimeDeliverSeq = 1;
+              final ArrayDeque<RealtimeTurn> realtimeAwaitingCommitAck = new ArrayDeque<>();
+              final HashMap<String, RealtimeTurn> realtimeTurnsByItem = new HashMap<>();
+              final HashMap<String, StringBuilder> realtimeOrphanDeltas = new HashMap<>();
+              final HashMap<String, String> realtimeOrphanFinals = new HashMap<>();
+              final TreeMap<Integer, RealtimeTurn> realtimeCompletedTurns = new TreeMap<>();
           
               final ArrayList<TextBlock> textBlocks = new ArrayList<>();
               final ArrayList<int[]> topRanges = new ArrayList<>();
@@ -517,14 +562,10 @@ jobs:
               };
           
               final String[][] vadEngineModes = {
-                  {"WebRTC VAD – csendes", "webrtc_quiet"},
-                  {"WebRTC VAD – közepes", "webrtc_medium"},
-                  {"WebRTC VAD – zajos", "webrtc"},
-                  {"Silero VAD – OFF / extra érzékeny, csak csendben", "silero_off"},
+                  {"Silero VAD – OFF / extra érzékeny", "silero_off"},
                   {"Silero VAD – NORMAL / ajánlott", "silero"},
                   {"Silero VAD – AGGRESSIVE", "silero_medium"},
-                  {"Silero VAD – VERY AGGRESSIVE", "silero_truck"},
-                  {"Passz / nincs zajkapu", "pass"}
+                  {"Silero VAD – VERY AGGRESSIVE", "silero_truck"}
               };
           
               final String[][] audioSourceModes = {
@@ -565,7 +606,8 @@ jobs:
                   vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "xhigh");
                   vadEngineMode = sp.getString("vadEngineMode", "silero");
-                  if(!"webrtc_quiet".equals(vadEngineMode) && !"webrtc_medium".equals(vadEngineMode) && !"webrtc".equals(vadEngineMode) && !"silero_off".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode) && !"pass".equals(vadEngineMode)) vadEngineMode = "silero";
+                  // V40.19: a WebRTC/pass ág megszűnt. Régi mentett érték esetén biztonságosan Silero NORMAL-ra migrálunk.
+                  if(!"silero_off".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode)) vadEngineMode = "silero";
                   audioSourceMode = sp.getString("audioSourceMode", "recognition");
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   String storedInterpreterMode = sp.getString("interpreterAudioMode", interpreterMode ? "auto" : "off");
@@ -655,7 +697,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.18");
+                  TextView title = label("Fordito_V40.19");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -1378,6 +1420,7 @@ jobs:
                       microphoneStartUiEarliestMs = android.os.SystemClock.elapsedRealtime() + 800L;
                       state.setText("mikrofon előkészítés");
                       updateButtons();
+                      startRealtimeTranscriptionSession();
                       audioLoop();
                   } else {
                       state.setText("fordítás");
@@ -1407,34 +1450,37 @@ jobs:
               }
 
               void clearPreRollAudio() {
-                  synchronized(preRollAudioChunks) {
-                      preRollAudioChunks.clear();
-                      preRollAudioBytes = 0;
+                  synchronized(preRollAudioFrames) {
+                      preRollAudioFrames.clear();
+                      preRollAudioMs = 0;
                   }
               }
+
+              PcmFramePair copyFramePair(PcmFramePair frame) {
+                  if(frame == null) return new PcmFramePair(new byte[0], new byte[0]);
+                  return new PcmFramePair(Arrays.copyOf(frame.pcm16k, frame.pcm16k.length), Arrays.copyOf(frame.pcm24k, frame.pcm24k.length));
+              }
           
-              void rememberPreRollAudio(byte[] data, int len) {
-                  if(data == null || len <= 0) return;
-                  byte[] copy = Arrays.copyOf(data, len);
-                  int maxBytes = Math.max(1, AUDIO_SAMPLE_RATE * 2 * PRE_ROLL_AUDIO_MS / 1000);
-                  synchronized(preRollAudioChunks) {
-                      preRollAudioChunks.add(copy);
-                      preRollAudioBytes += copy.length;
-                      while(preRollAudioBytes > maxBytes && !preRollAudioChunks.isEmpty()) {
-                          byte[] old = preRollAudioChunks.poll();
-                          if(old != null) preRollAudioBytes -= old.length;
+              void rememberPreRollAudio(PcmFramePair frame) {
+                  if(frame == null || frame.pcm16k.length == 0) return;
+                  synchronized(preRollAudioFrames) {
+                      preRollAudioFrames.add(copyFramePair(frame));
+                      preRollAudioMs += SILERO_FRAME_MS;
+                      while(preRollAudioMs > PRE_ROLL_AUDIO_MS && !preRollAudioFrames.isEmpty()) {
+                          preRollAudioFrames.poll();
+                          preRollAudioMs = Math.max(0, preRollAudioMs - SILERO_FRAME_MS);
                       }
                   }
               }
           
-              ArrayList<byte[]> takePreRollAudio() {
-                  ArrayList<byte[]> out = new ArrayList<>();
-                  synchronized(preRollAudioChunks) {
-                      while(!preRollAudioChunks.isEmpty()) {
-                          byte[] b = preRollAudioChunks.poll();
+              ArrayList<PcmFramePair> takePreRollAudio() {
+                  ArrayList<PcmFramePair> out = new ArrayList<>();
+                  synchronized(preRollAudioFrames) {
+                      while(!preRollAudioFrames.isEmpty()) {
+                          PcmFramePair b = preRollAudioFrames.poll();
                           if(b != null) out.add(b);
                       }
-                      preRollAudioBytes = 0;
+                      preRollAudioMs = 0;
                   }
                   return out;
               }
@@ -1445,29 +1491,29 @@ jobs:
               }
           
               void clearPendingSpeechAudio() {
-                  synchronized(pendingSpeechAudioChunks) {
-                      pendingSpeechAudioChunks.clear();
+                  synchronized(pendingSpeechAudioFrames) {
+                      pendingSpeechAudioFrames.clear();
                       pendingSpeechAudioMs = 0;
                   }
               }
           
-              void rememberPendingSpeechAudio(byte[] data, int len) {
-                  if(data == null || len <= 0) return;
-                  synchronized(pendingSpeechAudioChunks) {
-                      pendingSpeechAudioChunks.add(Arrays.copyOf(data, len));
-                      pendingSpeechAudioMs += pcm16Mono16kMs(len);
+              void rememberPendingSpeechAudio(PcmFramePair frame) {
+                  if(frame == null || frame.pcm16k.length == 0) return;
+                  synchronized(pendingSpeechAudioFrames) {
+                      pendingSpeechAudioFrames.add(copyFramePair(frame));
+                      pendingSpeechAudioMs += SILERO_FRAME_MS;
                   }
               }
           
               int pendingSpeechAudioDurationMs() {
-                  synchronized(pendingSpeechAudioChunks) { return pendingSpeechAudioMs; }
+                  synchronized(pendingSpeechAudioFrames) { return pendingSpeechAudioMs; }
               }
           
-              ArrayList<byte[]> takePendingSpeechAudio() {
-                  ArrayList<byte[]> out = new ArrayList<>();
-                  synchronized(pendingSpeechAudioChunks) {
-                      while(!pendingSpeechAudioChunks.isEmpty()) {
-                          byte[] b = pendingSpeechAudioChunks.poll();
+              ArrayList<PcmFramePair> takePendingSpeechAudio() {
+                  ArrayList<PcmFramePair> out = new ArrayList<>();
+                  synchronized(pendingSpeechAudioFrames) {
+                      while(!pendingSpeechAudioFrames.isEmpty()) {
+                          PcmFramePair b = pendingSpeechAudioFrames.poll();
                           if(b != null) out.add(b);
                       }
                       pendingSpeechAudioMs = 0;
@@ -1500,18 +1546,6 @@ jobs:
               }
 
               Object buildVadByReflection(String mode) throws Exception {
-                  if("webrtc_quiet".equals(mode) || "webrtc_medium".equals(mode) || "webrtc".equals(mode)) {
-                      Class<?> vadClass = Class.forName("com.konovalov.vad.webrtc.Vad");
-                      Object b = vadClass.getMethod("builder").invoke(null);
-                      b.getClass().getMethod("setSampleRate", Class.forName("com.konovalov.vad.webrtc.config.SampleRate")).invoke(b, enumConst("com.konovalov.vad.webrtc.config.SampleRate", "SAMPLE_RATE_16K"));
-                      b.getClass().getMethod("setFrameSize", Class.forName("com.konovalov.vad.webrtc.config.FrameSize")).invoke(b, enumConst("com.konovalov.vad.webrtc.config.FrameSize", "FRAME_SIZE_320"));
-                      String webRtcModeName = "webrtc_quiet".equals(mode) ? "NORMAL"
-                          : ("webrtc_medium".equals(mode) ? "AGGRESSIVE" : "VERY_AGGRESSIVE");
-                      b.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.webrtc.config.Mode")).invoke(b, enumConst("com.konovalov.vad.webrtc.config.Mode", webRtcModeName));
-                      b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, VAD_SPEECH_END_SILENCE_MS);
-                      b.getClass().getMethod("setSpeechDurationMs", int.class).invoke(b, VAD_SPEECH_START_MS);
-                      return b.getClass().getMethod("build").invoke(b);
-                  }
                   if("silero_off".equals(mode) || "silero".equals(mode) || "silero_medium".equals(mode) || "silero_truck".equals(mode)) {
                       Class<?> vadClass = Class.forName("com.konovalov.vad.silero.Vad");
                       Object b = vadClass.getMethod("builder").invoke(null);
@@ -1541,10 +1575,9 @@ jobs:
               }
 
               boolean ensureExternalVadReady() {
-                  if("pass".equals(vadEngineMode) || vadFallbackActive) return true;
-                  if(!"webrtc_quiet".equals(vadEngineMode) && !"webrtc_medium".equals(vadEngineMode) && !"webrtc".equals(vadEngineMode) && !"silero_off".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode)) {
-                      activateVadFallback("Unknown VAD mode: " + vadEngineMode, null);
-                      return true;
+                  if(vadFallbackActive) return true;
+                  if(!"silero_off".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode)) {
+                      vadEngineMode = "silero";
                   }
                   if(speechVadInstance != null && vadEngineMode.equals(speechVadInstanceMode)) return true;
                   closeExternalVad();
@@ -1560,7 +1593,7 @@ jobs:
               }
 
               int activeVadFrameBytes() {
-                  return vadEngineMode != null && vadEngineMode.startsWith("webrtc") ? WEBRTC_FRAME_BYTES : SILERO_FRAME_BYTES;
+                  return SILERO_FRAME_BYTES;
               }
 
               int frameDurationMs(int frameBytes) {
@@ -1608,7 +1641,6 @@ jobs:
               }
 
               boolean externalVadOverGate(byte[] exactFrame) {
-                  if("pass".equals(vadEngineMode)) return true;
                   ensureExternalVadReady();
                   if(vadFallbackActive) return fallbackEnergyIsSpeech(exactFrame);
                   try {
@@ -1619,26 +1651,36 @@ jobs:
                   }
               }
 
-              void processVadFrame(byte[] frame) throws Exception {
-                  if(frame == null || frame.length == 0) return;
+              void abortCurrentSpeechTurn() {
+                  voiceSendActive = false;
+                  clearPendingSpeechAudio();
+                  clearPreRollAudio();
+                  synchronized(speechAudioWindowLock) {
+                      speechAudioWindow.reset();
+                      currentTurnRealtimeEligible = false;
+                      currentTurnRealtimeBytes = 0;
+                  }
+                  sendRealtimeClearBuffer();
+              }
+
+              void processVadFrame(PcmFramePair frame) throws Exception {
+                  if(frame == null || frame.pcm16k.length == 0) return;
                   if(shouldMuteMicForSpeakerTts()) {
-                      voiceSendActive = false;
-                      clearPendingSpeechAudio();
-                      clearPreRollAudio();
+                      abortCurrentSpeechTurn();
                       return;
                   }
 
                   long now = System.currentTimeMillis();
-                  boolean overGate = externalVadOverGate(frame);
+                  boolean overGate = externalVadOverGate(frame.pcm16k);
                   if(overGate) {
                       if(!voiceSendActive) {
-                          rememberPendingSpeechAudio(frame, frame.length);
+                          rememberPendingSpeechAudio(frame);
                           if(pendingSpeechAudioDurationMs() < MIN_TRUE_SPEECH_AUDIO_MS) return;
                           if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = now;
-                          for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr);
-                          for(byte[] ps : takePendingSpeechAudio()) sendAudioChunk(ps);
+                          for(PcmFramePair pr : takePreRollAudio()) sendAudioFrame(pr);
+                          for(PcmFramePair ps : takePendingSpeechAudio()) sendAudioFrame(ps);
                       } else {
-                          sendAudioChunk(frame);
+                          sendAudioFrame(frame);
                       }
                       voiceSendActive = true;
                       return;
@@ -1649,31 +1691,81 @@ jobs:
                       flushSpeechAudioWindow(true);
                   }
                   clearPendingSpeechAudio();
-                  rememberPreRollAudio(frame, frame.length);
+                  rememberPreRollAudio(frame);
+              }
+
+              short[] decodeCapturedMono(byte[] raw, int offset, int frameBytes) {
+                  int channels = Math.max(1, activeCaptureChannelCount);
+                  int samples = frameBytes / (2 * channels);
+                  short[] mono = new short[samples];
+                  int pos = offset;
+                  for(int i=0;i<samples;i++) {
+                      long sum = 0L;
+                      for(int c=0;c<channels;c++) {
+                          short v = (short)(((raw[pos+1] & 0xff) << 8) | (raw[pos] & 0xff));
+                          sum += v;
+                          pos += 2;
+                      }
+                      mono[i] = (short)(sum / channels);
+                  }
+                  return mono;
+              }
+
+              byte[] resampleMonoPcm16(short[] input, int outputSamples) {
+                  if(input == null || input.length == 0 || outputSamples <= 0) return new byte[0];
+                  byte[] out = new byte[outputSamples * 2];
+                  if(input.length == 1) {
+                      for(int i=0;i<outputSamples;i++) {
+                          out[i*2] = (byte)(input[0] & 0xff);
+                          out[i*2+1] = (byte)((input[0] >> 8) & 0xff);
+                      }
+                      return out;
+                  }
+                  double scale = (input.length - 1.0) / Math.max(1.0, outputSamples - 1.0);
+                  for(int i=0;i<outputSamples;i++) {
+                      double src = i * scale;
+                      int a = (int)Math.floor(src);
+                      int b = Math.min(input.length - 1, a + 1);
+                      double f = src - a;
+                      int value = (int)Math.round(input[a] * (1.0 - f) + input[b] * f);
+                      value = Math.max(Short.MIN_VALUE, Math.min(Short.MAX_VALUE, value));
+                      out[i*2] = (byte)(value & 0xff);
+                      out[i*2+1] = (byte)((value >> 8) & 0xff);
+                  }
+                  return out;
+              }
+
+              ArrayList<PcmFramePair> normalizeCapturedFrames(byte[] data, int len) {
+                  ArrayList<PcmFramePair> out = new ArrayList<>();
+                  if(data == null || len <= 0) return out;
+                  synchronized(captureRateRemainder) {
+                      captureRateRemainder.write(data, 0, len);
+                      byte[] all = captureRateRemainder.toByteArray();
+                      int channels = Math.max(1, activeCaptureChannelCount);
+                      int inputSamples = Math.max(1, activeCaptureSampleRate * SILERO_FRAME_MS / 1000);
+                      int inputFrameBytes = inputSamples * channels * 2;
+                      int pos = 0;
+                      while(pos + inputFrameBytes <= all.length) {
+                          short[] mono = decodeCapturedMono(all, pos, inputFrameBytes);
+                          byte[] pcm16 = resampleMonoPcm16(mono, SILERO_FRAME_SAMPLES);
+                          byte[] pcm24 = resampleMonoPcm16(mono, REALTIME_SAMPLE_RATE * SILERO_FRAME_MS / 1000);
+                          out.add(new PcmFramePair(pcm16, pcm24));
+                          pos += inputFrameBytes;
+                      }
+                      captureRateRemainder.reset();
+                      if(pos < all.length) captureRateRemainder.write(all, pos, all.length - pos);
+                  }
+                  return out;
               }
 
               void processCapturedAudio(byte[] data, int len) throws Exception {
-                  if(data == null || len <= 0) return;
-                  ArrayList<byte[]> frames = new ArrayList<>();
-                  synchronized(capturedFrameLock) {
-                      capturedFrameBuffer.write(data, 0, len);
-                      byte[] all = capturedFrameBuffer.toByteArray();
-                      int frameBytes = activeVadFrameBytes();
-                      int pos = 0;
-                      while(pos + frameBytes <= all.length) {
-                          frames.add(Arrays.copyOfRange(all, pos, pos + frameBytes));
-                          pos += frameBytes;
-                      }
-                      capturedFrameBuffer.reset();
-                      if(pos < all.length) capturedFrameBuffer.write(all, pos, all.length - pos);
-                  }
-                  for(byte[] frame : frames) processVadFrame(frame);
+                  for(PcmFramePair frame : normalizeCapturedFrames(data, len)) processVadFrame(frame);
               }
 
               byte[] takeCapturedRemainder() {
-                  synchronized(capturedFrameLock) {
-                      byte[] out = capturedFrameBuffer.toByteArray();
-                      capturedFrameBuffer.reset();
+                  synchronized(captureRateRemainder) {
+                      byte[] out = captureRateRemainder.toByteArray();
+                      captureRateRemainder.reset();
                       return out;
                   }
               }
@@ -1681,46 +1773,67 @@ jobs:
               void clearSpeechAudioWindow() {
                   synchronized(speechAudioWindowLock) {
                       speechAudioWindow.reset();
+                      currentTurnRealtimeEligible = false;
+                      currentTurnRealtimeBytes = 0;
                   }
               }
           
               int speechAudioWindowMs() {
                   synchronized(speechAudioWindowLock) { return pcm16Mono16kMs(speechAudioWindow.size()); }
               }
-          
-              void appendSpeechAudioChunk(byte[] chunk) {
-                  if(chunk == null || chunk.length == 0 || client == null) return;
-                  byte[] ready = null;
-                  synchronized(speechAudioWindowLock) {
-                      speechAudioWindow.write(chunk, 0, chunk.length);
-                      int needBytes = AUDIO_SAMPLE_RATE * 2 * BLOCK_WINDOW_MS / 1000;
-                      if(speechAudioWindow.size() >= needBytes) {
-                          byte[] all = speechAudioWindow.toByteArray();
-                          ready = Arrays.copyOf(all, needBytes);
-                          int keepBytes = AUDIO_SAMPLE_RATE * 2 * BLOCK_OVERLAP_MS / 1000;
-                          speechAudioWindow.reset();
-                          int start = Math.max(0, needBytes - keepBytes);
-                          speechAudioWindow.write(all, start, needBytes - start);
-                          if(all.length > needBytes) {
-                              speechAudioWindow.write(all, needBytes, all.length - needBytes);
-                          }
-                      }
+
+              boolean sendRealtimeAudio(byte[] pcm24k) {
+                  if(pcm24k == null || pcm24k.length == 0 || !realtimeSessionReady) return false;
+                  try {
+                      JSONObject event = new JSONObject()
+                          .put("type", "input_audio_buffer.append")
+                          .put("audio", Base64.encodeToString(pcm24k, Base64.NO_WRAP));
+                      return sendRealtimeJson(event);
+                  } catch(Exception e) {
+                      android.util.Log.e(LOG_TAG, "Realtime audio append failed", e);
+                      return false;
                   }
-                  if(ready != null) transcribeAudioWindow(ready, false);
               }
-          
+
+              void appendSpeechAudioFrame(PcmFramePair frame) {
+                  if(frame == null || frame.pcm16k.length == 0 || client == null) return;
+                  boolean forceCommit = false;
+                  synchronized(speechAudioWindowLock) {
+                      if(speechAudioWindow.size() == 0) {
+                          currentTurnRealtimeEligible = realtimeSessionReady;
+                          currentTurnRealtimeBytes = 0;
+                      }
+                      speechAudioWindow.write(frame.pcm16k, 0, frame.pcm16k.length);
+                      if(currentTurnRealtimeEligible) {
+                          if(sendRealtimeAudio(frame.pcm24k)) currentTurnRealtimeBytes += frame.pcm24k.length;
+                          else currentTurnRealtimeEligible = false;
+                      }
+                      forceCommit = pcm16Mono16kMs(speechAudioWindow.size()) >= BLOCK_WINDOW_MS;
+                  }
+                  if(forceCommit) flushSpeechAudioWindow(true);
+              }
+
               void flushSpeechAudioWindow(boolean force) {
                   byte[] ready = null;
+                  boolean useRealtime = false;
                   synchronized(speechAudioWindowLock) {
                       int minBytes = AUDIO_SAMPLE_RATE * 2 * (force ? MIN_TRUE_SPEECH_AUDIO_MS : 1200) / 1000;
                       if(speechAudioWindow.size() >= minBytes) {
                           ready = speechAudioWindow.toByteArray();
+                          useRealtime = currentTurnRealtimeEligible && currentTurnRealtimeBytes > 0 && realtimeSessionReady;
                           speechAudioWindow.reset();
+                          currentTurnRealtimeEligible = false;
+                          currentTurnRealtimeBytes = 0;
                       }
                   }
-                  if(ready != null) transcribeAudioWindow(ready, true);
+                  if(ready == null) return;
+                  if(useRealtime) commitRealtimeTurn(ready);
+                  else {
+                      sendRealtimeClearBuffer();
+                      transcribeAudioWindow(ready, false);
+                  }
               }
-          
+
               byte[] wavFromPcm16k(byte[] pcm) throws Exception {
                   int dataLen = pcm == null ? 0 : pcm.length;
                   ByteArrayOutputStream out = new ByteArrayOutputStream(44 + dataLen);
@@ -1812,10 +1925,398 @@ jobs:
                   }
               }
 
-              void sendAudioChunk(byte[] chunk) throws Exception {
-                  appendSpeechAudioChunk(chunk);
+              void sendAudioFrame(PcmFramePair frame) {
+                  appendSpeechAudioFrame(frame);
               }
           
+              String realtimeDelaySetting() {
+                  // EarFun-szerű, a lehető legkorábbi részleges szöveghez a gyári MINIMAL fokozat.
+                  // Ha a valós tesztben pontatlan, egyetlen helyen visszaállítható LOW értékre.
+                  return "minimal";
+              }
+
+              void startRealtimeTranscriptionSession() {
+                  closeRealtimeTranscriptionSession(false);
+                  if(!hasKey()) return;
+                  final int generation;
+                  synchronized(realtimeLock) {
+                      generation = ++realtimeGeneration;
+                      realtimeSocketOpen = false;
+                      realtimeSessionReady = false;
+                  }
+                  realtimeClient = new OkHttpClient.Builder()
+                      .connectTimeout(20, TimeUnit.SECONDS)
+                      .readTimeout(0, TimeUnit.MILLISECONDS)
+                      .writeTimeout(30, TimeUnit.SECONDS)
+                      .pingInterval(20, TimeUnit.SECONDS)
+                      .build();
+                  Request request = new Request.Builder()
+                      .url("wss://api.openai.com/v1/realtime?model=gpt-realtime-whisper")
+                      .addHeader("Authorization", "Bearer " + apiKey.trim())
+                      .build();
+                  realtimeSocket = realtimeClient.newWebSocket(request, new WebSocketListener() {
+                      @Override public void onOpen(WebSocket webSocket, Response response) {
+                          synchronized(realtimeLock) {
+                              if(generation != realtimeGeneration || realtimeSocket != webSocket) {
+                                  webSocket.close(1000, "stale");
+                                  return;
+                              }
+                              realtimeSocketOpen = true;
+                          }
+                          try {
+                              JSONObject transcription = new JSONObject()
+                                  .put("model", "gpt-realtime-whisper")
+                                  .put("delay", realtimeDelaySetting());
+                              JSONObject input = new JSONObject()
+                                  .put("format", new JSONObject().put("type", "audio/pcm").put("rate", REALTIME_SAMPLE_RATE))
+                                  // A telefon mikrofonja a beszélő közelében, de nem száj előtt dolgozik:
+                                  // az OpenAI gyári FAR_FIELD előszűrése erre a mikrofontípusra való.
+                                  .put("noise_reduction", new JSONObject().put("type", "far_field"))
+                                  .put("transcription", transcription)
+                                  .put("turn_detection", JSONObject.NULL);
+                              JSONObject session = new JSONObject()
+                                  .put("type", "transcription")
+                                  .put("audio", new JSONObject().put("input", input));
+                              sendRealtimeJson(new JSONObject().put("type", "session.update").put("session", session));
+                          } catch(Exception e) {
+                              handleRealtimeTransportFailure(generation, "session beállítás", e);
+                          }
+                      }
+
+                      @Override public void onMessage(WebSocket webSocket, String text) {
+                          try {
+                              JSONObject event = new JSONObject(text);
+                              runOnUiThread(() -> handleRealtimeEvent(generation, event));
+                          } catch(Exception e) {
+                              android.util.Log.e(LOG_TAG, "Realtime event parse failed", e);
+                          }
+                      }
+
+                      @Override public void onFailure(WebSocket webSocket, Throwable t, Response response) {
+                          handleRealtimeTransportFailure(generation, "kapcsolat", t);
+                      }
+
+                      @Override public void onClosed(WebSocket webSocket, int code, String reason) {
+                          handleRealtimeTransportFailure(generation, "lezárva " + code, null);
+                      }
+                  });
+              }
+
+              boolean sendRealtimeJson(JSONObject event) {
+                  if(event == null) return false;
+                  WebSocket ws;
+                  synchronized(realtimeLock) {
+                      ws = realtimeSocket;
+                      if(ws == null || !realtimeSocketOpen) return false;
+                  }
+                  try { return ws.send(event.toString()); }
+                  catch(Exception e) {
+                      android.util.Log.e(LOG_TAG, "Realtime send failed", e);
+                      return false;
+                  }
+              }
+
+              void sendRealtimeClearBuffer() {
+                  if(!realtimeSocketOpen) return;
+                  try { sendRealtimeJson(new JSONObject().put("type", "input_audio_buffer.clear")); }
+                  catch(Exception ignored) {}
+              }
+
+              void closeRealtimeTranscriptionSession(boolean fallbackPending) {
+                  ArrayList<RealtimeTurn> pending = new ArrayList<>();
+                  WebSocket ws;
+                  OkHttpClient rc;
+                  synchronized(realtimeLock) {
+                      realtimeGeneration++;
+                      realtimeSocketOpen = false;
+                      realtimeSessionReady = false;
+                      realtimeReconnectScheduled = false;
+                      ws = realtimeSocket;
+                      rc = realtimeClient;
+                      realtimeSocket = null;
+                      realtimeClient = null;
+                      if(fallbackPending) {
+                          LinkedHashSet<RealtimeTurn> unique = new LinkedHashSet<>();
+                          unique.addAll(realtimeAwaitingCommitAck);
+                          unique.addAll(realtimeTurnsByItem.values());
+                          for(RealtimeTurn t : unique) if(t != null && !t.completed) pending.add(t);
+                      }
+                      realtimeAwaitingCommitAck.clear();
+                      realtimeTurnsByItem.clear();
+                      realtimeOrphanDeltas.clear();
+                      realtimeOrphanFinals.clear();
+                  }
+                  try { if(ws != null) ws.close(1000, "app"); } catch(Exception ignored) {}
+                  try { if(rc != null) rc.dispatcher().executorService().shutdown(); } catch(Exception ignored) {}
+                  if(fallbackPending) for(RealtimeTurn t : pending) startRealtimeTurnFallback(t, "élő STT megszakadt");
+              }
+
+              void handleRealtimeTransportFailure(int generation, String reason, Throwable error) {
+                  synchronized(realtimeLock) {
+                      if(generation != realtimeGeneration) return;
+                      realtimeSocketOpen = false;
+                      realtimeSessionReady = false;
+                  }
+                  if(error == null) android.util.Log.w(LOG_TAG, "Realtime " + reason);
+                  else android.util.Log.e(LOG_TAG, "Realtime " + reason, error);
+                  runOnUiThread(() -> {
+                      fallbackPendingRealtimeTurns("élő STT kapcsolat");
+                      scheduleRealtimeReconnect();
+                  });
+              }
+
+              void scheduleRealtimeReconnect() {
+                  synchronized(realtimeLock) {
+                      if(realtimeReconnectScheduled || !streaming || !hasKey()) return;
+                      realtimeReconnectScheduled = true;
+                  }
+                  new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                      synchronized(realtimeLock) { realtimeReconnectScheduled = false; }
+                      if(streaming && !finalizingStop && hasKey() && !realtimeSessionReady) startRealtimeTranscriptionSession();
+                  }, 1500L);
+              }
+
+              void handleRealtimeEvent(int generation, JSONObject event) {
+                  synchronized(realtimeLock) { if(generation != realtimeGeneration) return; }
+                  String type = event.optString("type", "");
+                  if("session.updated".equals(type)) {
+                      realtimeSessionReady = true;
+                      if(streaming && !microphoneStarting) state.setText("mikrofon aktív – élő STT");
+                      return;
+                  }
+                  if("input_audio_buffer.committed".equals(type)) {
+                      assignRealtimeItem(event.optString("item_id", ""));
+                      return;
+                  }
+                  if("conversation.item.input_audio_transcription.delta".equals(type)) {
+                      applyRealtimeDelta(event.optString("item_id", ""), event.optString("delta", ""));
+                      return;
+                  }
+                  if("conversation.item.input_audio_transcription.completed".equals(type)) {
+                      applyRealtimeCompleted(event.optString("item_id", ""), event.optString("transcript", ""));
+                      return;
+                  }
+                  if("conversation.item.input_audio_transcription.failed".equals(type) || "error".equals(type)) {
+                      String itemId = event.optString("item_id", "");
+                      String message = event.optJSONObject("error") == null ? type : event.optJSONObject("error").optString("message", type);
+                      if(itemId.length() > 0) failRealtimeItem(itemId, message);
+                      else {
+                          android.util.Log.e(LOG_TAG, "Realtime API error: " + message);
+                          fallbackPendingRealtimeTurns(message);
+                      }
+                  }
+              }
+
+              synchronized RealtimeTurn registerRealtimeTurn(byte[] pcm16k) {
+                  RealtimeTurn turn = new RealtimeTurn(sttSessionId, ++realtimeTurnSeq, Arrays.copyOf(pcm16k, pcm16k.length));
+                  sttRequestsInFlight++;
+                  synchronized(realtimeLock) { realtimeAwaitingCommitAck.add(turn); }
+                  new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                      if(turn.session == sttSessionId && !turn.completed) {
+                          synchronized(realtimeLock) {
+                              realtimeAwaitingCommitAck.remove(turn);
+                              if(turn.itemId != null && turn.itemId.length() > 0) realtimeTurnsByItem.remove(turn.itemId);
+                          }
+                          startRealtimeTurnFallback(turn, "élő STT időtúllépés");
+                      }
+                  }, 15000L);
+                  return turn;
+              }
+
+              void commitRealtimeTurn(byte[] pcm16k) {
+                  if(pcm16k == null || pcm16k.length == 0) return;
+                  RealtimeTurn turn = registerRealtimeTurn(pcm16k);
+                  boolean sent;
+                  try { sent = sendRealtimeJson(new JSONObject().put("type", "input_audio_buffer.commit")); }
+                  catch(Exception e) { sent = false; }
+                  if(!sent) {
+                      synchronized(realtimeLock) { realtimeAwaitingCommitAck.remove(turn); }
+                      startRealtimeTurnFallback(turn, "commit nem küldhető");
+                  }
+              }
+
+              void assignRealtimeItem(String itemId) {
+                  if(itemId == null || itemId.length() == 0) return;
+                  RealtimeTurn turn;
+                  String orphanDelta = "";
+                  String orphanFinal = null;
+                  synchronized(realtimeLock) {
+                      turn = realtimeAwaitingCommitAck.poll();
+                      if(turn == null) return;
+                      turn.itemId = itemId;
+                      realtimeTurnsByItem.put(itemId, turn);
+                      StringBuilder d = realtimeOrphanDeltas.remove(itemId);
+                      if(d != null) orphanDelta = d.toString();
+                      orphanFinal = realtimeOrphanFinals.remove(itemId);
+                  }
+                  if(orphanDelta.length() > 0) updateRealtimePartial(turn, orphanDelta);
+                  if(orphanFinal != null) finishRealtimeTurn(turn, orphanFinal, "");
+              }
+
+              void applyRealtimeDelta(String itemId, String delta) {
+                  if(itemId == null || itemId.length() == 0 || delta == null || delta.length() == 0) return;
+                  RealtimeTurn turn;
+                  synchronized(realtimeLock) {
+                      turn = realtimeTurnsByItem.get(itemId);
+                      if(turn == null) {
+                          realtimeOrphanDeltas.computeIfAbsent(itemId, k -> new StringBuilder()).append(delta);
+                          return;
+                      }
+                  }
+                  updateRealtimePartial(turn, turn.partialText + delta);
+              }
+
+              void updateRealtimePartial(RealtimeTurn turn, String text) {
+                  if(turn == null || turn.completed || turn.session != sttSessionId) return;
+                  String visible = text == null ? "" : text.trim();
+                  turn.partialText = visible;
+                  if(visible.length() == 0) return;
+                  boolean sourceTop = sourceIsTopBySelectedPair(visible, topActive);
+                  if(turn.partialBlock == null) {
+                      turn.partialBlock = new TextBlock();
+                      turn.partialBlock.translatedOk = false;
+                      textBlocks.add(turn.partialBlock);
+                  }
+                  TextBlock b = turn.partialBlock;
+                  b.sourceTop = sourceTop;
+                  b.pendingSourceText = visible;
+                  b.topText = sourceTop ? visible : "";
+                  b.bottomText = sourceTop ? "" : visible;
+                  renderBlocksKeepView();
+              }
+
+              void applyRealtimeCompleted(String itemId, String transcript) {
+                  if(itemId == null || itemId.length() == 0) return;
+                  RealtimeTurn turn;
+                  synchronized(realtimeLock) {
+                      turn = realtimeTurnsByItem.get(itemId);
+                      if(turn == null) {
+                          realtimeOrphanFinals.put(itemId, transcript == null ? "" : transcript);
+                          return;
+                      }
+                  }
+                  finishRealtimeTurn(turn, transcript, "");
+              }
+
+              void failRealtimeItem(String itemId, String error) {
+                  RealtimeTurn turn;
+                  synchronized(realtimeLock) { turn = realtimeTurnsByItem.get(itemId); }
+                  if(turn != null) startRealtimeTurnFallback(turn, error);
+              }
+
+              void removeRealtimePartialBlock(RealtimeTurn turn) {
+                  if(turn == null || turn.partialBlock == null) return;
+                  textBlocks.remove(turn.partialBlock);
+                  turn.partialBlock = null;
+                  renderBlocksKeepView();
+              }
+
+              void finishRealtimeTurn(RealtimeTurn turn, String transcript, String error) {
+                  if(turn == null || turn.completed || turn.session != sttSessionId) return;
+                  turn.completed = true;
+                  turn.finalText = transcript == null ? "" : transcript.trim();
+                  turn.error = error == null ? "" : error;
+                  synchronized(realtimeLock) {
+                      if(turn.itemId.length() > 0) realtimeTurnsByItem.remove(turn.itemId);
+                      realtimeAwaitingCommitAck.remove(turn);
+                  }
+                  realtimeCompletedTurns.put(turn.seq, turn);
+                  drainRealtimeTurnsInOrder();
+              }
+
+              void drainRealtimeTurnsInOrder() {
+                  while(true) {
+                      RealtimeTurn turn = realtimeCompletedTurns.remove(realtimeDeliverSeq);
+                      if(turn == null) break;
+                      realtimeDeliverSeq++;
+                      removeRealtimePartialBlock(turn);
+                      sttRequestsInFlight = Math.max(0, sttRequestsInFlight - 1);
+                      if(turn.finalText.length() > 0) handleTranscriptCompleted(turn.finalText, false);
+                      else if(turn.error.length() > 0) {
+                          android.util.Log.e(LOG_TAG, "Realtime STT failed: " + turn.error);
+                          state.setText(streaming ? "mikrofon aktív – STT hiba" : "STT hiba – az előző átiratok megmaradtak");
+                      }
+                  }
+                  maybeFinishStop();
+              }
+
+              void startRealtimeTurnFallback(RealtimeTurn turn, String reason) {
+                  if(Looper.myLooper() != Looper.getMainLooper()) {
+                      runOnUiThread(() -> startRealtimeTurnFallback(turn, reason));
+                      return;
+                  }
+                  if(turn == null || turn.completed || turn.fallbackStarted || turn.session != sttSessionId) return;
+                  turn.fallbackStarted = true;
+                  removeRealtimePartialBlock(turn);
+                  if(turn.fallbackPcm16k.length == 0 || client == null || !hasKey()) {
+                      finishRealtimeTurn(turn, "", reason);
+                      return;
+                  }
+                  try {
+                      byte[] wav = wavFromPcm16k(turn.fallbackPcm16k);
+                      MultipartBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
+                          .addFormDataPart("model", "gpt-4o-mini-transcribe")
+                          .addFormDataPart("response_format", "json")
+                          .addFormDataPart("prompt", speechTranscriptionPrompt())
+                          .addFormDataPart("file", "speech.wav", RequestBody.create(MediaType.parse("audio/wav"), wav))
+                          .build();
+                      Request req = new Request.Builder().url("https://api.openai.com/v1/audio/transcriptions")
+                          .addHeader("Authorization", "Bearer " + apiKey.trim())
+                          .post(body).build();
+                      client.newCall(req).enqueue(new Callback() {
+                          @Override public void onFailure(Call call, java.io.IOException e) {
+                              runOnUiThread(() -> finishRealtimeTurn(turn, "", reason + ": " + e.getMessage()));
+                          }
+                          @Override public void onResponse(Call call, Response response) throws java.io.IOException {
+                              String raw = response.body() == null ? "" : response.body().string();
+                              if(!response.isSuccessful()) {
+                                  runOnUiThread(() -> finishRealtimeTurn(turn, "", "HTTP " + response.code()));
+                                  return;
+                              }
+                              try {
+                                  String text = new JSONObject(raw).optString("text", "").trim();
+                                  runOnUiThread(() -> finishRealtimeTurn(turn, text, text.length() == 0 ? reason : ""));
+                              } catch(Exception e) {
+                                  runOnUiThread(() -> finishRealtimeTurn(turn, "", "tartalék válasz nem értelmezhető"));
+                              }
+                          }
+                      });
+                  } catch(Exception e) {
+                      finishRealtimeTurn(turn, "", reason + ": " + e.getMessage());
+                  }
+              }
+
+              void fallbackPendingRealtimeTurns(String reason) {
+                  ArrayList<RealtimeTurn> pending = new ArrayList<>();
+                  synchronized(realtimeLock) {
+                      LinkedHashSet<RealtimeTurn> unique = new LinkedHashSet<>();
+                      unique.addAll(realtimeAwaitingCommitAck);
+                      unique.addAll(realtimeTurnsByItem.values());
+                      for(RealtimeTurn t : unique) if(t != null && !t.completed) pending.add(t);
+                      realtimeAwaitingCommitAck.clear();
+                      realtimeTurnsByItem.clear();
+                      realtimeOrphanDeltas.clear();
+                      realtimeOrphanFinals.clear();
+                  }
+                  for(RealtimeTurn t : pending) startRealtimeTurnFallback(t, reason);
+              }
+
+              void resetRealtimeTurnState() {
+                  ArrayList<RealtimeTurn> turnsToRemove = new ArrayList<>();
+                  synchronized(realtimeLock) {
+                      LinkedHashSet<RealtimeTurn> unique = new LinkedHashSet<>();
+                      unique.addAll(realtimeAwaitingCommitAck);
+                      unique.addAll(realtimeTurnsByItem.values());
+                      unique.addAll(realtimeCompletedTurns.values());
+                      turnsToRemove.addAll(unique);
+                  }
+                  closeRealtimeTranscriptionSession(false);
+                  for(RealtimeTurn turn : turnsToRemove) removeRealtimePartialBlock(turn);
+                  realtimeCompletedTurns.clear();
+                  realtimeTurnSeq = 0;
+                  realtimeDeliverSeq = 1;
+              }
+
               String delayLabel() {
                   if("low".equals(delayMode)) return "Gyors – rövidebb bevitel";
                   if("medium".equals(delayMode)) return "Átlagos – ajánlott";
@@ -1979,7 +2480,7 @@ jobs:
               }
 
               AudioRecord makeBestAudioRecord(int sampleRate, int requestedBufferBytes) {
-                  activeCaptureSampleRate = AUDIO_SAMPLE_RATE;
+                  activeCaptureSampleRate = sampleRate;
                   activeCaptureChannelCount = 1;
                   directBleCaptureActive = false;
                   directBleDigitalSilenceMs = 0L;
@@ -1991,7 +2492,7 @@ jobs:
                   // ezért a távolabbi beszédet és a hangszóróból érkező hangot háttérzajként elnyomhatja.
                   if(interpreterMode && "headset_output_phone_mic".equals(activeInterpreterRoute) && preferredInterpreterInputDevice != null) {
                       AudioRecord phoneMic = tryAudioRecordCandidates(sampleRate, requestedBufferBytes, preferredInterpreterInputDevice);
-                      if(phoneMic != null) return phoneMic;
+                      if(phoneMic != null) { activeCaptureSampleRate = sampleRate; return phoneMic; }
                       android.util.Log.w(LOG_TAG, "Built-in interpreter microphone preference was rejected; using normal system input");
                   }
 
@@ -2033,7 +2534,7 @@ jobs:
                       if(activateInterpreterCommunicationFallback()) {
                           waitForCommunicationDeviceActivation(1800L);
                           AudioRecord fallback = tryAudioRecordCandidates(sampleRate, requestedBufferBytes, null);
-                          if(fallback != null) return fallback;
+                          if(fallback != null) { activeCaptureSampleRate = sampleRate; return fallback; }
                       } else {
                           activeInterpreterRoute = "speaker_half_duplex";
                           activeCommunicationDeviceLabel = "telefon mikrofon";
@@ -2044,7 +2545,7 @@ jobs:
                   }
 
                   AudioRecord regular = tryAudioRecordCandidates(sampleRate, requestedBufferBytes, null);
-                  if(regular != null) return regular;
+                  if(regular != null) { activeCaptureSampleRate = sampleRate; return regular; }
                   android.util.Log.e(LOG_TAG, "No supported AudioRecord source could be initialized");
                   return null;
               }
@@ -2126,11 +2627,12 @@ jobs:
                       if(routed != null) {
                           String suffix;
                           if("headset_output_phone_mic".equals(activeInterpreterRoute)) {
-                              suffix = " • kimenet: " + activeCommunicationDeviceLabel;
+                              suffix = (activeCaptureSampleRate == CAPTURE_SAMPLE_RATE ? " • 48k→16/24k" : " • " + activeCaptureSampleRate + "→16/24k") + " • kimenet: " + activeCommunicationDeviceLabel;
                           } else if(directBleCaptureActive && activeCaptureSampleRate == 32000) {
                               suffix = activeCaptureChannelCount > 1 ? " • 32k sztereó→16k" : " • 32→16 kHz";
                           } else {
-                              suffix = interpreterCommunicationFallbackActive ? " • kommunikációs" : "";
+                              suffix = interpreterCommunicationFallbackActive ? " • kommunikációs" :
+                                  (activeCaptureSampleRate == CAPTURE_SAMPLE_RATE ? " • 48k→16/24k" : "");
                           }
                           setInputRouteHeader("BEMENET: " + compactAudioDeviceLabel(routed) + suffix);
                       } else setInputRouteHeader("BEMENET: útvonal ellenőrzés…");
@@ -2489,44 +2991,15 @@ jobs:
                   closeExternalVad();
                   resetCapturedFrameState();
                   synchronized(captureRateRemainder) { captureRateRemainder.reset(); }
-                  activeCaptureSampleRate = AUDIO_SAMPLE_RATE;
+                  activeCaptureSampleRate = CAPTURE_SAMPLE_RATE;
                   activeCaptureChannelCount = 1;
                   directBleCaptureActive = false;
                   directBleDigitalSilenceMs = 0L;
                   directBleFallbackRequested = false;
                   resetSttOrderingForNewSession();
+                  resetRealtimeTurnState();
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception e) { android.util.Log.w(LOG_TAG, "AudioRecord reset failed", e); }
                   rec = null;
-              }
-
-              byte[] normalizeCapturedPcmTo16k(byte[] data, int len) {
-                  if(data == null || len <= 0) return new byte[0];
-                  synchronized(captureRateRemainder) {
-                      captureRateRemainder.write(data, 0, len);
-                      byte[] all = captureRateRemainder.toByteArray();
-                      int rateRatio = activeCaptureSampleRate == 32000 ? 2 : 1;
-                      int channels = Math.max(1, activeCaptureChannelCount);
-                      int inputGroupBytes = rateRatio * channels * 2;
-                      int usable = all.length - (all.length % inputGroupBytes);
-                      if(usable <= 0) return new byte[0];
-                      ByteArrayOutputStream out = new ByteArrayOutputStream(usable / (rateRatio * channels));
-                      for(int i=0;i<usable;i+=inputGroupBytes) {
-                          long sum = 0L;
-                          int sampleCount = rateRatio * channels;
-                          int pos = i;
-                          for(int n=0;n<sampleCount;n++) {
-                              short sample = (short)(((all[pos+1] & 0xff) << 8) | (all[pos] & 0xff));
-                              sum += sample;
-                              pos += 2;
-                          }
-                          int avg = (int)(sum / Math.max(1, sampleCount));
-                          out.write(avg & 0xff);
-                          out.write((avg >> 8) & 0xff);
-                      }
-                      captureRateRemainder.reset();
-                      if(usable < all.length) captureRateRemainder.write(all, usable, all.length - usable);
-                      return out.toByteArray();
-                  }
               }
 
               void monitorDirectBleSignal(byte[] pcm16k, int len) {
@@ -2573,9 +3046,9 @@ jobs:
               }
 
               void audioLoop() {
-                  int sr = AUDIO_SAMPLE_RATE;
+                  int sr = CAPTURE_SAMPLE_RATE;
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-                  int bs = Math.max(min, 4800);
+                  int bs = Math.max(min, sr * 2 * SILERO_FRAME_MS / 1000 * 6);
 
                   rec = makeBestAudioRecord(sr, bs);
                   if(rec == null) {
@@ -2619,8 +3092,8 @@ jobs:
                   });
 
                   audioExec.submit(() -> {
-                      int rateRatio = activeCaptureSampleRate == 32000 ? 2 : 1;
-                      int captureFrameBytes = SILERO_FRAME_BYTES * rateRatio * Math.max(1, activeCaptureChannelCount);
+                      int captureSamplesPerFrame = Math.max(1, activeCaptureSampleRate * SILERO_FRAME_MS / 1000);
+                      int captureFrameBytes = captureSamplesPerFrame * Math.max(1, activeCaptureChannelCount) * 2;
                       byte[] buf = new byte[captureFrameBytes];
                       clearPreRollAudio();
                       clearPendingSpeechAudio();
@@ -2638,15 +3111,17 @@ jobs:
                           if(read > 0) {
                               if(!streaming && !finalizingStop) break;
                               try {
-                                  byte[] pcm16k = normalizeCapturedPcmTo16k(buf, read);
-                                  if(pcm16k.length == 0) continue;
+                                  ArrayList<PcmFramePair> frames = normalizeCapturedFrames(buf, read);
+                                  if(frames.isEmpty()) continue;
                                   if(!microphonePcmReady) {
                                       microphonePcmReady = true;
                                       markMicrophoneUiReady(activeRec);
                                   }
-                                  monitorDirectBleSignal(pcm16k, pcm16k.length);
-                                  synchronized(audioProcessingLock) {
-                                      processCapturedAudio(pcm16k, pcm16k.length);
+                                  for(PcmFramePair frame : frames) {
+                                      monitorDirectBleSignal(frame.pcm16k, frame.pcm16k.length);
+                                      synchronized(audioProcessingLock) {
+                                          processVadFrame(frame);
+                                      }
                                   }
                               } catch(Exception e) {
                                   android.util.Log.e(LOG_TAG, "Audio processing failed", e);
@@ -2736,6 +3211,7 @@ jobs:
                   // Azonnali belső leállításnál a régi HTTP válaszok nem kerülhetnek
                   // egy később induló mikrofonmenet blokkjaiba.
                   resetSttOrderingForNewSession();
+                  closeRealtimeTranscriptionSession(false);
                   finishStopCleanup();
               }
 
@@ -2744,11 +3220,9 @@ jobs:
                   catch(Exception e) { android.util.Log.w(LOG_TAG, "AudioRecord delayed release failed", e); }
                   if(stopSession != sttSessionId || !finalizingStop) return;
                   synchronized(audioProcessingLock) {
-                      byte[] remainder = takeCapturedRemainder();
-                      if(voiceSendActive && remainder.length > 0) appendSpeechAudioChunk(remainder);
-                      if(!voiceSendActive && pendingSpeechAudioDurationMs() > 0) {
-                          for(byte[] pr : takePreRollAudio()) appendSpeechAudioChunk(pr);
-                          for(byte[] ps : takePendingSpeechAudio()) appendSpeechAudioChunk(ps);
+                      if(!voiceSendActive && pendingSpeechAudioDurationMs() >= MIN_TRUE_SPEECH_AUDIO_MS) {
+                          for(PcmFramePair pr : takePreRollAudio()) sendAudioFrame(pr);
+                          for(PcmFramePair ps : takePendingSpeechAudio()) sendAudioFrame(ps);
                       }
                       voiceSendActive = false;
                       clearPendingSpeechAudio();
@@ -2781,6 +3255,7 @@ jobs:
                   clearSpeechAudioWindow();
                   resetCapturedFrameState();
                   closeExternalVad();
+                  closeRealtimeTranscriptionSession(false);
                   speechTranscriptBuffer = "";
                   firstSpeechHeardAt = 0L;
                   speechBufferStartedAt = 0L;
@@ -5373,14 +5848,10 @@ jobs:
 
 
               String vadEngineLabel() {
-                  if("webrtc_quiet".equals(vadEngineMode)) return "WebRTC VAD – csendes";
-                  if("webrtc_medium".equals(vadEngineMode)) return "WebRTC VAD – közepes";
-                  if("webrtc".equals(vadEngineMode)) return "WebRTC VAD – zajos";
                   if("silero_off".equals(vadEngineMode)) return "Silero VAD – OFF / extra érzékeny";
                   if("silero".equals(vadEngineMode)) return "Silero VAD – NORMAL / ajánlott";
                   if("silero_medium".equals(vadEngineMode)) return "Silero VAD – AGGRESSIVE";
                   if("silero_truck".equals(vadEngineMode)) return "Silero VAD – VERY AGGRESSIVE";
-                  if("pass".equals(vadEngineMode)) return "Passz / nincs zajkapu";
                   return vadEngineMode;
               }
 
@@ -5431,7 +5902,7 @@ jobs:
 
               String sharedTextCleanupInstructions() {
                   // V40.17: a RENDEZ és a FORDÍT ugyanazt az egysoros mondattagolást használja.
-                  // V40.18: négy Silero fokozat, késleltetett mikrofon-kész jelzés és azonnali profilmenü-frissítés.
+                  // V40.19: Silero-only 300 ms lezárás, 48→16/24 kHz kettős hangág és Realtime részleges STT.
                   return nonConversationalLanguageTaskRules() +
                       profilePrompt() +
                       cleanupBehaviorRules() +
@@ -5605,7 +6076,7 @@ jobs:
           
                       if(micBtn != null) {
                           micBtn.setEnabled(true);
-                          if(finalizingStop) {
+                          if(finalizingStop || microphoneStarting) {
                               micBtn.setText("VÁRJ");
                               setOvalButtonColor(micBtn, orange);
                           } else if(streaming) {
@@ -5759,6 +6230,7 @@ jobs:
                       }
                   } catch(Exception ignored) {}
                   clearSpeakState();
+                  closeRealtimeTranscriptionSession(false);
                   restoreNormalAudioRoute();
                   audioExec.shutdownNow();
                   super.onDestroy();
@@ -5802,14 +6274,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.18.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.18.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.19.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.19.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.18
+          name: V40.19
           path: |
             artifact/*.apk
             artifact/*.aab
