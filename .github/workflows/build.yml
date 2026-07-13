@@ -1,4 +1,4 @@
-name: Build Android APK V40.21
+name: Build Android APK V40.20
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4021; versionName = "40.21" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4020; versionName = "40.20" }
           
               signingConfigs {
                   create("release") {
@@ -114,7 +114,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.21" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.20" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -249,7 +249,7 @@ jobs:
               final LinkedHashMap<String,TtsJob> ttsJobs = new LinkedHashMap<>();
               AudioManager audioManager;
               AudioDeviceInfo preferredInterpreterInputDevice;
-              // V40.21: a bemenet minden módban kizárólag a telefon beépített mikrofonja.
+              // V40.20: a bemenet minden módban kizárólag a telefon beépített mikrofonja.
               // Elsődleges rögzítés 48 kHz; ha ezt a készülék nem inicializálja, a tartalék 24 kHz.
               int activeCaptureSampleRate = 48000;
               int activeCaptureChannelCount = 1;
@@ -283,28 +283,27 @@ jobs:
               String interpreterAudioMode = "off";
               String lastInterpreterAudioMode = "auto";
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV421";
-              static final int PRE_ROLL_AUDIO_MS = 320;
-              // V40.21: a gyári Silero út marad 16 kHz / 512 minta / 32 ms kerettel.
+              static final String LOG_TAG = "ForditoV420";
+              static final int PRE_ROLL_AUDIO_MS = 800;
+              // V40.20: a gyári Silero út marad 16 kHz / 512 minta / 32 ms kerettel.
               // A mondatrész 50 ms igazolt beszéd után nyit és 300 ms csend után zár.
               static final int SILERO_FRAME_SAMPLES = 512;
               static final int SILERO_FRAME_BYTES = SILERO_FRAME_SAMPLES * 2;
               static final int SILERO_FRAME_MS = 32;
               static final int VAD_SPEECH_START_MS = 50;
               static final int VAD_SPEECH_END_SILENCE_MS = 300;
-              static final int MIN_TRUE_SPEECH_AUDIO_MS = SILERO_FRAME_MS;
+              static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
               // A telefon fő felvétele 48 kHz. Ugyanabból a 32 ms-os keretből készül
               // 16 kHz a Silero számára és 24 kHz az OpenAI Realtime számára.
               static final int CAPTURE_SAMPLE_RATE = 48000;
               static final int AUDIO_SAMPLE_RATE = 16000;
               static final int REALTIME_SAMPLE_RATE = 24000;
-              // V40.21: EarFun-jellegű élő előnézet. A Realtime puffer 640 ms-onként commitol,
-              // majd 192 ms hangátfedést visszatölt a következő mikroblokk elejére. A Silero 300 ms-os
-              // csendje továbbra is az egyetlen valódi mondatlezárás; az előnézeti commit nem indít fordítást.
-              static final int REALTIME_PREVIEW_COMMIT_MS = 640;
-              static final int REALTIME_OVERLAP_MS = 192;
-              static final int REALTIME_MIN_FINAL_NEW_AUDIO_MS = 32;
-              static final int FALLBACK_TEXT_MAX_WAIT_MS = 2000;
+              // A Silero 300 ms-os csendje az elsődleges mondathatár. Hosszú, szünet nélküli
+              // beszédnél legfeljebb 2,4 másodpercenként commitolunk, miközben a következő rész már rögzül.
+              static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 2400;
+              static final int BLOCK_WINDOW_MS = MAX_CONTINUOUS_SPEECH_BLOCK_MS;
+              static final int BLOCK_ACCEPT_MS = MAX_CONTINUOUS_SPEECH_BLOCK_MS;
+              static final int BLOCK_OVERLAP_MS = 0;
               volatile boolean voiceSendActive = false;
           
               static class PcmFramePair {
@@ -324,11 +323,6 @@ jobs:
               ByteArrayOutputStream speechAudioWindow = new ByteArrayOutputStream();
               boolean currentTurnRealtimeEligible = false;
               int currentTurnRealtimeBytes = 0;
-              int currentTurnNewAudioMs = 0;
-              final ArrayDeque<PcmFramePair> realtimeOverlapFrames = new ArrayDeque<>();
-              int realtimeOverlapMs = 0;
-              RealtimeUtterance activeRealtimeUtterance = null;
-              int realtimeUtteranceSeq = 0;
               String vadEngineMode = "silero"; // dokumentált Silero NORMAL alap
               Object speechVadInstance = null;
               String speechVadInstanceMode = "";
@@ -459,42 +453,21 @@ jobs:
                   }
               }
           
-              static class RealtimeUtterance {
-                  final int session;
-                  final int id;
-                  String committedText = "";
-                  int pendingTurns = 0;
-                  boolean endRequested = false;
-                  boolean finalized = false;
-                  final ArrayList<Integer> turnOrder = new ArrayList<>();
-                  final HashMap<Integer, String> partialByTurn = new HashMap<>();
-                  final HashMap<Integer, String> finalByTurn = new HashMap<>();
-                  TextBlock partialBlock;
-                  RealtimeUtterance(int session, int id) {
-                      this.session = session;
-                      this.id = id;
-                  }
-              }
-          
               static class RealtimeTurn {
                   final int session;
                   final int seq;
                   final byte[] fallbackPcm16k;
-                  final RealtimeUtterance utterance;
-                  final boolean finalChunk;
                   String itemId = "";
                   String partialText = "";
                   String finalText = "";
                   String error = "";
                   boolean completed = false;
                   boolean fallbackStarted = false;
-                  boolean awaitingCommitAck = false;
-                  RealtimeTurn(int session, int seq, byte[] fallbackPcm16k, RealtimeUtterance utterance, boolean finalChunk) {
+                  TextBlock partialBlock;
+                  RealtimeTurn(int session, int seq, byte[] fallbackPcm16k) {
                       this.session = session;
                       this.seq = seq;
                       this.fallbackPcm16k = fallbackPcm16k == null ? new byte[0] : fallbackPcm16k;
-                      this.utterance = utterance;
-                      this.finalChunk = finalChunk;
                   }
               }
           
@@ -632,7 +605,7 @@ jobs:
                   delayMode = sp.getString("delayMode", "low");
                   if(!"minimal".equals(delayMode) && !"low".equals(delayMode) && !"medium".equals(delayMode) && !"high".equals(delayMode) && !"xhigh".equals(delayMode)) delayMode = "low";
                   vadEngineMode = sp.getString("vadEngineMode", "silero");
-                  // V40.21: csak Silero NORMAL vagy kézzel választott AGGRESSIVE maradhat.
+                  // V40.20: csak Silero NORMAL vagy kézzel választott AGGRESSIVE maradhat.
                   if(!"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode)) vadEngineMode = "silero";
                   // A bemeneti forrás nem választható: mindig a telefon mikrofonja + VOICE_RECOGNITION/MIC.
                   audioSourceMode = "recognition";
@@ -688,12 +661,12 @@ jobs:
                       sp.edit().putInt("stableDefaultsVersion", 412).apply();
                       save();
                   }
-                  if(last < 421) {
-                      // V40.21: EarFun-jellegű gyors élő út, fix telefonmikrofon, Silero-only és LOW késleltetés.
+                  if(last < 420) {
+                      // V40.20: EarFun-jellegű gyors élő út, fix telefonmikrofon, Silero-only és LOW késleltetés.
                       vadEngineMode = "silero";
                       audioSourceMode = "recognition";
                       delayMode = "low";
-                      sp.edit().putInt("stableDefaultsVersion", 421).apply();
+                      sp.edit().putInt("stableDefaultsVersion", 420).apply();
                       save();
                   }
               }
@@ -732,7 +705,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.21");
+                  TextView title = label("Fordito_V40.20");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -1479,7 +1452,7 @@ jobs:
                       state.setText("mikrofon előkészítés");
                       updateButtons();
                       startRealtimeTranscriptionSession();
-                      audioExec.submit(this::audioLoop);
+                      audioLoop();
                   } else {
                       state.setText("fordítás");
                       if(pendingManualText.length() > 0) {
@@ -1671,7 +1644,11 @@ jobs:
                   voiceSendActive = false;
                   clearPendingSpeechAudio();
                   clearPreRollAudio();
-                  clearSpeechAudioWindow();
+                  synchronized(speechAudioWindowLock) {
+                      speechAudioWindow.reset();
+                      currentTurnRealtimeEligible = false;
+                      currentTurnRealtimeBytes = 0;
+                  }
                   sendRealtimeClearBuffer();
               }
           
@@ -1700,7 +1677,7 @@ jobs:
           
                   if(voiceSendActive) {
                       voiceSendActive = false;
-                      finishSpeechUtterance();
+                      flushSpeechAudioWindow(true);
                   }
                   clearPendingSpeechAudio();
                   rememberPreRollAudio(frame);
@@ -1847,18 +1824,11 @@ jobs:
               }
           
               void clearSpeechAudioWindow() {
-                  RealtimeUtterance abandoned;
                   synchronized(speechAudioWindowLock) {
-                      abandoned = activeRealtimeUtterance;
                       speechAudioWindow.reset();
                       currentTurnRealtimeEligible = false;
                       currentTurnRealtimeBytes = 0;
-                      currentTurnNewAudioMs = 0;
-                      realtimeOverlapFrames.clear();
-                      realtimeOverlapMs = 0;
-                      activeRealtimeUtterance = null;
                   }
-                  if(abandoned != null && !abandoned.finalized) runOnUiThread(() -> removeRealtimeUtteranceBlock(abandoned));
               }
           
               int speechAudioWindowMs() {
@@ -1878,102 +1848,43 @@ jobs:
                   }
               }
           
-              void rememberRealtimeOverlapLocked(PcmFramePair frame) {
-                  realtimeOverlapFrames.add(copyFramePair(frame));
-                  realtimeOverlapMs += SILERO_FRAME_MS;
-                  while(realtimeOverlapMs > REALTIME_OVERLAP_MS && !realtimeOverlapFrames.isEmpty()) {
-                      realtimeOverlapFrames.poll();
-                      realtimeOverlapMs = Math.max(0, realtimeOverlapMs - SILERO_FRAME_MS);
-                  }
-              }
-          
-              ArrayList<PcmFramePair> copyRealtimeOverlapLocked() {
-                  ArrayList<PcmFramePair> out = new ArrayList<>();
-                  for(PcmFramePair frame : realtimeOverlapFrames) out.add(copyFramePair(frame));
-                  return out;
-              }
-          
-              RealtimeUtterance ensureRealtimeUtteranceLocked() {
-                  if(activeRealtimeUtterance == null || activeRealtimeUtterance.session != sttSessionId || activeRealtimeUtterance.endRequested)
-                      activeRealtimeUtterance = new RealtimeUtterance(sttSessionId, ++realtimeUtteranceSeq);
-                  return activeRealtimeUtterance;
-              }
-          
               void appendSpeechAudioFrame(PcmFramePair frame) {
                   if(frame == null || frame.pcm16k.length == 0 || client == null) return;
-                  boolean previewCommit;
+                  boolean forceCommit = false;
                   synchronized(speechAudioWindowLock) {
-                      ensureRealtimeUtteranceLocked();
                       if(speechAudioWindow.size() == 0) {
                           currentTurnRealtimeEligible = realtimeSessionReady;
                           currentTurnRealtimeBytes = 0;
-                          currentTurnNewAudioMs = 0;
                       }
                       speechAudioWindow.write(frame.pcm16k, 0, frame.pcm16k.length);
-                      currentTurnNewAudioMs += SILERO_FRAME_MS;
-                      rememberRealtimeOverlapLocked(frame);
                       if(currentTurnRealtimeEligible) {
                           if(sendRealtimeAudio(frame.pcm24k)) currentTurnRealtimeBytes += frame.pcm24k.length;
                           else currentTurnRealtimeEligible = false;
                       }
-                      previewCommit = currentTurnNewAudioMs >= REALTIME_PREVIEW_COMMIT_MS;
+                      forceCommit = pcm16Mono16kMs(speechAudioWindow.size()) >= BLOCK_WINDOW_MS;
                   }
-                  if(previewCommit) commitRealtimeAudioChunk(false);
+                  if(forceCommit) flushSpeechAudioWindow(true);
               }
           
-              void primeNextRealtimeChunk(ArrayList<PcmFramePair> overlap) {
-                  if(overlap == null || overlap.isEmpty()) return;
-                  synchronized(speechAudioWindowLock) {
-                      if(activeRealtimeUtterance == null || activeRealtimeUtterance.endRequested) return;
-                      currentTurnRealtimeEligible = realtimeSessionReady;
-                      currentTurnRealtimeBytes = 0;
-                      currentTurnNewAudioMs = 0;
-                      for(PcmFramePair frame : overlap) {
-                          speechAudioWindow.write(frame.pcm16k, 0, frame.pcm16k.length);
-                          if(currentTurnRealtimeEligible) {
-                              if(sendRealtimeAudio(frame.pcm24k)) currentTurnRealtimeBytes += frame.pcm24k.length;
-                              else currentTurnRealtimeEligible = false;
-                          }
-                      }
-                  }
-              }
-          
-              void commitRealtimeAudioChunk(boolean finalChunk) {
+              void flushSpeechAudioWindow(boolean force) {
                   byte[] ready = null;
                   boolean useRealtime = false;
-                  RealtimeUtterance utterance;
-                  ArrayList<PcmFramePair> overlap = new ArrayList<>();
                   synchronized(speechAudioWindowLock) {
-                      utterance = activeRealtimeUtterance;
-                      if(utterance == null) return;
-                      int requiredNewMs = finalChunk ? REALTIME_MIN_FINAL_NEW_AUDIO_MS : REALTIME_PREVIEW_COMMIT_MS;
-                      if(currentTurnNewAudioMs >= requiredNewMs && speechAudioWindow.size() > 0) {
+                      int minBytes = AUDIO_SAMPLE_RATE * 2 * (force ? MIN_TRUE_SPEECH_AUDIO_MS : 1200) / 1000;
+                      if(speechAudioWindow.size() >= minBytes) {
                           ready = speechAudioWindow.toByteArray();
                           useRealtime = currentTurnRealtimeEligible && currentTurnRealtimeBytes > 0 && realtimeSessionReady;
-                          if(!finalChunk) overlap = copyRealtimeOverlapLocked();
-                      }
-                      speechAudioWindow.reset();
-                      currentTurnRealtimeEligible = false;
-                      currentTurnRealtimeBytes = 0;
-                      currentTurnNewAudioMs = 0;
-                      if(finalChunk) {
-                          realtimeOverlapFrames.clear();
-                          realtimeOverlapMs = 0;
-                          activeRealtimeUtterance = null;
+                          speechAudioWindow.reset();
+                          currentTurnRealtimeEligible = false;
+                          currentTurnRealtimeBytes = 0;
                       }
                   }
-          
-                  if(ready != null) submitRealtimeTurn(ready, utterance, finalChunk, useRealtime);
-                  else if(finalChunk) {
-                      synchronized(utterance) { utterance.endRequested = true; }
-                      runOnUiThread(() -> maybeFinalizeRealtimeUtterance(utterance));
+                  if(ready == null) return;
+                  if(useRealtime) commitRealtimeTurn(ready);
+                  else {
+                      sendRealtimeClearBuffer();
+                      transcribeAudioWindow(ready, false);
                   }
-          
-                  if(!finalChunk) primeNextRealtimeChunk(overlap);
-              }
-          
-              void finishSpeechUtterance() {
-                  commitRealtimeAudioChunk(true);
               }
           
               byte[] wavFromPcm16k(byte[] pcm) throws Exception {
@@ -2251,44 +2162,30 @@ jobs:
                   }
               }
           
-              synchronized RealtimeTurn registerRealtimeTurn(byte[] pcm16k, RealtimeUtterance utterance, boolean finalChunk, boolean awaitCommitAck) {
-                  RealtimeTurn turn = new RealtimeTurn(sttSessionId, ++realtimeTurnSeq, Arrays.copyOf(pcm16k, pcm16k.length), utterance, finalChunk);
+              synchronized RealtimeTurn registerRealtimeTurn(byte[] pcm16k) {
+                  RealtimeTurn turn = new RealtimeTurn(sttSessionId, ++realtimeTurnSeq, Arrays.copyOf(pcm16k, pcm16k.length));
                   sttRequestsInFlight++;
-                  if(utterance != null) {
-                      synchronized(utterance) {
-                          utterance.pendingTurns++;
-                          utterance.turnOrder.add(turn.seq);
-                          if(finalChunk) utterance.endRequested = true;
-                      }
-                  }
-                  if(awaitCommitAck) {
-                      turn.awaitingCommitAck = true;
-                      synchronized(realtimeLock) { realtimeAwaitingCommitAck.add(turn); }
-                      new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                          if(turn.session == sttSessionId && !turn.completed) {
-                              // Az ACK-sorban marad, hogy egy későn érkező committed esemény ne a
-                              // következő mikroblokkhoz legyen tévesen hozzárendelve.
-                              startRealtimeTurnFallback(turn, "élő STT időtúllépés");
+                  synchronized(realtimeLock) { realtimeAwaitingCommitAck.add(turn); }
+                  new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                      if(turn.session == sttSessionId && !turn.completed) {
+                          synchronized(realtimeLock) {
+                              realtimeAwaitingCommitAck.remove(turn);
+                              if(turn.itemId != null && turn.itemId.length() > 0) realtimeTurnsByItem.remove(turn.itemId);
                           }
-                      }, 15000L);
-                  }
+                          startRealtimeTurnFallback(turn, "élő STT időtúllépés");
+                      }
+                  }, 15000L);
                   return turn;
               }
           
-              void submitRealtimeTurn(byte[] pcm16k, RealtimeUtterance utterance, boolean finalChunk, boolean useRealtime) {
-                  if(pcm16k == null || pcm16k.length == 0 || utterance == null) return;
-                  RealtimeTurn turn = registerRealtimeTurn(pcm16k, utterance, finalChunk, useRealtime);
-                  if(!useRealtime) {
-                      sendRealtimeClearBuffer();
-                      startRealtimeTurnFallback(turn, "élő STT nem kész");
-                      return;
-                  }
+              void commitRealtimeTurn(byte[] pcm16k) {
+                  if(pcm16k == null || pcm16k.length == 0) return;
+                  RealtimeTurn turn = registerRealtimeTurn(pcm16k);
                   boolean sent;
                   try { sent = sendRealtimeJson(new JSONObject().put("type", "input_audio_buffer.commit")); }
                   catch(Exception e) { sent = false; }
                   if(!sent) {
                       synchronized(realtimeLock) { realtimeAwaitingCommitAck.remove(turn); }
-                      turn.awaitingCommitAck = false;
                       startRealtimeTurnFallback(turn, "commit nem küldhető");
                   }
               }
@@ -2301,14 +2198,12 @@ jobs:
                   synchronized(realtimeLock) {
                       turn = realtimeAwaitingCommitAck.poll();
                       if(turn == null) return;
-                      turn.awaitingCommitAck = false;
                       turn.itemId = itemId;
+                      realtimeTurnsByItem.put(itemId, turn);
                       StringBuilder d = realtimeOrphanDeltas.remove(itemId);
                       if(d != null) orphanDelta = d.toString();
                       orphanFinal = realtimeOrphanFinals.remove(itemId);
-                      if(!turn.completed) realtimeTurnsByItem.put(itemId, turn);
                   }
-                  if(turn.completed) return;
                   if(orphanDelta.length() > 0) updateRealtimePartial(turn, orphanDelta);
                   if(orphanFinal != null) finishRealtimeTurn(turn, orphanFinal, "");
               }
@@ -2326,102 +2221,29 @@ jobs:
                   updateRealtimePartial(turn, turn.partialText + delta);
               }
           
-              String normalizeRealtimeWord(String word) {
-                  if(word == null) return "";
-                  return java.text.Normalizer.normalize(word, java.text.Normalizer.Form.NFD)
-                      .replaceAll("\\p{M}+", "")
-                      .toLowerCase(Locale.ROOT)
-                      .replaceAll("[^a-z0-9]", "");
-              }
-          
-              String mergeRealtimeTranscript(String base, String next) {
-                  String a = base == null ? "" : base.trim().replaceAll("\\s+", " ");
-                  String b = next == null ? "" : next.trim().replaceAll("\\s+", " ");
-                  if(a.length() == 0) return b;
-                  if(b.length() == 0) return a;
-                  String na = normalizeSpeechBlockHash(a);
-                  String nb = normalizeSpeechBlockHash(b);
-                  if(na.equals(nb)) return a.length() >= b.length() ? a : b;
-                  if(nb.startsWith(na + " ")) return b;
-                  if(na.endsWith(" " + nb) || na.equals(nb)) return a;
-          
-                  String[] aw = a.split("\\s+");
-                  String[] bw = b.split("\\s+");
-                  int best = 0;
-                  int max = Math.min(12, Math.min(aw.length, bw.length));
-                  for(int n=max; n>=1; n--) {
-                      boolean same = true;
-                      for(int i=0;i<n;i++) {
-                          String left = normalizeRealtimeWord(aw[aw.length - n + i]);
-                          String right = normalizeRealtimeWord(bw[i]);
-                          if(left.length() == 0 || !left.equals(right)) { same = false; break; }
-                      }
-                      if(same) { best = n; break; }
+              void updateRealtimePartial(RealtimeTurn turn, String text) {
+                  if(turn == null || turn.completed || turn.session != sttSessionId) return;
+                  String visible = text == null ? "" : text.trim();
+                  turn.partialText = visible;
+                  if(visible.length() == 0) return;
+                  if(looksLikeObviousThirdLanguageNoise(visible)) {
+                      removeRealtimePartialBlock(turn);
+                      return;
                   }
-                  if(best >= bw.length) return a;
-                  StringBuilder out = new StringBuilder(a);
-                  for(int i=best;i<bw.length;i++) {
-                      if(out.length() > 0 && out.charAt(out.length()-1) != ' ') out.append(' ');
-                      out.append(bw[i]);
+                  boolean sourceTop = sourceIsTopBySelectedPair(visible, topActive);
+                  if(turn.partialBlock == null) {
+                      turn.partialBlock = new TextBlock();
+                      turn.partialBlock.translatedOk = false;
+                      turn.partialBlock.provisional = true;
+                      textBlocks.add(turn.partialBlock);
                   }
-                  return out.toString().trim().replaceAll("\\s+", " ");
-              }
-          
-              String buildRealtimeUtterancePreview(RealtimeUtterance utterance) {
-                  if(utterance == null) return "";
-                  synchronized(utterance) {
-                      String visible = "";
-                      for(Integer seq : utterance.turnOrder) {
-                          if(seq == null) continue;
-                          if(utterance.finalByTurn.containsKey(seq)) {
-                              String part = utterance.finalByTurn.get(seq);
-                              if(part != null && part.trim().length() > 0)
-                                  visible = mergeRealtimeTranscript(visible, part);
-                              // Egy sikertelen, üresre lezárt mikroblokkot átugrunk: a 192 ms-os
-                              // átfedés miatt a következő blokk rendszerint visszahozza a szöveget.
-                              continue;
-                          }
-                          String part = utterance.partialByTurn.get(seq);
-                          if(part == null || part.trim().length() == 0) break;
-                          visible = mergeRealtimeTranscript(visible, part);
-                          // Egy még részleges blokk után későbbi blokkot nem jelenítünk meg,
-                          // így a később érkező események nem cserélik fel a mondat elejét-végét.
-                          break;
-                      }
-                      return visible;
-                  }
-              }
-          
-              void updateRealtimeUtterancePreview(RealtimeUtterance utterance) {
-                  if(utterance == null || utterance.finalized) return;
-                  String visible = cleanTranscriptForSelectedPair(buildRealtimeUtterancePreview(utterance)).trim();
-                  if(visible.length() == 0 || looksLikeObviousThirdLanguageNoise(visible)) return;
-                  String detected = selectedPairLanguageCode(visible);
-                  // Bizonytalan vagy harmadik nyelvű rész soha nem kerül ideiglenesen sem a magyar/forrás oldalra.
-                  if(detected.isEmpty()) return;
-                  boolean sourceTop = detected.equalsIgnoreCase(code(topLang));
-                  if(utterance.partialBlock == null) {
-                      utterance.partialBlock = new TextBlock();
-                      utterance.partialBlock.translatedOk = false;
-                      utterance.partialBlock.provisional = true;
-                      textBlocks.add(utterance.partialBlock);
-                  }
-                  TextBlock b = utterance.partialBlock;
+                  TextBlock b = turn.partialBlock;
                   b.sourceTop = sourceTop;
                   b.provisional = true;
                   b.pendingSourceText = visible;
                   b.topText = sourceTop ? visible : "";
                   b.bottomText = sourceTop ? "" : visible;
                   renderBlocksKeepView();
-              }
-          
-              void updateRealtimePartial(RealtimeTurn turn, String text) {
-                  if(turn == null || turn.completed || turn.session != sttSessionId || turn.utterance == null) return;
-                  String partial = text == null ? "" : text.trim();
-                  turn.partialText = partial;
-                  if(partial.length() == 0) return;
-                  synchronized(turn.utterance) { turn.utterance.partialByTurn.put(turn.seq, partial); }
-                  updateRealtimeUtterancePreview(turn.utterance);
               }
           
               void applyRealtimeCompleted(String itemId, String transcript) {
@@ -2443,15 +2265,11 @@ jobs:
                   if(turn != null) startRealtimeTurnFallback(turn, error);
               }
           
-              void removeRealtimeUtteranceBlock(RealtimeUtterance utterance) {
-                  if(utterance == null || utterance.partialBlock == null) return;
-                  textBlocks.remove(utterance.partialBlock);
-                  utterance.partialBlock = null;
-                  renderBlocksKeepView();
-              }
-          
               void removeRealtimePartialBlock(RealtimeTurn turn) {
-                  if(turn != null) removeRealtimeUtteranceBlock(turn.utterance);
+                  if(turn == null || turn.partialBlock == null) return;
+                  textBlocks.remove(turn.partialBlock);
+                  turn.partialBlock = null;
+                  renderBlocksKeepView();
               }
           
               void finishRealtimeTurn(RealtimeTurn turn, String transcript, String error) {
@@ -2459,16 +2277,9 @@ jobs:
                   turn.completed = true;
                   turn.finalText = transcript == null ? "" : transcript.trim();
                   turn.error = error == null ? "" : error;
-                  if(turn.utterance != null) {
-                      synchronized(turn.utterance) {
-                          turn.utterance.partialByTurn.remove(turn.seq);
-                          turn.utterance.finalByTurn.put(turn.seq, turn.finalText);
-                      }
-                      updateRealtimeUtterancePreview(turn.utterance);
-                  }
                   synchronized(realtimeLock) {
                       if(turn.itemId.length() > 0) realtimeTurnsByItem.remove(turn.itemId);
-                      if(!turn.awaitingCommitAck) realtimeAwaitingCommitAck.remove(turn);
+                      realtimeAwaitingCommitAck.remove(turn);
                   }
                   realtimeCompletedTurns.put(turn.seq, turn);
                   drainRealtimeTurnsInOrder();
@@ -2480,52 +2291,36 @@ jobs:
                       if(turn == null) break;
                       realtimeDeliverSeq++;
                       sttRequestsInFlight = Math.max(0, sttRequestsInFlight - 1);
-                      RealtimeUtterance utterance = turn.utterance;
-                      if(utterance != null) {
-                          synchronized(utterance) {
-                              utterance.pendingTurns = Math.max(0, utterance.pendingTurns - 1);
-                              if(turn.finalChunk) utterance.endRequested = true;
+                      if(turn.finalText.length() > 0) finalizeRealtimeTurnForTranslation(turn);
+                      else {
+                          removeRealtimePartialBlock(turn);
+                          if(turn.error.length() > 0) {
+                              android.util.Log.e(LOG_TAG, "Realtime STT failed: " + turn.error);
+                              state.setText(streaming ? "mikrofon aktív – STT hiba" : "STT hiba – az előző átiratok megmaradtak");
                           }
-                          if(turn.finalText.length() > 0) {
-                              utterance.committedText = mergeRealtimeTranscript(utterance.committedText, turn.finalText);
-                              updateRealtimeUtteranceCommittedPreview(utterance);
-                          } else if(turn.error.length() > 0) {
-                              android.util.Log.e(LOG_TAG, "Realtime STT chunk failed: " + turn.error);
-                          }
-                          maybeFinalizeRealtimeUtterance(utterance);
                       }
                   }
                   maybeFinishStop();
               }
           
-              void updateRealtimeUtteranceCommittedPreview(RealtimeUtterance utterance) {
-                  updateRealtimeUtterancePreview(utterance);
-              }
-          
-              void maybeFinalizeRealtimeUtterance(RealtimeUtterance utterance) {
-                  if(utterance == null || utterance.session != sttSessionId) return;
-                  synchronized(utterance) {
-                      if(utterance.finalized || !utterance.endRequested || utterance.pendingTurns > 0) return;
-                      utterance.finalized = true;
-                  }
-                  String cleaned = normalizeAndDeduplicateSpeechBlock(utterance.committedText);
-                  if(cleaned.length() == 0 || looksLikeObviousThirdLanguageNoise(cleaned)) {
-                      removeRealtimeUtteranceBlock(utterance);
+              void finalizeRealtimeTurnForTranslation(RealtimeTurn turn) {
+                  if(turn == null) return;
+                  String cleaned = normalizeAndDeduplicateSpeechBlock(turn.finalText);
+                  if(cleaned.length() == 0) {
+                      removeRealtimePartialBlock(turn);
                       return;
                   }
-          
-                  String detected = selectedPairLanguageCode(cleaned);
-                  boolean sourceTop = detected.isEmpty() ? topActive : detected.equalsIgnoreCase(code(topLang));
-                  TextBlock b = utterance.partialBlock;
+                  boolean sourceTop = sourceIsTopBySelectedPair(cleaned, topActive);
+                  TextBlock b = turn.partialBlock;
                   int id;
                   if(b != null && textBlocks.contains(b)) {
-                      utterance.partialBlock = null;
+                      turn.partialBlock = null; // ettől kezdve végleges forrásblokk, resetkor nem törölhető részlegesként
                       b.speechSeq = b.speechSeq > 0 ? b.speechSeq : ++speechSourceBlockSeq;
                       b.sourceTop = sourceTop;
                       b.provisional = true;
                       b.translatedOk = false;
                       b.pendingSourceText = cleaned;
-                      String visible = detected.isEmpty() ? "" : userVisibleSpeechTextOrEmpty(cleaned);
+                      String visible = userVisibleSpeechTextOrEmpty(cleaned);
                       b.topText = sourceTop ? visible : "";
                       b.bottomText = sourceTop ? "" : visible;
                       id = textBlocks.indexOf(b);
@@ -2548,8 +2343,7 @@ jobs:
                   }
                   if(turn == null || turn.completed || turn.fallbackStarted || turn.session != sttSessionId) return;
                   turn.fallbackStarted = true;
-                  // Egy mikroblokk tartalék STT-je nem törölheti az ugyanahhoz a mondathoz
-                  // már megjelent stabil szürke előnézetet.
+                  removeRealtimePartialBlock(turn);
                   if(turn.fallbackPcm16k.length == 0 || client == null || !hasKey()) {
                       finishRealtimeTurn(turn, "", reason);
                       return;
@@ -2616,7 +2410,6 @@ jobs:
                   for(RealtimeTurn turn : turnsToRemove) removeRealtimePartialBlock(turn);
                   realtimeCompletedTurns.clear();
                   realtimeTurnSeq = 0;
-                  realtimeUtteranceSeq = 0;
                   realtimeDeliverSeq = 1;
               }
           
@@ -2650,7 +2443,7 @@ jobs:
               }
           
               int selectedAudioSource() {
-                  // V40.21: nincs kommunikációs vagy nyers bemeneti ág. A telefon mikrofonján
+                  // V40.20: nincs kommunikációs vagy nyers bemeneti ág. A telefon mikrofonján
                   // VOICE_RECOGNITION az első, MIC a kompatibilitási tartalék.
                   return MediaRecorder.AudioSource.VOICE_RECOGNITION;
               }
@@ -2992,7 +2785,7 @@ jobs:
                   if(!streaming) return;
                   synchronized(audioProcessingLock) {
                       try {
-                          if(voiceSendActive) finishSpeechUtterance();
+                          if(voiceSendActive) flushSpeechAudioWindow(true);
                       } catch(Exception e) {
                           android.util.Log.w(LOG_TAG, "Half-duplex pre-TTS flush failed", e);
                       }
@@ -3082,7 +2875,6 @@ jobs:
               }
           
               void audioLoop() {
-                  final int audioSession = sttSessionId;
                   rec = null;
                   Exception lastStartError = null;
                   if(!ensureExternalVadReady()) {
@@ -3127,65 +2919,60 @@ jobs:
                       return;
                   }
           
-                  if(audioSession != sttSessionId || !connected) {
-                      try { rec.stop(); } catch(Exception ignored) {}
-                      try { rec.release(); } catch(Exception ignored) {}
-                      rec = null;
-                      return;
-                  }
-          
                   streaming = true;
                   final AudioRecord activeRec = rec;
                   registerActualInputRouteUpdates(activeRec);
+                  refreshActualInputRoute(activeRec);
+                  setSpeechUiLocked(false);
                   runOnUiThread(() -> {
-                      refreshActualInputRoute(activeRec);
-                      setSpeechUiLocked(false);
                       state.setText("mikrofon előkészítés");
                       updateButtons();
                   });
           
-                  int captureSamplesPerFrame = Math.max(1, activeCaptureSampleRate * SILERO_FRAME_MS / 1000);
-                  int captureFrameBytes = captureSamplesPerFrame * 2;
-                  byte[] buf = new byte[captureFrameBytes];
-                  clearPreRollAudio();
-                  clearPendingSpeechAudio();
-                  clearSpeechAudioWindow();
-                  voiceSendActive = false;
-                  while((streaming || finalizingStop) && activeRec != null && audioSession == sttSessionId) {
-                      int read;
-                      try {
-                          read = activeRec.read(buf, 0, buf.length, AudioRecord.READ_BLOCKING);
-                      } catch(Exception e) {
-                          android.util.Log.e(LOG_TAG, "AudioRecord read threw", e);
-                          runOnUiThread(() -> state.setText("mikrofon olvasási hiba"));
-                          break;
-                      }
-                      if(read > 0) {
-                          if(!streaming && !finalizingStop) break;
+                  audioExec.submit(() -> {
+                      int captureSamplesPerFrame = Math.max(1, activeCaptureSampleRate * SILERO_FRAME_MS / 1000);
+                      int captureFrameBytes = captureSamplesPerFrame * 2;
+                      byte[] buf = new byte[captureFrameBytes];
+                      clearPreRollAudio();
+                      clearPendingSpeechAudio();
+                      clearSpeechAudioWindow();
+                      voiceSendActive = false;
+                      while((streaming || finalizingStop) && activeRec != null) {
+                          int read;
                           try {
-                              ArrayList<PcmFramePair> frames = normalizeCapturedFrames(buf, read);
-                              if(frames.isEmpty()) continue;
-                              if(!microphonePcmReady) {
-                                  microphonePcmReady = true;
-                                  markMicrophoneUiReady(activeRec);
-                              }
-                              for(PcmFramePair frame : frames) {
-                                  synchronized(audioProcessingLock) { processVadFrame(frame); }
-                              }
+                              read = activeRec.read(buf, 0, buf.length, AudioRecord.READ_BLOCKING);
                           } catch(Exception e) {
-                              android.util.Log.e(LOG_TAG, "Silero/audio processing failed", e);
-                              sileroFatalError = true;
-                              runOnUiThread(() -> state.setText("Silero VAD feldolgozási hiba"));
+                              android.util.Log.e(LOG_TAG, "AudioRecord read threw", e);
+                              runOnUiThread(() -> state.setText("mikrofon olvasási hiba"));
                               break;
                           }
-                      } else if(read < 0) {
-                          final int code = read;
-                          android.util.Log.e(LOG_TAG, "AudioRecord read error code=" + code);
-                          runOnUiThread(() -> state.setText("mikrofon olvasási hiba: " + code));
-                          break;
+                          if(read > 0) {
+                              if(!streaming && !finalizingStop) break;
+                              try {
+                                  ArrayList<PcmFramePair> frames = normalizeCapturedFrames(buf, read);
+                                  if(frames.isEmpty()) continue;
+                                  if(!microphonePcmReady) {
+                                      microphonePcmReady = true;
+                                      markMicrophoneUiReady(activeRec);
+                                  }
+                                  for(PcmFramePair frame : frames) {
+                                      synchronized(audioProcessingLock) { processVadFrame(frame); }
+                                  }
+                              } catch(Exception e) {
+                                  android.util.Log.e(LOG_TAG, "Silero/audio processing failed", e);
+                                  sileroFatalError = true;
+                                  runOnUiThread(() -> state.setText("Silero VAD feldolgozási hiba"));
+                                  break;
+                              }
+                          } else if(read < 0) {
+                              final int code = read;
+                              android.util.Log.e(LOG_TAG, "AudioRecord read error code=" + code);
+                              runOnUiThread(() -> state.setText("mikrofon olvasási hiba: " + code));
+                              break;
+                          }
                       }
-                  }
-                  if(streaming && !finalizingStop && audioSession == sttSessionId) runOnUiThread(() -> stop(false));
+                      if(streaming && !finalizingStop) runOnUiThread(() -> stop(false));
+                  });
               }
           
               void handleConnectionFailure(Throwable t) {
@@ -3277,7 +3064,7 @@ jobs:
                       voiceSendActive = false;
                       clearPendingSpeechAudio();
                       clearPreRollAudio();
-                      finishSpeechUtterance();
+                      flushSpeechAudioWindow(true);
                   }
                   closeExternalVad();
                   stopAudioDrainPending = false;
@@ -3844,16 +3631,16 @@ jobs:
                   String l = lang == null ? "" : lang.toLowerCase(Locale.ROOT);
                   String words;
                   switch(l) {
-                      case "hu": words = "igen nem hogy vagy van volt lesz ezt azt egy es és de mert akkor most mar már meg nagyon csak kell lehet itt ott nekem neked neki mond mondja mondom amit erti érti nyugodtan program problema probléma mukodik működik jo jó koszonom köszönöm rendben persze ugy úgy mi mit hogyan miert miért gyere ide menj varj várj gyors pontos hallom hallja beszel beszél fordit fordít telefon mikrofon"; break;
-                      case "fr": words = "oui non bonjour bonsoir salut merci monsieur madame comprends comprendre attends attendre parler parle ecoute écoute langue traduction probleme problème telephone téléphone microphone le la les un une des du de et est sont pas je tu il elle nous vous ils elles ce ca ça cette que qui quoi dans pour avec sur en au aux mon ma mes ton ta tes votre vos bien bon mais alors comment pourquoi parce comme tres très viens ici allez vite rapide fonctionne marche c'est j'ai n'est revoir"; break;
-                      case "en": words = "yes no hello hi world good morning afternoon evening goodbye the a an and is are was were will not i you he she we they this that these those what why how where with for from in on at my your very but because thanks thank okay language program problem works working wait waiting second seconds first next now then tell say says said understand translation translate microphone phone come go fast quick precise hear listen speak spoken lock"; break;
-                      case "de": words = "ja nein hallo guten morgen abend tschuss der die das ein eine und ist sind nicht ich du er sie wir ihr was warum wie wo mit fur für von in auf mein dein aber weil danke bitte schon schön schnell kommen gehen sprache ubersetzung übersetzung telefon mikrofon"; break;
-                      case "it": words = "si sì no buongiorno buonasera ciao arrivederci il lo la i gli le un una e è sono non io tu lui lei noi voi loro questo quella che cosa per con in su mio tuo ma perche perché grazie prego veloce lingua traduzione telefono microfono"; break;
-                      case "es": words = "si sí no hola buenos dias tardes noches adios el la los las un una y es son yo tu usted ella nosotros vosotros ellos esto eso que por para con en mi pero porque gracias rapido rápida idioma traduccion teléfono microfono"; break;
-                      case "ro": words = "da nu buna ziua seara salut la revedere si și este sunt eu tu el ea noi voi ei asta aceea ce de la pentru cu in în meu tau tău dar ca că multumesc mulțumesc rapid limba traducere telefon microfon"; break;
-                      case "hr": words = "da ne bok dobar dan jutro vecer večer dovidenja doviđenja i je su ja ti on ona mi vi oni ovo to sto što zasto zašto kako gdje sa za u moj tvoj ali jer hvala molim brzo jezik prijevod telefon mikrofon"; break;
-                      case "sk": words = "ano áno nie ahoj dobry dobrý den deň rano ráno vecer večer dovidenia a je su sú ja ty on ona my vy oni toto to co čo preco prečo ako kde s pre v moj tvoj ale lebo dakujem ďakujem prosim prosím rychlo rýchlo jazyk preklad telefon mikrofon"; break;
-                      case "sl": words = "da ne zivjo živjo dober dan jutro vecer večer nasvidenje in je so jaz ti on ona mi vi oni to kaj zakaj kako kje z za v moj tvoj ampak ker hvala prosim hitro jezik prevod telefon mikrofon"; break;
+                      case "hu": words = "igen nem hogy vagy van volt lesz ezt azt egy es és de mert akkor most mar már meg nagyon csak kell lehet itt ott nekem neked neki mond mondja mondom amit erti érti nyugodtan program problema probléma mukodik működik jo jó koszonom köszönöm rendben persze ugy úgy mi mit hogyan miert miért"; break;
+                      case "fr": words = "oui non bonjour salut monsieur madame comprends comprendre attends attendre parler langue probleme problème le la les un une des du de et est sont pas je tu il elle nous vous ils elles ce ca ça cette que qui quoi dans pour avec sur en au aux mon ma mes ton ta tes votre vos bien bon mais alors merci comment pourquoi parce comme tres très"; break;
+                      case "en": words = "yes no the a an and is are was were not i you he she we they this that these those what why how where with for from in on at my your very but because thanks thank okay"; break;
+                      case "de": words = "ja nein der die das ein eine und ist sind nicht ich du er sie wir ihr was warum wie wo mit fur für von in auf mein dein aber weil danke bitte"; break;
+                      case "it": words = "si sì no il lo la i gli le un una e e è sono non io tu lui lei noi voi loro questo quella che cosa per con in su mio tuo ma perché grazie prego"; break;
+                      case "es": words = "si sí no el la los las un una y es son no yo tu usted el ella nosotros vosotros ellos esto eso que por para con en mi tu pero porque gracias"; break;
+                      case "ro": words = "da nu si și este sunt eu tu el ea noi voi ei asta aceea ce de la pentru cu in în meu tau tău dar pentru ca că multumesc mulțumesc"; break;
+                      case "hr": words = "da ne i je su ja ti on ona mi vi oni ovo to sto što zasto zašto kako gdje sa za u moj tvoj ali jer hvala molim"; break;
+                      case "sk": words = "ano áno nie a je su sú ja ty on ona my vy oni toto to co čo preco prečo ako kde s pre v moj tvoj ale lebo dakujem ďakujem prosim prosím"; break;
+                      case "sl": words = "da ne in je so jaz ti on ona mi vi oni to kaj zakaj kako kje z za v moj tvoj ampak ker hvala prosim"; break;
                       default: words = "";
                   }
                   return new HashSet<>(Arrays.asList(words.split("\\s+")));
@@ -3922,48 +3709,6 @@ jobs:
                   String detected = selectedPairLanguageCode(text);
                   if(detected.isEmpty()) return fallback;
                   return detected.equalsIgnoreCase(code(topLang));
-              }
-          
-              boolean looksLikeProperNameOrNumberFragment(String text) {
-                  if(text == null) return false;
-                  String raw = text.trim();
-                  if(raw.length() == 0) return false;
-                  String[] words = raw.split("\\s+");
-                  if(words.length > 4) return false;
-                  boolean hasNameSignal = false;
-                  for(String word : words) {
-                      String letters = word.replaceAll("[^\\p{L}0-9]", "");
-                      if(letters.length() == 0) continue;
-                      if(letters.matches(".*\\d.*") || Character.isUpperCase(letters.charAt(0)) || letters.equals(letters.toUpperCase(Locale.ROOT)))
-                          hasNameSignal = true;
-                      else return false;
-                  }
-                  return hasNameSignal;
-              }
-          
-              boolean locallySupportsLanguageCode(String text, String languageCode) {
-                  if(text == null || languageCode == null) return false;
-                  String ai = languageCode.toLowerCase(Locale.ROOT);
-                  String detected = selectedPairLanguageCode(text);
-                  if(!detected.isEmpty()) return detected.equalsIgnoreCase(ai);
-                  if(looksLikeObviousThirdLanguageNoise(text)) return false;
-          
-                  int aiScore = scoreTextForSelectedLang(text, ai);
-                  if(aiScore >= 3) return true;
-                  if(looksLikeProperNameOrNumberFragment(text)) return true;
-          
-                  String normalized = normalizedLanguageText(text);
-                  int words = normalized.isEmpty() ? 0 : normalized.split("\\s+").length;
-                  int otherBest = 0;
-                  String[] supported = {"hu","fr","en","de","it","es","ro","hr","sk","sl"};
-                  for(String lang : supported) {
-                      if(lang.equals(ai)) continue;
-                      otherBest = Math.max(otherBest, scoreTextForSelectedLang(text, lang));
-                  }
-                  // Az UNKNOWN menekülőutat tartalmazó AI-nyelvdöntést két vagy több szónál
-                  // elfogadjuk, ha nincs másik ismert nyelvre utaló helyi bizonyíték. Egyetlen
-                  // ismeretlen közszó továbbra is túl bizonytalan; név/szám külön ágon engedhető.
-                  return words >= 2 && otherBest < 3;
               }
           
               boolean looksLikeNonFrHuNoise(String text) { return looksLikeObviousThirdLanguageNoise(text); }
@@ -4138,7 +3883,7 @@ jobs:
                   if(cut >= 0) return cut;
           
                   long age = firstSpeechHeardAt > 0L ? System.currentTimeMillis() - firstSpeechHeardAt : 0L;
-                  if(age >= FALLBACK_TEXT_MAX_WAIT_MS) {
+                  if(age >= MAX_CONTINUOUS_SPEECH_BLOCK_MS) {
                       int forced = safeWholeBufferFlushCut(s);
                       return forced >= 0 ? forced : s.length();
                   }
@@ -4338,6 +4083,7 @@ jobs:
                   String normalized = normalizedLanguageText(text);
                   if(normalized.isEmpty()) return true;
                   int wordCount = normalized.split("\\s+").length;
+                  if(wordCount < 3 && normalized.length() < 18) return false;
                   String top = code(topLang).toLowerCase(Locale.ROOT);
                   String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
                   int selectedBest = Math.max(scoreTextForSelectedLang(text, top), scoreTextForSelectedLang(text, bottom));
@@ -4347,9 +4093,6 @@ jobs:
                       if(lang.equals(top) || lang.equals(bottom)) continue;
                       otherBest = Math.max(otherBest, scoreTextForSelectedLang(text, lang));
                   }
-                  // Rövid idegen válasz sem bújhat át csak azért, mert egy-két szóból áll.
-                  // Ismeretlen tulajdonnév viszont nem kap automatikus tiltást.
-                  if(wordCount <= 2) return otherBest >= 3 && otherBest >= selectedBest + 3;
                   return otherBest >= 8 && otherBest >= selectedBest + 5;
               }
           
@@ -4399,23 +4142,22 @@ jobs:
               }
           
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
-                  String raw = original == null ? "" : original.trim();
-                  if(!passesSelectedPairInputGate(raw) || looksLikeObviousThirdLanguageNoise(raw)) return -1;
-          
-                  String detected = selectedPairLanguageCode(raw);
-                  boolean locallyConfirmed = !detected.isEmpty();
-                  if(locallyConfirmed) sourceIsTop = detected.equalsIgnoreCase(code(topLang));
-                  if(isRecentlyDisplayedSourceDuplicate(sourceIsTop, raw)) return -1;
+                  // V318: gyors visszajelzés. A nyers STT azonnal látható az aktuális oldalon,
+                  // ugyanakkor pendingSourceText-ben is megmarad, hogy a valid AI-válasz után
+                  // a blokk átkerülhessen a valódi SOURCE_LANG szerinti oldalra.
+                  if(isRecentlyDisplayedSourceDuplicate(sourceIsTop, original)) return -1;
           
                   TextBlock b = new TextBlock();
                   b.speechSeq = ++speechSourceBlockSeq;
                   b.sourceTop = sourceIsTop;
                   b.translatedOk = false;
                   b.provisional = true;
-                  b.pendingSourceText = raw;
-                  // Bizonytalan nyelvű STT nem kerül egyik nyelvi oldalra sem. A blokk rejtve várja
-                  // az egyetlen szigorú nyelvazonosító+fordító választ; csak igazolt TOP/BOTTOM eredmény jelenhet meg.
-                  String visibleSource = locallyConfirmed ? userVisibleSpeechTextOrEmpty(raw) : "";
+                  b.pendingSourceText = original == null ? "" : original.trim();
+                  // V40.3: a nyers STT azonnal látható; az AI-válasz után ugyanennek a blokknak
+                  // a forrásoldalát a finoman javított clean_source váltja fel.
+                  // A pendingSourceText változatlanul megmarad; az AI nyelvdöntése után a blokk
+                  // szükség esetén átkerül a másik oldalra. Fordítási hiba esetén az átirat nem vész el.
+                  String visibleSource = userVisibleSpeechTextOrEmpty(b.pendingSourceText);
                   b.topText = sourceIsTop ? visibleSource : "";
                   b.bottomText = sourceIsTop ? "" : visibleSource;
                   textBlocks.add(b);
@@ -4520,7 +4262,7 @@ jobs:
                           "RAW_SPEECH_TEXT (the only text to clean and translate):\n" + src.trim()));
                       root.put("messages", messages);
           
-                      // V40.21: UNKNOWN kötelező menekülőút. A modell nem kényszerül harmadik nyelvet
+                      // V40.20: UNKNOWN kötelező menekülőút. A modell nem kényszerül harmadik nyelvet
                       // vagy értelmetlen STT-zajt tévesen a felső/alsó nyelvhez sorolni.
                       JSONObject properties = new JSONObject();
                       properties.put("source_lang", new JSONObject().put("type", "string")
@@ -4584,8 +4326,9 @@ jobs:
               }
           
               void retrySpeechBlockOrRender(int id) {
-                  // Nincs automatikus újrakérés. Hibás/hiányos válaszból nem maradhat tévesen
-                  // végleges forrásszöveg a magyar vagy a másik nyelvi oldalon.
+                  // 2026-07-09: nincs automatikus második/harmadik AI-kör.
+                  // Egy beszédblokk egy fordítási kérést kap. Hibás vagy hiányos válasz nem nyújthatja
+                  // 4-9 másodpercre a reakcióidőt újraküldésekkel. Az állapotot feloldjuk, a sor továbblép.
                   responseInProgress = false;
                   speechTranslateMode = false;
                   pendingSpeechBlockId = -1;
@@ -4593,17 +4336,13 @@ jobs:
           
                   if(id >= 0 && id < textBlocks.size()) {
                       TextBlock b = textBlocks.get(id);
-                      b.topText = "";
-                      b.bottomText = "";
-                      b.pendingSourceText = "";
                       b.translatedOk = false;
                       b.provisional = false;
-                      b.finalReady = false;
                       b.retryCount = 0;
                   }
           
                   renderBlocksKeepView();
-                  state.setText(streaming ? "mikrofon aktív – hibás rész kihagyva" : "hibás rész kihagyva");
+                  state.setText(streaming ? "mikrofon aktív – fordítási hiba" : "fordítási hiba – az átirat megmaradt");
                   if(!speechTranslateQueue.isEmpty()) processNextSpeechTranslation();
                   else maybeFinishStop();
               }
@@ -4675,12 +4414,22 @@ jobs:
                       // nyelvi bizonyítékot. Ez akadályozza meg, hogy egy egyértelműen francia/angol
                       // vagy más nyelvű eredmény a magyar oldalra kerüljön csak azért, mert a séma
                       // egyik kiválasztott nyelvet várta.
-                      if(!locallySupportsLanguageCode(original, normalizedSource)) {
-                          suppressSpeechBlock(id, "idegen vagy bizonytalan nyelvű rész kihagyva");
+                      if(looksLikeObviousThirdLanguageNoise(original)) {
+                          suppressSpeechBlock(id, "idegen nyelvű rész kihagyva");
+                          return;
+                      }
+                      String locallyDetectedSource = selectedPairLanguageCode(original);
+                      if(!locallyDetectedSource.isEmpty() && !locallyDetectedSource.equalsIgnoreCase(normalizedSource)) {
+                          suppressSpeechBlock(id, "hibás nyelvi besorolás kihagyva");
                           return;
                       }
                       String expectedTargetCode = sourceIsTop ? bottomCode : topCode;
-                      if(!locallySupportsLanguageCode(translation, expectedTargetCode)) {
+                      if(looksLikeObviousThirdLanguageNoise(translation)) {
+                          retrySpeechBlockOrRender(id);
+                          return;
+                      }
+                      String locallyDetectedTarget = selectedPairLanguageCode(translation);
+                      if(!locallyDetectedTarget.isEmpty() && !locallyDetectedTarget.equalsIgnoreCase(expectedTargetCode)) {
                           retrySpeechBlockOrRender(id);
                           return;
                       }
@@ -6142,7 +5891,7 @@ jobs:
           
               String sharedTextCleanupInstructions() {
                   // V40.17: a RENDEZ és a FORDÍT ugyanazt az egysoros mondattagolást használja.
-                  // V40.21: Silero-only 300 ms lezárás, 48→16/24 kHz kettős hangág és Realtime részleges STT.
+                  // V40.20: Silero-only 300 ms lezárás, 48→16/24 kHz kettős hangág és Realtime részleges STT.
                   return nonConversationalLanguageTaskRules() +
                       profilePrompt() +
                       cleanupBehaviorRules() +
@@ -6514,14 +6263,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.21.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.21.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.20.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.20.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.21
+          name: V40.20
           path: |
             artifact/*.apk
             artifact/*.aab
