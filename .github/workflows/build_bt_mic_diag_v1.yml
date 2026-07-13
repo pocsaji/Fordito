@@ -1,0 +1,1316 @@
+name: Build BT Mic Diagnosztika V1.0
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Android project
+        run: |
+          mkdir -p app/src/main/java/com/attila/btmicdiag app/src/main/res/values app/src/main/res/drawable
+
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral(); maven { url = uri("https://jitpack.io") } } }
+          rootProject.name = "BtMicDiagnosztika"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins { id("com.android.application") version "8.6.1" apply false }
+          EOF
+
+          cat > app/build.gradle.kts <<'EOF'
+          import java.util.Properties
+          
+          plugins { id("com.android.application") }
+          
+          val keystoreProperties = Properties()
+          val keystorePropertiesFile = rootProject.file("keystore.properties")
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(keystorePropertiesFile.inputStream())
+          }
+          
+          android {
+              namespace = "com.attila.btmicdiag"
+              compileSdk = 35
+          
+              defaultConfig {
+                  applicationId = "hu.pocsaji.btmicdiag"
+                  minSdk = 26
+                  targetSdk = 35
+                  versionCode = 100
+                  versionName = "1.0"
+              }
+          
+              signingConfigs {
+                  create("release") {
+                      storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
+                      storePassword = keystoreProperties["storePassword"] as String
+                      keyAlias = keystoreProperties["keyAlias"] as String
+                      keyPassword = keystoreProperties["keyPassword"] as String
+                  }
+              }
+          
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                      isShrinkResources = false
+                      signingConfig = signingConfigs.getByName("release")
+                  }
+              }
+          }
+          
+          dependencies {
+              implementation("com.squareup.okhttp3:okhttp:4.12.0")
+              implementation("org.json:json:20240303")
+              implementation("com.github.gkonovalov.android-vad:silero:2.0.10")
+          }
+          EOF
+
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:navigationBarColor">#101318</item>
+                  <item name="android:statusBarColor">#101318</item>
+                  <item name="android:windowBackground">#101318</item>
+                  <item name="android:windowNoTitle">true</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_launcher_mic.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path android:fillColor="#111820" android:pathData="M54,54 m-50,0 a50,50 0,1 0,100 0 a50,50 0,1 0,-100 0" />
+              <path android:strokeColor="#FFFFFF" android:strokeWidth="7" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="@android:color/transparent" android:pathData="M54,19 Q43,19 43,31 L43,52 Q43,64 54,64 Q65,64 65,52 L65,31 Q65,19 54,19 Z" />
+              <path android:strokeColor="#35C46A" android:strokeWidth="7" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="@android:color/transparent" android:pathData="M29,50 Q29,79 54,79 Q79,79 79,50 M54,79 L54,93 M41,93 L67,93" />
+          </vector>
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+              <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+          
+              <application
+                  android:allowBackup="false"
+                  android:label="BT mikrofon diagnosztika"
+                  android:icon="@drawable/ic_launcher_mic"
+                  android:roundIcon="@drawable/ic_launcher_mic"
+                  android:supportsRtl="true"
+                  android:theme="@style/AppTheme">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:screenOrientation="portrait">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/attila/btmicdiag/MainActivity.java <<'EOF'
+          package com.attila.btmicdiag;
+          
+          import android.Manifest;
+          import android.app.*;
+          import android.content.*;
+          import android.content.pm.PackageManager;
+          import android.graphics.Color;
+          import android.media.*;
+          import android.media.audiofx.AcousticEchoCanceler;
+          import android.media.audiofx.AutomaticGainControl;
+          import android.media.audiofx.NoiseSuppressor;
+          import android.os.*;
+          import android.text.InputType;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.widget.*;
+          
+          import org.json.JSONObject;
+          
+          import java.io.ByteArrayOutputStream;
+          import java.lang.reflect.Field;
+          import java.lang.reflect.Method;
+          import java.text.SimpleDateFormat;
+          import java.util.*;
+          import java.util.concurrent.ExecutorService;
+          import java.util.concurrent.Executors;
+          
+          import okhttp3.*;
+          
+          public class MainActivity extends Activity {
+              static final String APP_VERSION = "1.0";
+              static final int REQ_PERMISSIONS = 1001;
+              static final int TARGET_RATE = 16000;
+              static final int SILERO_FRAME_BYTES = 512 * 2;
+              static final int VAD_START_MS = 50;
+              static final int VAD_END_MS = 500;
+              static final int MIN_TRUE_SPEECH_MS = 150;
+              static final int PRE_ROLL_MS = 800;
+              static final int MAX_BLOCK_MS = 8000;
+              static final int MAX_BLOCK_BYTES = TARGET_RATE * 2 * MAX_BLOCK_MS / 1000;
+          
+              enum RouteMode { PHONE, BT_DIRECT, BT_COMM }
+          
+              final Handler main = new Handler(Looper.getMainLooper());
+              final ExecutorService audioExec = Executors.newSingleThreadExecutor();
+              final Object audioLock = new Object();
+              final Object vadLock = new Object();
+              final Object sttLock = new Object();
+              final ArrayDeque<String> events = new ArrayDeque<>();
+              final ArrayDeque<byte[]> preRoll = new ArrayDeque<>();
+              final ArrayList<byte[]> pendingSpeech = new ArrayList<>();
+              final TreeMap<Integer, SttResult> pendingStt = new TreeMap<>();
+          
+              TextView header;
+              EditText rawText;
+              EditText diagnostics;
+              Button startButton;
+              Button phoneButton;
+              Button directButton;
+              Button commButton;
+          
+              SharedPreferences prefs;
+              OkHttpClient http;
+              AudioManager audioManager;
+              AudioRecord recorder;
+              AudioDeviceCallback deviceCallback;
+              AudioRouting.OnRoutingChangedListener routingListener;
+          
+              volatile boolean running = false;
+              volatile boolean startRequested = false;
+              volatile RouteMode routeMode = RouteMode.PHONE;
+              volatile int sessionGeneration = 0;
+          
+              AudioDeviceInfo preferredInput;
+              AudioDeviceInfo lastRoutedInput;
+              AudioDeviceInfo selectedCommunicationDevice;
+              boolean preferredAccepted = false;
+              boolean communicationAccepted = false;
+              int captureRate = TARGET_RATE;
+              int captureChannels = 1;
+              int captureSource = MediaRecorder.AudioSource.VOICE_RECOGNITION;
+              int captureBufferBytes = 0;
+              long captureStartMs = 0L;
+              long totalPcmBytes = 0L;
+              long totalReads = 0L;
+              long zeroReads = 0L;
+              long readErrors = 0L;
+              long routeChanges = 0L;
+              long lastNonZeroMs = 0L;
+              double latestRms = 0.0;
+              int latestPeak = 0;
+              boolean latestVadSpeech = false;
+              int pendingSpeechMs = 0;
+              boolean voiceActive = false;
+              int currentBlockMs = 0;
+              int sentBlocks = 0;
+              int sttInFlight = 0;
+              int nextSttSeq = 0;
+              int deliverSttSeq = 1;
+              String lastError = "";
+              String lastReset = "—";
+              String apiKey = "";
+          
+              Object sileroVad;
+              final ByteArrayOutputStream frameRemainder = new ByteArrayOutputStream();
+              final ByteArrayOutputStream speechWindow = new ByteArrayOutputStream();
+              final ByteArrayOutputStream rateRemainder = new ByteArrayOutputStream();
+          
+              final Runnable diagnosticsTicker = new Runnable() {
+                  @Override public void run() {
+                      renderDiagnostics();
+                      main.postDelayed(this, 300L);
+                  }
+              };
+          
+              static class SttResult {
+                  final String text;
+                  final String error;
+                  SttResult(String text, String error) {
+                      this.text = text == null ? "" : text.trim();
+                      this.error = error == null ? "" : error.trim();
+                  }
+              }
+          
+              @Override public void onCreate(Bundle state) {
+                  super.onCreate(state);
+                  prefs = getSharedPreferences("bt_mic_diag", MODE_PRIVATE);
+                  apiKey = prefs.getString("apiKey", "");
+                  http = new OkHttpClient.Builder().callTimeout(java.time.Duration.ofSeconds(45)).build();
+                  audioManager = (AudioManager)getSystemService(AUDIO_SERVICE);
+                  buildUi();
+                  registerDeviceCallback();
+                  logEvent("Alkalmazás indul, verzió " + APP_VERSION);
+                  requestNeededPermissions();
+                  main.post(diagnosticsTicker);
+              }
+          
+              void buildUi() {
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setPadding(dp(6), dp(6), dp(6), dp(6));
+                  root.setBackgroundColor(Color.rgb(16, 19, 24));
+          
+                  header = new TextView(this);
+                  header.setTextColor(Color.WHITE);
+                  header.setTextSize(17);
+                  header.setGravity(Gravity.CENTER);
+                  header.setText("BT mikrofon diagnosztika V" + APP_VERSION + " — leállítva");
+                  root.addView(header, new LinearLayout.LayoutParams(-1, dp(42)));
+          
+                  rawText = new EditText(this);
+                  rawText.setTextColor(Color.WHITE);
+                  rawText.setHintTextColor(Color.GRAY);
+                  rawText.setHint("Nyers magyar STT-szöveg jelenik meg itt…");
+                  rawText.setTextSize(20);
+                  rawText.setGravity(Gravity.TOP | Gravity.START);
+                  rawText.setBackgroundColor(Color.rgb(28, 32, 40));
+                  rawText.setPadding(dp(10), dp(8), dp(10), dp(8));
+                  rawText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+                  root.addView(rawText, new LinearLayout.LayoutParams(-1, 0, 1.15f));
+          
+                  diagnostics = new EditText(this);
+                  diagnostics.setTextColor(Color.rgb(210, 235, 220));
+                  diagnostics.setHintTextColor(Color.GRAY);
+                  diagnostics.setTextSize(13);
+                  diagnostics.setGravity(Gravity.TOP | Gravity.START);
+                  diagnostics.setBackgroundColor(Color.rgb(20, 24, 30));
+                  diagnostics.setPadding(dp(10), dp(8), dp(10), dp(8));
+                  diagnostics.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+                  diagnostics.setFocusable(false);
+                  root.addView(diagnostics, new LinearLayout.LayoutParams(-1, 0, 1.0f));
+          
+                  LinearLayout row1 = buttonRow();
+                  startButton = actionButton("INDÍT", Color.rgb(20, 160, 70));
+                  phoneButton = actionButton("TELEFON", Color.rgb(45, 100, 170));
+                  directButton = actionButton("BT DIREKT", Color.rgb(45, 100, 170));
+                  commButton = actionButton("BT KOMM", Color.rgb(45, 100, 170));
+                  addWeighted(row1, startButton);
+                  addWeighted(row1, phoneButton);
+                  addWeighted(row1, directButton);
+                  addWeighted(row1, commButton);
+                  root.addView(row1, new LinearLayout.LayoutParams(-1, dp(54)));
+          
+                  LinearLayout row2 = buttonRow();
+                  Button recReset = actionButton("REC RESET", Color.rgb(90, 90, 100));
+                  Button routeReset = actionButton("ÚT RESET", Color.rgb(90, 90, 100));
+                  Button scoReset = actionButton("SCO RESET", Color.rgb(90, 90, 100));
+                  Button apiButton = actionButton("API / MÁSOL", Color.rgb(120, 75, 30));
+                  addWeighted(row2, recReset);
+                  addWeighted(row2, routeReset);
+                  addWeighted(row2, scoReset);
+                  addWeighted(row2, apiButton);
+                  root.addView(row2, new LinearLayout.LayoutParams(-1, dp(54)));
+          
+                  startButton.setOnClickListener(v -> { if(running || startRequested) stopCapture(true); else startCapture(); });
+                  phoneButton.setOnClickListener(v -> selectRoute(RouteMode.PHONE));
+                  directButton.setOnClickListener(v -> selectRoute(RouteMode.BT_DIRECT));
+                  commButton.setOnClickListener(v -> selectRoute(RouteMode.BT_COMM));
+                  recReset.setOnClickListener(v -> recorderReset());
+                  routeReset.setOnClickListener(v -> routeReset());
+                  scoReset.setOnClickListener(v -> scoReset());
+                  apiButton.setOnClickListener(v -> showApiAndCopyDialog());
+          
+                  rawText.setOnLongClickListener(v -> {
+                      rawText.setText("");
+                      logEvent("Nyers szöveg törölve");
+                      return true;
+                  });
+                  diagnostics.setOnLongClickListener(v -> {
+                      copyDiagnostics();
+                      return true;
+                  });
+                  setContentView(root);
+                  updateRouteButtons();
+              }
+          
+              LinearLayout buttonRow() {
+                  LinearLayout row = new LinearLayout(this);
+                  row.setOrientation(LinearLayout.HORIZONTAL);
+                  return row;
+              }
+          
+              Button actionButton(String text, int color) {
+                  Button b = new Button(this);
+                  b.setText(text);
+                  b.setTextColor(Color.WHITE);
+                  b.setTextSize(12);
+                  b.setAllCaps(false);
+                  b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(color));
+                  b.setPadding(dp(2), 0, dp(2), 0);
+                  return b;
+              }
+          
+              void addWeighted(LinearLayout row, View view) {
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1f);
+                  lp.setMargins(dp(2), dp(2), dp(2), dp(2));
+                  row.addView(view, lp);
+              }
+          
+              int dp(int value) {
+                  return Math.round(value * getResources().getDisplayMetrics().density);
+              }
+          
+              void requestNeededPermissions() {
+                  ArrayList<String> missing = new ArrayList<>();
+                  if(checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) missing.add(Manifest.permission.RECORD_AUDIO);
+                  if(Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) missing.add(Manifest.permission.BLUETOOTH_CONNECT);
+                  if(!missing.isEmpty()) requestPermissions(missing.toArray(new String[0]), REQ_PERMISSIONS);
+              }
+          
+              @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+                  super.onRequestPermissionsResult(requestCode, permissions, results);
+                  if(requestCode == REQ_PERMISSIONS) {
+                      boolean ok = true;
+                      for(int r : results) if(r != PackageManager.PERMISSION_GRANTED) ok = false;
+                      logEvent(ok ? "Engedélyek megadva" : "Hiányzó engedély: a Bluetooth-adatok korlátozottak lehetnek");
+                  }
+              }
+          
+              void registerDeviceCallback() {
+                  if(Build.VERSION.SDK_INT < 23 || audioManager == null) return;
+                  deviceCallback = new AudioDeviceCallback() {
+                      @Override public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
+                          for(AudioDeviceInfo d : addedDevices) logEvent("Eszköz csatlakozott: " + deviceLabel(d));
+                      }
+                      @Override public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
+                          for(AudioDeviceInfo d : removedDevices) logEvent("Eszköz eltűnt: " + deviceLabel(d));
+                      }
+                  };
+                  try { audioManager.registerAudioDeviceCallback(deviceCallback, main); }
+                  catch(Exception e) { logError("AudioDeviceCallback", e); }
+              }
+          
+              void selectRoute(RouteMode mode) {
+                  boolean restart = running || startRequested;
+                  routeMode = mode;
+                  updateRouteButtons();
+                  logEvent("Kért útvonal: " + routeLabel(mode));
+                  if(restart) {
+                      stopCapture(false);
+                      main.postDelayed(this::startCapture, mode == RouteMode.BT_COMM ? 900L : 350L);
+                  }
+              }
+          
+              void updateRouteButtons() {
+                  tint(phoneButton, routeMode == RouteMode.PHONE ? Color.rgb(20, 145, 70) : Color.rgb(45, 100, 170));
+                  tint(directButton, routeMode == RouteMode.BT_DIRECT ? Color.rgb(20, 145, 70) : Color.rgb(45, 100, 170));
+                  tint(commButton, routeMode == RouteMode.BT_COMM ? Color.rgb(20, 145, 70) : Color.rgb(45, 100, 170));
+              }
+          
+              void tint(Button b, int color) {
+                  if(b != null) b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(color));
+              }
+          
+              String routeLabel(RouteMode mode) {
+                  if(mode == RouteMode.PHONE) return "telefonmikrofon";
+                  if(mode == RouteMode.BT_DIRECT) return "közvetlen Bluetooth-bemenet";
+                  return "Bluetooth kommunikációs út";
+              }
+          
+              void startCapture() {
+                  if(startRequested || running) return;
+                  if(checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                      requestNeededPermissions();
+                      Toast.makeText(this, "Mikrofonengedély szükséges", Toast.LENGTH_SHORT).show();
+                      return;
+                  }
+                  startRequested = true;
+                  final int generation = ++sessionGeneration;
+                  header.setText("BT mikrofon diagnosztika — előkészítés…");
+                  startButton.setText("VÁRJ");
+                  tint(startButton, Color.rgb(180, 110, 20));
+                  resetCaptureMetrics();
+                  audioExec.execute(() -> {
+                      try {
+                          applyRoutePreparation();
+                          AudioRecord created = buildRecorderForCurrentRoute();
+                          if(created == null) throw new IllegalStateException("Nem hozható létre AudioRecord az útvonalhoz");
+                          synchronized(audioLock) { recorder = created; }
+                          registerRouteListener(created);
+                          created.startRecording();
+                          if(created.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) throw new IllegalStateException("AudioRecord nem lépett RECORDING állapotba");
+                          captureStartMs = System.currentTimeMillis();
+                          running = true;
+                          startRequested = false;
+                          logEvent("Rögzítés elindult: session=" + created.getAudioSessionId());
+                          main.post(() -> {
+                              startButton.setText("STOP");
+                              tint(startButton, Color.rgb(20, 180, 70));
+                              header.setText("BT mikrofon diagnosztika — mikrofon aktív");
+                          });
+                          readLoop(created, generation);
+                      } catch(Exception e) {
+                          logError("Indítás", e);
+                          startRequested = false;
+                          running = false;
+                          releaseRecorder();
+                          main.post(() -> {
+                              startButton.setText("INDÍT");
+                              tint(startButton, Color.rgb(20, 160, 70));
+                              header.setText("BT mikrofon diagnosztika — indítási hiba");
+                          });
+                      }
+                  });
+              }
+          
+              void stopCapture(boolean flush) {
+                  startRequested = false;
+                  running = false;
+                  ++sessionGeneration;
+                  AudioRecord r;
+                  synchronized(audioLock) { r = recorder; recorder = null; }
+                  if(r != null) {
+                      try { if(r.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) r.stop(); } catch(Exception e) { logError("AudioRecord stop", e); }
+                      try { r.release(); } catch(Exception e) { logError("AudioRecord release", e); }
+                  }
+                  if(flush) flushSpeechWindow(); else clearAudioBuffers();
+                  closeSilero();
+                  header.setText("BT mikrofon diagnosztika — leállítva");
+                  startButton.setText("INDÍT");
+                  tint(startButton, Color.rgb(20, 160, 70));
+                  logEvent("Rögzítés leállt");
+              }
+          
+              void releaseRecorder() {
+                  AudioRecord r;
+                  synchronized(audioLock) { r = recorder; recorder = null; }
+                  if(r == null) return;
+                  try { r.stop(); } catch(Exception ignored) {}
+                  try { r.release(); } catch(Exception ignored) {}
+              }
+          
+              void resetCaptureMetrics() {
+                  totalPcmBytes = 0L;
+                  totalReads = 0L;
+                  zeroReads = 0L;
+                  readErrors = 0L;
+                  latestRms = 0.0;
+                  latestPeak = 0;
+                  latestVadSpeech = false;
+                  lastNonZeroMs = 0L;
+                  lastError = "";
+                  sentBlocks = 0;
+                  clearAudioBuffers();
+                  synchronized(sttLock) {
+                      pendingStt.clear();
+                      nextSttSeq = 0;
+                      deliverSttSeq = 1;
+                      sttInFlight = 0;
+                  }
+              }
+          
+              void clearAudioBuffers() {
+                  synchronized(vadLock) {
+                      frameRemainder.reset();
+                      rateRemainder.reset();
+                      speechWindow.reset();
+                      preRoll.clear();
+                      pendingSpeech.clear();
+                      pendingSpeechMs = 0;
+                      voiceActive = false;
+                      currentBlockMs = 0;
+                  }
+              }
+          
+              void readLoop(AudioRecord active, int generation) {
+                  int readSize = Math.max(2048, captureBufferBytes / 4);
+                  byte[] input = new byte[readSize];
+                  while(running && generation == sessionGeneration && active == recorder) {
+                      int n;
+                      try { n = active.read(input, 0, input.length, AudioRecord.READ_BLOCKING); }
+                      catch(Exception e) { logError("AudioRecord read", e); break; }
+                      if(n > 0) {
+                          totalReads++;
+                          byte[] normalized = normalizeTo16kMono(input, n, captureRate, captureChannels);
+                          if(normalized.length == 0) continue;
+                          updatePcmMetrics(normalized);
+                          try { processCaptured16k(normalized); }
+                          catch(Exception e) { logError("VAD feldolgozás", e); }
+                      } else {
+                          readErrors++;
+                          lastError = "AudioRecord.read=" + n;
+                          logEvent(lastError);
+                          if(n == AudioRecord.ERROR_DEAD_OBJECT) break;
+                          SystemClock.sleep(30L);
+                      }
+                  }
+                  if(active == recorder) {
+                      running = false;
+                      main.post(() -> {
+                          startButton.setText("INDÍT");
+                          tint(startButton, Color.rgb(20, 160, 70));
+                          header.setText("BT mikrofon diagnosztika — rögzítés megszakadt");
+                      });
+                  }
+              }
+          
+              byte[] normalizeTo16kMono(byte[] input, int len, int rate, int channels) {
+                  if(input == null || len < 2) return new byte[0];
+                  int safeChannels = Math.max(1, channels);
+                  int frameBytes = safeChannels * 2;
+                  int frames = len / frameBytes;
+                  if(frames <= 0) return new byte[0];
+                  short[] mono = new short[frames];
+                  for(int f = 0; f < frames; f++) {
+                      int sum = 0;
+                      for(int c = 0; c < safeChannels; c++) {
+                          int p = f * frameBytes + c * 2;
+                          int lo = input[p] & 0xff;
+                          int hi = input[p + 1];
+                          sum += (short)((hi << 8) | lo);
+                      }
+                      mono[f] = (short)(sum / safeChannels);
+                  }
+                  if(rate == TARGET_RATE) return shortsToBytes(mono);
+                  if(rate == 32000) {
+                      int outCount = mono.length / 2;
+                      short[] out = new short[outCount];
+                      for(int i = 0; i < outCount; i++) out[i] = (short)(((int)mono[i * 2] + (int)mono[i * 2 + 1]) / 2);
+                      return shortsToBytes(out);
+                  }
+                  int outCount = Math.max(1, (int)Math.floor((double)mono.length * TARGET_RATE / rate));
+                  short[] out = new short[outCount];
+                  for(int i = 0; i < outCount; i++) {
+                      int src = Math.min(mono.length - 1, (int)Math.floor((double)i * rate / TARGET_RATE));
+                      out[i] = mono[src];
+                  }
+                  return shortsToBytes(out);
+              }
+          
+              byte[] shortsToBytes(short[] samples) {
+                  byte[] out = new byte[samples.length * 2];
+                  for(int i = 0; i < samples.length; i++) {
+                      int v = samples[i];
+                      out[i * 2] = (byte)(v & 0xff);
+                      out[i * 2 + 1] = (byte)((v >> 8) & 0xff);
+                  }
+                  return out;
+              }
+          
+              void updatePcmMetrics(byte[] pcm) {
+                  long sum = 0L;
+                  int peak = 0;
+                  boolean any = false;
+                  int samples = pcm.length / 2;
+                  for(int i = 0; i < samples; i++) {
+                      int lo = pcm[i * 2] & 0xff;
+                      int hi = pcm[i * 2 + 1];
+                      short value = (short)((hi << 8) | lo);
+                      int abs = Math.abs((int)value);
+                      if(abs > peak) peak = abs;
+                      if(abs != 0) any = true;
+                      sum += (long)value * (long)value;
+                  }
+                  latestRms = samples == 0 ? 0.0 : Math.sqrt((double)sum / samples);
+                  latestPeak = peak;
+                  totalPcmBytes += pcm.length;
+                  if(any) lastNonZeroMs = System.currentTimeMillis(); else zeroReads++;
+              }
+          
+              void processCaptured16k(byte[] pcm) throws Exception {
+                  ArrayList<byte[]> frames = new ArrayList<>();
+                  synchronized(vadLock) {
+                      frameRemainder.write(pcm, 0, pcm.length);
+                      byte[] all = frameRemainder.toByteArray();
+                      int pos = 0;
+                      while(pos + SILERO_FRAME_BYTES <= all.length) {
+                          frames.add(Arrays.copyOfRange(all, pos, pos + SILERO_FRAME_BYTES));
+                          pos += SILERO_FRAME_BYTES;
+                      }
+                      frameRemainder.reset();
+                      if(pos < all.length) frameRemainder.write(all, pos, all.length - pos);
+                  }
+                  for(byte[] frame : frames) processVadFrame(frame);
+              }
+          
+              void processVadFrame(byte[] frame) throws Exception {
+                  boolean speech = sileroIsSpeech(frame);
+                  latestVadSpeech = speech;
+                  synchronized(vadLock) {
+                      if(speech) {
+                          if(!voiceActive) {
+                              pendingSpeech.add(frame);
+                              pendingSpeechMs += 32;
+                              if(pendingSpeechMs < MIN_TRUE_SPEECH_MS) return;
+                              while(!preRoll.isEmpty()) appendSpeechBytes(preRoll.removeFirst());
+                              for(byte[] p : pendingSpeech) appendSpeechBytes(p);
+                              pendingSpeech.clear();
+                              pendingSpeechMs = 0;
+                              voiceActive = true;
+                          } else {
+                              appendSpeechBytes(frame);
+                          }
+                      } else {
+                          if(voiceActive) {
+                              voiceActive = false;
+                              pendingSpeech.clear();
+                              pendingSpeechMs = 0;
+                              flushSpeechWindowLocked();
+                          } else {
+                              pendingSpeech.clear();
+                              pendingSpeechMs = 0;
+                          }
+                          preRoll.addLast(frame);
+                          int maxFrames = Math.max(1, PRE_ROLL_MS / 32);
+                          while(preRoll.size() > maxFrames) preRoll.removeFirst();
+                      }
+                  }
+              }
+          
+              void appendSpeechBytes(byte[] frame) {
+                  speechWindow.write(frame, 0, frame.length);
+                  currentBlockMs = speechWindow.size() * 1000 / (TARGET_RATE * 2);
+                  while(speechWindow.size() >= MAX_BLOCK_BYTES) {
+                      byte[] all = speechWindow.toByteArray();
+                      byte[] block = Arrays.copyOf(all, MAX_BLOCK_BYTES);
+                      speechWindow.reset();
+                      if(all.length > MAX_BLOCK_BYTES) speechWindow.write(all, MAX_BLOCK_BYTES, all.length - MAX_BLOCK_BYTES);
+                      currentBlockMs = speechWindow.size() * 1000 / (TARGET_RATE * 2);
+                      sendStt(block);
+                  }
+              }
+          
+              void flushSpeechWindow() {
+                  synchronized(vadLock) { flushSpeechWindowLocked(); }
+              }
+          
+              void flushSpeechWindowLocked() {
+                  if(speechWindow.size() >= TARGET_RATE * 2 * MIN_TRUE_SPEECH_MS / 1000) {
+                      byte[] block = speechWindow.toByteArray();
+                      speechWindow.reset();
+                      currentBlockMs = 0;
+                      sendStt(block);
+                  } else {
+                      speechWindow.reset();
+                      currentBlockMs = 0;
+                  }
+              }
+          
+              Object enumConst(String className, String value) throws Exception {
+                  Class<?> cls = Class.forName(className);
+                  return Enum.valueOf((Class<Enum>)cls.asSubclass(Enum.class), value);
+              }
+          
+              void ensureSilero() throws Exception {
+                  if(sileroVad != null) return;
+                  Class<?> vadClass = Class.forName("com.konovalov.vad.silero.Vad");
+                  Object builder = vadClass.getMethod("builder").invoke(null);
+                  builder.getClass().getMethod("setContext", Context.class).invoke(builder, this);
+                  builder.getClass().getMethod("setSampleRate", Class.forName("com.konovalov.vad.silero.config.SampleRate"))
+                      .invoke(builder, enumConst("com.konovalov.vad.silero.config.SampleRate", "SAMPLE_RATE_16K"));
+                  builder.getClass().getMethod("setFrameSize", Class.forName("com.konovalov.vad.silero.config.FrameSize"))
+                      .invoke(builder, enumConst("com.konovalov.vad.silero.config.FrameSize", "FRAME_SIZE_512"));
+                  builder.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.silero.config.Mode"))
+                      .invoke(builder, enumConst("com.konovalov.vad.silero.config.Mode", "NORMAL"));
+                  builder.getClass().getMethod("setSpeechDurationMs", int.class).invoke(builder, VAD_START_MS);
+                  builder.getClass().getMethod("setSilenceDurationMs", int.class).invoke(builder, VAD_END_MS);
+                  sileroVad = builder.getClass().getMethod("build").invoke(builder);
+                  logEvent("Silero NORMAL kész: 16 kHz, 512 minta, 50/500 ms");
+              }
+          
+              boolean sileroIsSpeech(byte[] frame) throws Exception {
+                  ensureSilero();
+                  try {
+                      Object result = sileroVad.getClass().getMethod("isSpeech", byte[].class).invoke(sileroVad, (Object)frame);
+                      return Boolean.TRUE.equals(result);
+                  } catch(NoSuchMethodException e) {
+                      short[] samples = new short[frame.length / 2];
+                      for(int i = 0; i < samples.length; i++) {
+                          int lo = frame[i * 2] & 0xff;
+                          int hi = frame[i * 2 + 1];
+                          samples[i] = (short)((hi << 8) | lo);
+                      }
+                      Object result = sileroVad.getClass().getMethod("isSpeech", short[].class).invoke(sileroVad, (Object)samples);
+                      return Boolean.TRUE.equals(result);
+                  }
+              }
+          
+              void closeSilero() {
+                  Object vad = sileroVad;
+                  sileroVad = null;
+                  if(vad == null) return;
+                  try {
+                      if(vad instanceof AutoCloseable) ((AutoCloseable)vad).close();
+                      else vad.getClass().getMethod("close").invoke(vad);
+                  } catch(Exception e) { logError("Silero close", e); }
+              }
+          
+              void sendStt(byte[] pcm) {
+                  if(pcm == null || pcm.length == 0) return;
+                  if(apiKey.trim().isEmpty()) {
+                      logEvent("STT kihagyva: nincs API-kulcs");
+                      main.post(() -> Toast.makeText(this, "Adj meg OpenAI API-kulcsot", Toast.LENGTH_SHORT).show());
+                      return;
+                  }
+                  final int seq;
+                  synchronized(sttLock) {
+                      seq = ++nextSttSeq;
+                      sttInFlight++;
+                      sentBlocks++;
+                  }
+                  try {
+                      byte[] wav = wavFromPcm(pcm);
+                      MultipartBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
+                          .addFormDataPart("model", "gpt-4o-mini-transcribe")
+                          .addFormDataPart("language", "hu")
+                          .addFormDataPart("response_format", "json")
+                          .addFormDataPart("file", "diag.wav", RequestBody.create(MediaType.parse("audio/wav"), wav))
+                          .build();
+                      Request request = new Request.Builder()
+                          .url("https://api.openai.com/v1/audio/transcriptions")
+                          .addHeader("Authorization", "Bearer " + apiKey.trim())
+                          .post(body)
+                          .build();
+                      http.newCall(request).enqueue(new Callback() {
+                          @Override public void onFailure(Call call, java.io.IOException e) {
+                              completeStt(seq, "", "kapcsolat: " + e.getMessage());
+                          }
+                          @Override public void onResponse(Call call, Response response) throws java.io.IOException {
+                              String raw = response.body() == null ? "" : response.body().string();
+                              if(!response.isSuccessful()) {
+                                  completeStt(seq, "", "HTTP " + response.code());
+                                  return;
+                              }
+                              try {
+                                  String text = new JSONObject(raw).optString("text", "").trim();
+                                  completeStt(seq, text, "");
+                              } catch(Exception e) {
+                                  completeStt(seq, "", "hibás STT-válasz");
+                              }
+                          }
+                      });
+                  } catch(Exception e) {
+                      completeStt(seq, "", "WAV/STT előkészítés: " + e.getMessage());
+                  }
+              }
+          
+              void completeStt(int seq, String text, String error) {
+                  main.post(() -> {
+                      synchronized(sttLock) {
+                          sttInFlight = Math.max(0, sttInFlight - 1);
+                          pendingStt.put(seq, new SttResult(text, error));
+                          while(pendingStt.containsKey(deliverSttSeq)) {
+                              SttResult result = pendingStt.remove(deliverSttSeq++);
+                              if(!result.error.isEmpty()) {
+                                  lastError = result.error;
+                                  logEvent("STT hiba: " + result.error);
+                              }
+                              if(!result.text.isEmpty()) appendRawText(result.text);
+                          }
+                      }
+                  });
+              }
+          
+              void appendRawText(String text) {
+                  String old = rawText.getText().toString();
+                  if(!old.isEmpty() && !old.endsWith("\n")) old += "\n";
+                  rawText.setText(old + text.trim());
+                  rawText.setSelection(rawText.length());
+              }
+          
+              byte[] wavFromPcm(byte[] pcm) throws Exception {
+                  ByteArrayOutputStream out = new ByteArrayOutputStream(44 + pcm.length);
+                  writeAscii(out, "RIFF"); writeIntLE(out, 36 + pcm.length); writeAscii(out, "WAVE");
+                  writeAscii(out, "fmt "); writeIntLE(out, 16); writeShortLE(out, 1); writeShortLE(out, 1);
+                  writeIntLE(out, TARGET_RATE); writeIntLE(out, TARGET_RATE * 2); writeShortLE(out, 2); writeShortLE(out, 16);
+                  writeAscii(out, "data"); writeIntLE(out, pcm.length); out.write(pcm);
+                  return out.toByteArray();
+              }
+          
+              void writeAscii(ByteArrayOutputStream out, String text) throws Exception { out.write(text.getBytes("US-ASCII")); }
+              void writeIntLE(ByteArrayOutputStream out, int v) { out.write(v & 255); out.write((v >> 8) & 255); out.write((v >> 16) & 255); out.write((v >> 24) & 255); }
+              void writeShortLE(ByteArrayOutputStream out, int v) { out.write(v & 255); out.write((v >> 8) & 255); }
+          
+              void applyRoutePreparation() {
+                  preferredInput = null;
+                  selectedCommunicationDevice = null;
+                  preferredAccepted = false;
+                  communicationAccepted = false;
+                  clearCommunicationRoute();
+          
+                  if(routeMode == RouteMode.PHONE) {
+                      preferredInput = findBuiltInMic();
+                      logEvent("Telefonmód előkészítve: " + deviceLabel(preferredInput));
+                      return;
+                  }
+                  if(routeMode == RouteMode.BT_DIRECT) {
+                      preferredInput = findBluetoothInput();
+                      logEvent("BT direkt előkészítve: " + deviceLabel(preferredInput));
+                      return;
+                  }
+                  if(audioManager == null) return;
+                  try {
+                      audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+                      if(Build.VERSION.SDK_INT >= 31) {
+                          selectedCommunicationDevice = findBluetoothCommunicationDevice();
+                          if(selectedCommunicationDevice != null) communicationAccepted = audioManager.setCommunicationDevice(selectedCommunicationDevice);
+                      } else {
+                          audioManager.startBluetoothSco();
+                          audioManager.setBluetoothScoOn(true);
+                          communicationAccepted = true;
+                      }
+                      logEvent("BT kommunikációs út: " + deviceLabel(selectedCommunicationDevice) + ", elfogadva=" + communicationAccepted);
+                      SystemClock.sleep(650L);
+                  } catch(Exception e) { logError("BT kommunikációs út", e); }
+              }
+          
+              void clearCommunicationRoute() {
+                  if(audioManager == null) return;
+                  try { if(Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice(); } catch(Exception e) { logError("clearCommunicationDevice", e); }
+                  try { audioManager.stopBluetoothSco(); } catch(Exception ignored) {}
+                  try { audioManager.setBluetoothScoOn(false); } catch(Exception ignored) {}
+                  try { audioManager.setSpeakerphoneOn(false); } catch(Exception ignored) {}
+                  try { audioManager.setMode(AudioManager.MODE_NORMAL); } catch(Exception e) { logError("MODE_NORMAL", e); }
+              }
+          
+              AudioRecord buildRecorderForCurrentRoute() {
+                  if(routeMode == RouteMode.BT_DIRECT && preferredInput == null) {
+                      lastError = "Nincs Bluetooth bemeneti eszköz";
+                      logEvent(lastError);
+                      return null;
+                  }
+                  if(routeMode == RouteMode.BT_DIRECT && preferredInput != null && supportsRate(preferredInput, 32000)) {
+                      AudioRecord r = createRecorder(MediaRecorder.AudioSource.MIC, 32000, preferredInput);
+                      if(r != null) return r;
+                  }
+                  if(routeMode == RouteMode.BT_DIRECT) {
+                      AudioRecord r = createRecorder(MediaRecorder.AudioSource.MIC, TARGET_RATE, preferredInput);
+                      if(r != null) return r;
+                      return createRecorder(MediaRecorder.AudioSource.VOICE_RECOGNITION, TARGET_RATE, preferredInput);
+                  }
+                  if(routeMode == RouteMode.PHONE) {
+                      AudioRecord r = createRecorder(MediaRecorder.AudioSource.VOICE_RECOGNITION, TARGET_RATE, preferredInput);
+                      if(r != null) return r;
+                      return createRecorder(MediaRecorder.AudioSource.MIC, TARGET_RATE, preferredInput);
+                  }
+                  AudioRecord r = createRecorder(MediaRecorder.AudioSource.VOICE_RECOGNITION, TARGET_RATE, null);
+                  if(r != null) return r;
+                  return createRecorder(MediaRecorder.AudioSource.MIC, TARGET_RATE, null);
+              }
+          
+              AudioRecord createRecorder(int source, int rate, AudioDeviceInfo preferred) {
+                  AudioRecord candidate = null;
+                  try {
+                      int min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+                      if(min <= 0) min = rate;
+                      int buffer = Math.max(min * 3, rate * 2);
+                      AudioFormat format = new AudioFormat.Builder()
+                          .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                          .setSampleRate(rate)
+                          .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                          .build();
+                      candidate = new AudioRecord.Builder()
+                          .setAudioSource(source)
+                          .setAudioFormat(format)
+                          .setBufferSizeInBytes(buffer)
+                          .build();
+                      if(candidate.getState() != AudioRecord.STATE_INITIALIZED) {
+                          candidate.release();
+                          return null;
+                      }
+                      boolean accepted = preferred == null || candidate.setPreferredDevice(preferred);
+                      if(preferred != null) preferredAccepted = accepted;
+                      captureRate = rate;
+                      captureChannels = candidate.getChannelCount();
+                      captureSource = source;
+                      captureBufferBytes = buffer;
+                      logEvent("AudioRecord kész: " + sourceLabel(source) + ", " + rate + " Hz, preferált=" + deviceLabel(preferred) + ", elfogadva=" + accepted);
+                      return candidate;
+                  } catch(Exception e) {
+                      if(candidate != null) try { candidate.release(); } catch(Exception ignored) {}
+                      logError("AudioRecord létrehozás " + sourceLabel(source) + "/" + rate, e);
+                      return null;
+                  }
+              }
+          
+              void registerRouteListener(AudioRecord active) {
+                  if(Build.VERSION.SDK_INT < 24) return;
+                  routingListener = router -> {
+                      routeChanges++;
+                      if(active == recorder) {
+                          try { lastRoutedInput = active.getRoutedDevice(); } catch(Exception ignored) {}
+                          logEvent("AudioRecord útvonal változott: " + deviceLabel(lastRoutedInput));
+                      }
+                  };
+                  try { active.addOnRoutingChangedListener(routingListener, main); }
+                  catch(Exception e) { logError("Routing listener", e); }
+              }
+          
+              AudioDeviceInfo findBuiltInMic() {
+                  for(AudioDeviceInfo d : inputDevices()) if(d.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC) return d;
+                  return null;
+              }
+          
+              AudioDeviceInfo findBluetoothInput() {
+                  for(AudioDeviceInfo d : inputDevices()) if(isBluetoothInput(d)) return d;
+                  return null;
+              }
+          
+              AudioDeviceInfo findBluetoothCommunicationDevice() {
+                  if(audioManager == null || Build.VERSION.SDK_INT < 31) return null;
+                  try {
+                      for(AudioDeviceInfo d : audioManager.getAvailableCommunicationDevices()) {
+                          int t = d.getType();
+                          if(t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || t == AudioDeviceInfo.TYPE_BLE_HEADSET || t == AudioDeviceInfo.TYPE_HEARING_AID) return d;
+                      }
+                  } catch(Exception e) { logError("Kommunikációs eszközlista", e); }
+                  return null;
+              }
+          
+              List<AudioDeviceInfo> inputDevices() {
+                  if(audioManager == null || Build.VERSION.SDK_INT < 23) return Collections.emptyList();
+                  try { return Arrays.asList(audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)); }
+                  catch(Exception e) { logError("Bemeneti eszközlista", e); return Collections.emptyList(); }
+              }
+          
+              boolean isBluetoothInput(AudioDeviceInfo d) {
+                  int t = d.getType();
+                  return t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || t == AudioDeviceInfo.TYPE_HEARING_AID ||
+                      (Build.VERSION.SDK_INT >= 31 && t == AudioDeviceInfo.TYPE_BLE_HEADSET);
+              }
+          
+              boolean supportsRate(AudioDeviceInfo d, int rate) {
+                  if(d == null) return false;
+                  int[] rates = d.getSampleRates();
+                  if(rates == null || rates.length == 0) return false;
+                  for(int r : rates) if(r == rate) return true;
+                  return false;
+              }
+          
+              void recorderReset() {
+                  boolean restart = running || startRequested;
+                  lastReset = "REC RESET " + timeNow();
+                  logEvent("REC RESET: csak az alkalmazás AudioRecord lánca épül újra");
+                  stopCapture(false);
+                  if(restart) main.postDelayed(this::startCapture, 350L);
+              }
+          
+              void routeReset() {
+                  boolean restart = running || startRequested;
+                  lastReset = "ÚT RESET " + timeNow();
+                  logEvent("ÚT RESET: kommunikációs út, SCO és AudioRecord elengedése");
+                  stopCapture(false);
+                  clearCommunicationRoute();
+                  if(restart) main.postDelayed(this::startCapture, 650L);
+              }
+          
+              void scoReset() {
+                  boolean restart = running || startRequested;
+                  lastReset = "SCO RESET " + timeNow();
+                  logEvent("SCO RESET: stopBluetoothSco → startBluetoothSco");
+                  stopCapture(false);
+                  if(audioManager != null) {
+                      try { audioManager.stopBluetoothSco(); } catch(Exception ignored) {}
+                      try { audioManager.setBluetoothScoOn(false); } catch(Exception ignored) {}
+                  }
+                  main.postDelayed(() -> {
+                      if(audioManager != null) {
+                          try { audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION); } catch(Exception ignored) {}
+                          try { audioManager.startBluetoothSco(); } catch(Exception e) { logError("startBluetoothSco", e); }
+                          try { audioManager.setBluetoothScoOn(true); } catch(Exception e) { logError("setBluetoothScoOn", e); }
+                      }
+                      if(restart) startCapture();
+                  }, 500L);
+              }
+          
+              void showApiAndCopyDialog() {
+                  LinearLayout box = new LinearLayout(this);
+                  box.setOrientation(LinearLayout.VERTICAL);
+                  box.setPadding(dp(18), dp(8), dp(18), 0);
+                  EditText key = new EditText(this);
+                  key.setHint("OpenAI API-kulcs");
+                  key.setText(apiKey);
+                  key.setSingleLine(true);
+                  key.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                  box.addView(key, new LinearLayout.LayoutParams(-1, -2));
+                  new AlertDialog.Builder(this)
+                      .setTitle("API-kulcs / diagnosztika")
+                      .setView(box)
+                      .setPositiveButton("MENTÉS", (d, w) -> {
+                          apiKey = key.getText().toString().trim();
+                          prefs.edit().putString("apiKey", apiKey).apply();
+                          logEvent("API-kulcs " + (apiKey.isEmpty() ? "törölve" : "mentve"));
+                      })
+                      .setNeutralButton("NAPLÓ MÁSOLÁSA", (d, w) -> copyDiagnostics())
+                      .setNegativeButton("MÉGSE", null)
+                      .show();
+              }
+          
+              void copyDiagnostics() {
+                  ClipboardManager cm = (ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+                  if(cm != null) cm.setPrimaryClip(ClipData.newPlainText("BT mikrofon diagnosztika", diagnostics.getText().toString()));
+                  Toast.makeText(this, "Diagnosztika vágólapra másolva", Toast.LENGTH_SHORT).show();
+              }
+          
+              void renderDiagnostics() {
+                  AudioRecord r = recorder;
+                  if(r != null) {
+                      try { lastRoutedInput = r.getRoutedDevice(); } catch(Exception ignored) {}
+                  }
+                  StringBuilder s = new StringBuilder();
+                  s.append("ÁLLAPOT\n");
+                  s.append("idő: ").append(timeNow()).append('\n');
+                  s.append("kért út: ").append(routeLabel(routeMode)).append('\n');
+                  s.append("running/start: ").append(running).append('/').append(startRequested).append('\n');
+                  s.append("AudioManager mód: ").append(audioModeLabel(audioManager == null ? -1 : audioManager.getMode())).append('\n');
+                  s.append("kommunikációs eszköz: ").append(currentCommunicationDeviceLabel()).append('\n');
+                  s.append("kommunikáció elfogadva: ").append(communicationAccepted).append('\n');
+                  s.append("preferált bemenet: ").append(deviceLabel(preferredInput)).append(" | elfogadva=").append(preferredAccepted).append('\n');
+                  s.append("tényleges route: ").append(deviceLabel(lastRoutedInput)).append('\n');
+                  s.append("route-váltások: ").append(routeChanges).append('\n');
+          
+                  s.append("\nAUDIORECORD\n");
+                  if(r == null) {
+                      s.append("nincs aktív AudioRecord\n");
+                  } else {
+                      s.append("state/recording: ").append(r.getState()).append('/').append(r.getRecordingState()).append('\n');
+                      s.append("source: ").append(sourceLabel(captureSource)).append('\n');
+                      s.append("capture: ").append(captureRate).append(" Hz, ").append(captureChannels).append(" csatorna, PCM16\n");
+                      s.append("STT/VAD: 16000 Hz mono\n");
+                      s.append("buffer: ").append(captureBufferBytes).append(" byte\n");
+                      s.append("session: ").append(r.getAudioSessionId()).append('\n');
+                      s.append("client silenced: ").append(clientSilencedLabel(r)).append('\n');
+                      s.append("aktív mikrofonok: ").append(activeMicrophonesLabel(r)).append('\n');
+                      s.append("recording config: ").append(recordingConfigLabel(r)).append('\n');
+                      s.append("preprocess: ").append(preprocessingLabel(r.getAudioSessionId())).append('\n');
+                  }
+          
+                  s.append("\nJELSZINT / VAD\n");
+                  s.append("RMS: ").append(String.format(Locale.US, "%.1f", latestRms));
+                  s.append(" | dBFS: ").append(dbfsLabel(latestRms));
+                  s.append(" | peak: ").append(latestPeak).append('\n');
+                  s.append("utolsó nem nulla: ").append(lastNonZeroMs == 0 ? "—" : (System.currentTimeMillis() - lastNonZeroMs) + " ms").append('\n');
+                  s.append("PCM: ").append(totalPcmBytes).append(" byte | reads=").append(totalReads).append(" | zero=").append(zeroReads).append(" | hibák=").append(readErrors).append('\n');
+                  s.append("Silero: NORMAL, 16 kHz, 512 minta, 50 ms nyitás, 500 ms zárás\n");
+                  s.append("VAD most: ").append(latestVadSpeech ? "BESZÉD" : "CSEND").append(" | aktív blokk=").append(voiceActive).append('\n');
+                  s.append("aktuális blokk: ").append(currentBlockMs).append(" ms / max 8000 ms | átfedés: 0\n");
+                  s.append("STT blokkok: ").append(sentBlocks).append(" | folyamatban: ").append(sttInFlight).append('\n');
+          
+                  s.append("\nESZKÖZÖK\n");
+                  for(AudioDeviceInfo d : inputDevices()) {
+                      s.append("• ").append(deviceLabel(d));
+                      s.append(" rates=").append(Arrays.toString(d.getSampleRates()));
+                      s.append(" channels=").append(Arrays.toString(d.getChannelCounts())).append('\n');
+                  }
+                  s.append("AEC/NS/AGC elérhető: ").append(AcousticEchoCanceler.isAvailable()).append('/').append(NoiseSuppressor.isAvailable()).append('/').append(AutomaticGainControl.isAvailable()).append('\n');
+                  s.append("utolsó reset: ").append(lastReset).append('\n');
+                  s.append("megjegyzés: a resetgombok az alkalmazás audioútját építik újra; teljes rendszerszintű Bluetooth-rádióresetet normál app nem végezhet.\n");
+                  if(!lastError.isEmpty()) s.append("utolsó hiba: ").append(lastError).append('\n');
+          
+                  s.append("\nESEMÉNYEK (legújabb felül)\n");
+                  synchronized(events) { for(String e : events) s.append(e).append('\n'); }
+                  diagnostics.setText(s.toString());
+              }
+          
+              String currentCommunicationDeviceLabel() {
+                  if(audioManager == null || Build.VERSION.SDK_INT < 31) return "API<31 / SCO";
+                  try { return deviceLabel(audioManager.getCommunicationDevice()); }
+                  catch(Exception e) { return "hiba: " + e.getClass().getSimpleName(); }
+              }
+          
+              String clientSilencedLabel(AudioRecord r) {
+                  if(Build.VERSION.SDK_INT < 29) return "API<29";
+                  try {
+                      for(AudioRecordingConfiguration c : audioManager.getActiveRecordingConfigurations()) {
+                          if(c.getClientAudioSessionId() == r.getAudioSessionId()) return String.valueOf(c.isClientSilenced());
+                      }
+                      return "nincs config";
+                  } catch(Exception e) { return "hiba"; }
+              }
+          
+              String recordingConfigLabel(AudioRecord r) {
+                  if(audioManager == null || Build.VERSION.SDK_INT < 24) return "API<24";
+                  try {
+                      for(AudioRecordingConfiguration c : audioManager.getActiveRecordingConfigurations()) {
+                          if(c.getClientAudioSessionId() != r.getAudioSessionId()) continue;
+                          StringBuilder x = new StringBuilder();
+                          x.append("source=").append(sourceLabel(c.getClientAudioSource()));
+                          x.append(", client=").append(formatLabel(c.getClientFormat()));
+                          x.append(", device=").append(formatLabel(c.getFormat()));
+                          if(Build.VERSION.SDK_INT >= 28) x.append(", audioDevice=").append(deviceLabel(c.getAudioDevice()));
+                          return x.toString();
+                      }
+                      return "nem található";
+                  } catch(Exception e) { return "hiba: " + e.getClass().getSimpleName(); }
+              }
+          
+              String activeMicrophonesLabel(AudioRecord r) {
+                  if(Build.VERSION.SDK_INT < 28) return "API<28";
+                  try {
+                      List<MicrophoneInfo> list = r.getActiveMicrophones();
+                      if(list == null || list.isEmpty()) return "üres";
+                      ArrayList<String> out = new ArrayList<>();
+                      for(MicrophoneInfo m : list) {
+                          out.add(m.getDescription() + "/" + deviceTypeLabel(m.getType()) + "/loc=" + m.getLocation() + "/dir=" + m.getDirectionality());
+                      }
+                      return android.text.TextUtils.join("; ", out);
+                  } catch(Exception e) { return "hiba: " + e.getClass().getSimpleName(); }
+              }
+          
+              String preprocessingLabel(int sessionId) {
+                  try {
+                      Class<?> cls = Class.forName("android.media.audiofx.AudioEffect");
+                      Method method = cls.getMethod("queryPreProcessings", int.class);
+                      Object value = method.invoke(null, sessionId);
+                      if(!(value instanceof Object[])) return "nincs adat";
+                      Object[] array = (Object[])value;
+                      if(array.length == 0) return "nincs aktív előfeldolgozó";
+                      ArrayList<String> names = new ArrayList<>();
+                      for(Object descriptor : array) {
+                          try {
+                              Field name = descriptor.getClass().getField("name");
+                              names.add(String.valueOf(name.get(descriptor)));
+                          } catch(Exception e) { names.add(descriptor.toString()); }
+                      }
+                      return android.text.TextUtils.join(", ", names);
+                  } catch(Exception e) { return "nem lekérdezhető"; }
+              }
+          
+              String formatLabel(AudioFormat f) {
+                  if(f == null) return "—";
+                  return f.getSampleRate() + "Hz/" + f.getChannelCount() + "ch/enc" + f.getEncoding();
+              }
+          
+              String dbfsLabel(double rms) {
+                  if(rms <= 0.0) return "−∞";
+                  return String.format(Locale.US, "%.1f", 20.0 * Math.log10(rms / 32768.0));
+              }
+          
+              String audioModeLabel(int mode) {
+                  if(mode == AudioManager.MODE_NORMAL) return "NORMAL";
+                  if(mode == AudioManager.MODE_RINGTONE) return "RINGTONE";
+                  if(mode == AudioManager.MODE_IN_CALL) return "IN_CALL";
+                  if(mode == AudioManager.MODE_IN_COMMUNICATION) return "IN_COMMUNICATION";
+                  if(Build.VERSION.SDK_INT >= 30 && mode == AudioManager.MODE_CALL_SCREENING) return "CALL_SCREENING";
+                  return String.valueOf(mode);
+              }
+          
+              String sourceLabel(int source) {
+                  if(source == MediaRecorder.AudioSource.MIC) return "MIC";
+                  if(source == MediaRecorder.AudioSource.VOICE_RECOGNITION) return "VOICE_RECOGNITION";
+                  if(source == MediaRecorder.AudioSource.VOICE_COMMUNICATION) return "VOICE_COMMUNICATION";
+                  if(source == MediaRecorder.AudioSource.CAMCORDER) return "CAMCORDER";
+                  if(source == MediaRecorder.AudioSource.UNPROCESSED) return "UNPROCESSED";
+                  return String.valueOf(source);
+              }
+          
+              String deviceLabel(AudioDeviceInfo d) {
+                  if(d == null) return "—";
+                  String name;
+                  try { name = String.valueOf(d.getProductName()); } catch(Exception e) { name = "eszköz"; }
+                  return name + " / " + deviceTypeLabel(d.getType()) + " / id=" + d.getId();
+              }
+          
+              String deviceTypeLabel(int type) {
+                  if(type == AudioDeviceInfo.TYPE_BUILTIN_MIC) return "BUILTIN_MIC";
+                  if(type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) return "BT_SCO";
+                  if(type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) return "BT_A2DP";
+                  if(type == AudioDeviceInfo.TYPE_WIRED_HEADSET) return "WIRED_HEADSET";
+                  if(type == AudioDeviceInfo.TYPE_USB_HEADSET) return "USB_HEADSET";
+                  if(type == AudioDeviceInfo.TYPE_USB_DEVICE) return "USB_DEVICE";
+                  if(type == AudioDeviceInfo.TYPE_HEARING_AID) return "HEARING_AID";
+                  if(Build.VERSION.SDK_INT >= 31 && type == AudioDeviceInfo.TYPE_BLE_HEADSET) return "BLE_HEADSET";
+                  if(Build.VERSION.SDK_INT >= 31 && type == AudioDeviceInfo.TYPE_BLE_SPEAKER) return "BLE_SPEAKER";
+                  return "TYPE_" + type;
+              }
+          
+              void logEvent(String message) {
+                  String line = timeNow() + "  " + message;
+                  synchronized(events) {
+                      events.addFirst(line);
+                      while(events.size() > 18) events.removeLast();
+                  }
+                  android.util.Log.i("BtMicDiag", message);
+              }
+          
+              void logError(String where, Throwable error) {
+                  String msg = where + ": " + (error == null ? "ismeretlen" : error.getClass().getSimpleName() + " — " + error.getMessage());
+                  lastError = msg;
+                  logEvent(msg);
+                  android.util.Log.e("BtMicDiag", where, error);
+              }
+          
+              String timeNow() {
+                  return new SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(new Date());
+              }
+          
+              @Override public void onDestroy() {
+                  main.removeCallbacks(diagnosticsTicker);
+                  stopCapture(false);
+                  clearCommunicationRoute();
+                  closeSilero();
+                  if(deviceCallback != null && audioManager != null && Build.VERSION.SDK_INT >= 23) {
+                      try { audioManager.unregisterAudioDeviceCallback(deviceCallback); } catch(Exception ignored) {}
+                  }
+                  audioExec.shutdownNow();
+                  super.onDestroy();
+              }
+          }
+          EOF
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Prepare release signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64" || (echo "Missing ANDROID_KEYSTORE_BASE64" && exit 1)
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || (echo "Missing ANDROID_KEYSTORE_PASSWORD" && exit 1)
+          test -n "$ANDROID_KEY_ALIAS" || (echo "Missing ANDROID_KEY_ALIAS" && exit 1)
+          test -n "$ANDROID_KEY_PASSWORD" || (echo "Missing ANDROID_KEY_PASSWORD" && exit 1)
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release-key.jks
+          cat > keystore.properties <<EOF
+          storeFile=release-key.jks
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
+
+      - name: Build signed release APK and AAB
+        run: gradle assembleRelease bundleRelease --stacktrace
+
+      - name: Collect release files
+        run: |
+          mkdir -p artifact
+          cp app/build/outputs/apk/release/app-release.apk artifact/BT_Mic_Diag_V1.0.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/BT_Mic_Diag_V1.0.aab
+          ls -lah artifact
+
+      - name: Upload signed APK and AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: BT_Mic_Diag_V1.0
+          path: |
+            artifact/*.apk
+            artifact/*.aab
+          if-no-files-found: error
