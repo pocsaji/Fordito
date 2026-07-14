@@ -1,4 +1,4 @@
-name: Build Android APK V40.20
+name: Build Android APK V40.21
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4020; versionName = "40.20" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4021; versionName = "40.21" }
 
               signingConfigs {
                   create("release") {
@@ -386,6 +386,7 @@ jobs:
               long lastSpeechBlockReleasedAt = 0L;
               boolean firstSpeechBlockReleased = false;
               int pendingSpeechBlockId = -1;
+              int pendingSpeechBlockRevision = -1;
               final ArrayDeque<Integer> speechTranslateQueue = new ArrayDeque<>();
               int speechSourceBlockSeq = 0;
               String lastSureSpeechOriginal = "";
@@ -408,6 +409,9 @@ jobs:
                   boolean sourceTop = true;
                   boolean translatedOk = false;
                   int retryCount = 0;
+                  // Növekszik minden valódi felhasználói szövegmódosításkor.
+                  // Egy korábban elküldött AI-válasz nem írhatja felül a frissebb kézi javítást.
+                  int editRevision = 0;
                   boolean ttsSpoken = false;
                   int speechSeq = 0;
                   // Csak ez a lezárt mező olvasható fel. Nyers STT vagy részleges AI-válasz nem.
@@ -540,6 +544,7 @@ jobs:
                   super.onCreate(b);
                   sp = getSharedPreferences("settings", MODE_PRIVATE);
                   load();
+                  ensureHttpClient();
                   backgroundScreenAllowed = true;
                   // Biztonsági alapelv marad: új alkalmazásindításkor a felolvasó tolmács mód nem indul el magától.
                   interpreterMode = false;
@@ -863,15 +868,73 @@ jobs:
                       public void onTextChanged(CharSequence s, int start, int before, int count) {
                           if(programmaticChange) return;
                           enterManualEditMode(top);
+                          syncManualEditIntoBlockModel(top, s, start, before, count);
                       }
                       public void afterTextChanged(Editable e) {
                           if(programmaticChange) return;
-                                  // V318: nincs kézi blokkállapot.
-                          // Gépelés közben nem bontjuk újra a blokkokat.
-                          // FORDÍT gombnál a teljes aktív ablak fordul újra a másik ablakba.
+                          // A kézi javítás már az onTextChanged alatt bekerült ugyanabba a TextBlockba,
+                          // ezért egy későbbi élő render nem tudja a régi szöveget visszaírni.
+                          // FORDÍT gombnál továbbra is a teljes aktív ablak fordul újra.
                           updateButtons();
                       }
                   };
+              }
+
+              void syncManualEditIntoBlockModel(boolean top, CharSequence currentText, int start, int before, int count) {
+                  if(programmaticChange || currentText == null || textBlocks.isEmpty()) return;
+                  ArrayList<int[]> ranges = top ? topRanges : bottomRanges;
+                  if(ranges == null || ranges.isEmpty()) return;
+
+                  ArrayList<TextBlock> visible = new ArrayList<>();
+                  for(TextBlock b : textBlocks) {
+                      if(b == null) continue;
+                      String bt = b.topText == null ? "" : b.topText;
+                      String bb = b.bottomText == null ? "" : b.bottomText;
+                      if(bt.trim().length() == 0 && bb.trim().length() == 0) continue;
+                      visible.add(b);
+                  }
+                  if(visible.size() != ranges.size()) return;
+
+                  int oldEditEnd = start + Math.max(0, before);
+                  int rangeIndex = -1;
+                  for(int i=0;i<ranges.size();i++) {
+                      int[] r = ranges.get(i);
+                      if(r == null || r.length < 2) continue;
+                      int rs = r[0];
+                      int re = r[1];
+                      boolean localInsertion = before == 0 && start >= rs && start <= re;
+                      boolean localReplaceOrDelete = before > 0 && start >= rs && oldEditEnd <= re;
+                      if(localInsertion || localReplaceOrDelete) { rangeIndex = i; break; }
+                  }
+
+                  // A szó- és mondatrészen belüli kézi javítás a biztonságos cél.
+                  // Több blokk határát egyszerre érintő szerkezeti szerkesztést itt nem találgatunk.
+                  if(rangeIndex < 0 || rangeIndex >= visible.size()) return;
+
+                  int[] r = ranges.get(rangeIndex);
+                  int delta = count - before;
+                  int newEnd = r[1] + delta;
+                  if(r[0] < 0 || newEnd < r[0] || newEnd > currentText.length()) return;
+
+                  String edited = currentText.subSequence(r[0], newEnd).toString();
+                  TextBlock block = visible.get(rangeIndex);
+                  if(top) block.topText = edited;
+                  else block.bottomText = edited;
+
+                  // Ha a felhasználó a forrásoldalt javította, a háttérben tárolt nyers forrás is
+                  // ugyanazt a frissebb szöveget kapja. Automatikus újraküldés nincs: a FORDÍT gomb marad kézi döntés.
+                  if(block.sourceTop == top) block.pendingSourceText = edited.trim();
+                  block.editRevision++;
+
+                  // A karakterhossz változása után a későbbi blokkok pozícióit is eltoljuk,
+                  // így az élő részleges újrarajzolás továbbra is a helyes helyen dolgozik.
+                  r[1] = newEnd;
+                  for(int i=rangeIndex+1;i<ranges.size();i++) {
+                      int[] next = ranges.get(i);
+                      if(next == null || next.length < 2) continue;
+                      next[0] += delta;
+                      next[1] += delta;
+                  }
               }
           
               void selectActiveBox(boolean top) {
@@ -893,6 +956,7 @@ jobs:
                       responseInProgress = false;
                       speechTranslateMode = false;
                       pendingSpeechBlockId = -1;
+                      pendingSpeechBlockRevision = -1;
                       pendingOutput = "";
                       speechTranslateQueue.clear();
                   }
@@ -1360,6 +1424,15 @@ jobs:
               boolean hasKey() {
                   return apiKey != null && apiKey.trim().startsWith("sk-");
               }
+
+              synchronized void ensureHttpClient() {
+                  if(client != null) return;
+                  client = new OkHttpClient.Builder()
+                      .connectTimeout(25, TimeUnit.SECONDS)
+                      .readTimeout(90, TimeUnit.SECONDS)
+                      .writeTimeout(90, TimeUnit.SECONDS)
+                      .build();
+              }
           
               void start(boolean withAudio) {
                   clipboardResponseMode = false;
@@ -1368,11 +1441,9 @@ jobs:
                   if(withAudio) startBackgroundForegroundServiceIfAllowed();
           
                   connected = true;
-                  client = new OkHttpClient.Builder()
-                      .connectTimeout(25, TimeUnit.SECONDS)
-                      .readTimeout(90, TimeUnit.SECONDS)
-                      .writeTimeout(90, TimeUnit.SECONDS)
-                      .build();
+                  // Egyetlen tartós OkHttp kliens: a kapcsolatpool megmarad mikrofon STOP/START között is.
+                  // Ez nem érinti a hangfeldolgozást vagy a felismerési paramétereket.
+                  ensureHttpClient();
                   if(withAudio) {
                       if(interpreterMode) configureInterpreterAudioRoute(false);
                       else restoreNormalAudioRoute();
@@ -2424,6 +2495,7 @@ jobs:
                   firstSpeechBlockReleased = false;
                   speechTranslateMode = false;
                   pendingSpeechBlockId = -1;
+                  pendingSpeechBlockRevision = -1;
                   speechTranslateQueue.clear();
                   manualResponseMode = false;
                   clipboardResponseMode = false;
@@ -2471,8 +2543,8 @@ jobs:
                           "SOURCE_TEXT_BEGIN\n" + sourceText + "\nSOURCE_TEXT_END"));
                       root.put("messages", messages);
 
-                      OkHttpClient http = client != null ? client : new OkHttpClient.Builder()
-                          .connectTimeout(25, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).writeTimeout(45, TimeUnit.SECONDS).build();
+                      ensureHttpClient();
+                      OkHttpClient http = client;
                       Request req = new Request.Builder().url("https://api.openai.com/v1/chat/completions")
                           .addHeader("Authorization", "Bearer " + apiKey.trim())
                           .addHeader("Content-Type", "application/json")
@@ -2552,7 +2624,7 @@ jobs:
                        + "TARGET_LANG: " + tgtCode + "\n"
                        + "TEXT:\n" + sourceText;
           
-                  if(client == null) client = new OkHttpClient.Builder().connectTimeout(25, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).writeTimeout(45, TimeUnit.SECONDS).build();
+                  ensureHttpClient();
                   sendManualText(payload);
               }
           
@@ -2561,14 +2633,15 @@ jobs:
                   topActive = manualTopSource;
                   speechTranslateMode = false;
                   pendingSpeechBlockId = -1;
+                  pendingSpeechBlockRevision = -1;
                   speechTranslateQueue.clear();
                   pendingOutput = "";
                   manualResponseMode = true;
                   responseInProgress = true;
                   updateButtons();
                   try {
-                      OkHttpClient http = client != null ? client : new OkHttpClient.Builder()
-                          .connectTimeout(25, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).writeTimeout(45, TimeUnit.SECONDS).build();
+                      ensureHttpClient();
+                      OkHttpClient http = client;
                       JSONObject root = new JSONObject();
                       root.put("model", model);
                       root.put("temperature", 0.1);
@@ -3442,7 +3515,7 @@ jobs:
               void processNextSpeechTranslation() {
                   clipboardResponseMode = false;
                   if(speechTranslateMode || responseInProgress) return;
-                  if(client == null) client = new OkHttpClient.Builder().connectTimeout(25, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).writeTimeout(45, TimeUnit.SECONDS).build();
+                  ensureHttpClient();
                   Integer idObj = speechTranslateQueue.poll();
                   if(idObj == null) { maybeFinishStop(); return; }
                   int id = idObj.intValue();
@@ -3456,6 +3529,7 @@ jobs:
           
                   try {
                       pendingSpeechBlockId = id;
+                      pendingSpeechBlockRevision = b.editRevision;
                       speechTranslateMode = true;
                       responseInProgress = true;
                       final int requestSession = sttSessionId;
@@ -3467,8 +3541,6 @@ jobs:
                       String topCode = code(topLang).toUpperCase(Locale.ROOT);
                       String bottomCode = code(bottomLang).toUpperCase(Locale.ROOT);
                       messages.put(new JSONObject().put("role", "user").put("content",
-                          "SELECTED_TOP_LANG: " + topCode + "\n" +
-                          "SELECTED_BOTTOM_LANG: " + bottomCode + "\n" +
                           speechPreviousContextHint() +
                           "RAW_SPEECH_TEXT (the only text to clean and translate):\n" + src.trim()));
                       root.put("messages", messages);
@@ -3535,6 +3607,18 @@ jobs:
                   }
               }
           
+              void finishSupersededSpeechTranslation(int id) {
+                  // A felhasználó a kérés elküldése után kézzel módosította ugyanazt a blokkot.
+                  // A régi AI-válasz szándékosan nem kerül a képernyőre és nem indít új automatikus kérést.
+                  responseInProgress = false;
+                  speechTranslateMode = false;
+                  if(pendingSpeechBlockId == id) pendingSpeechBlockId = -1;
+                  pendingSpeechBlockRevision = -1;
+                  pendingOutput = "";
+                  if(!speechTranslateQueue.isEmpty()) processNextSpeechTranslation();
+                  else maybeFinishStop();
+              }
+
               void retrySpeechBlockOrRender(int id) {
                   // 2026-07-09: nincs automatikus második/harmadik AI-kör.
                   // Egy beszédblokk egy fordítási kérést kap. Hibás vagy hiányos válasz nem nyújthatja
@@ -3542,6 +3626,7 @@ jobs:
                   responseInProgress = false;
                   speechTranslateMode = false;
                   pendingSpeechBlockId = -1;
+                  pendingSpeechBlockRevision = -1;
                   pendingOutput = "";
 
                   if(id >= 0 && id < textBlocks.size()) {
@@ -3562,6 +3647,10 @@ jobs:
                   String speakLang = null;
                   if(id >= 0 && id < textBlocks.size()) {
                       TextBlock b = textBlocks.get(id);
+                      if(pendingSpeechBlockRevision >= 0 && b.editRevision != pendingSpeechBlockRevision) {
+                          finishSupersededSpeechTranslation(id);
+                          return;
+                      }
                       String sourceLang = "";
                       String original = b.pendingSourceText == null ? "" : b.pendingSourceText.trim();
                       String translation = "";
@@ -3637,6 +3726,7 @@ jobs:
                       }
                   }
                   pendingSpeechBlockId = -1;
+                  pendingSpeechBlockRevision = -1;
                   speechTranslateMode = false;
                   if(!speechTranslateQueue.isEmpty()) processNextSpeechTranslation();
                   else maybeFinishStop();
@@ -4232,8 +4322,8 @@ jobs:
           
               void cleanSameLanguageHttp(String sourceText) {
                   try {
-                      OkHttpClient http = new OkHttpClient.Builder()
-                          .connectTimeout(25, TimeUnit.SECONDS).readTimeout(70, TimeUnit.SECONDS).writeTimeout(30, TimeUnit.SECONDS).build();
+                      ensureHttpClient();
+                      OkHttpClient http = client;
                       JSONObject root = new JSONObject();
                       root.put("model", model);
                       root.put("temperature", 0.1);
