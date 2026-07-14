@@ -1,4 +1,4 @@
-name: Build Android APK V40.19
+name: Build Android APK V40.20
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4019; versionName = "40.19" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4020; versionName = "40.20" }
 
               signingConfigs {
                   create("release") {
@@ -114,7 +114,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.19" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.20" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -284,15 +284,23 @@ jobs:
               String interpreterAudioMode = "off";
               String lastInterpreterAudioMode = "auto";
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV419";
-              static final int PRE_ROLL_AUDIO_MS = 800;
+              static final String LOG_TAG = "ForditoV420";
+              // V40.20: a beszédkezdet 24 kHz-es hangja gördülő előpufferben marad.
+              // 960 ms = pontosan 30 darab 32 ms-os keret; a VAD késői/fel-felvillanó nyitása
+              // ezért nem vághatja le az első szót.
+              static final int PRE_ROLL_AUDIO_MS = 960;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
               static final int SILERO_FRAME_SAMPLES = 512;
               static final int SILERO_FRAME_BYTES = SILERO_FRAME_SAMPLES * 2;
               static final int VAD_SPEECH_START_MS = 50;
               static final int VAD_SPEECH_END_SILENCE_MS = 500;
+              // V40.20: a Silero saját 50 ms-os beszédkapuja után három 32 ms-os pozitív
+              // keret elég a beszédindítás megerősítésére. A 150 ms-os minimum továbbra is
+              // megmarad az STT-ablak tényleges elküldési minimumának.
+              static final int VAD_START_CONFIRM_AUDIO_MS = 96;
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
+              static final int POST_TTS_SPEAKER_GUARD_MS = 180;
               // V40.19: az AudioRecord a telefon beépített mikrofonját használja; headset-bemeneti hanglánc nincs.
               // Hangszórós tolmács módban TTS alatt a mikrofont továbbra is kapuzzuk a visszahallás ellen.
               static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 8000;
@@ -1218,7 +1226,7 @@ jobs:
                       if(utteranceId != null && utteranceId.equals(currentTtsUtteranceId)) {
                           currentTtsUtteranceId = "";
                           ttsPlaybackActive = false;
-                          if(isHalfDuplexSpeakerRoute()) ttsMuteUntilMs = System.currentTimeMillis() + 450L;
+                          if(isHalfDuplexSpeakerRoute()) ttsMuteUntilMs = System.currentTimeMillis() + POST_TTS_SPEAKER_GUARD_MS;
                       }
 
                       if(queuedTtsUtterances <= 0 || ttsJobs.isEmpty()) {
@@ -1394,6 +1402,7 @@ jobs:
                   String bottom = code(bottomLang).toUpperCase(Locale.ROOT);
                   return "Transcribe only the words that are clearly audible. " +
                       "The speech language is exactly one of these two languages: " + top + " or " + bottom + ". " +
+                      "A speaker may switch between those two languages from one utterance to the next. Use the entire audio clip to determine the language before deciding how to write the opening word; do not bias the first word toward the previously spoken language. " +
                       "For ordinary speech, never output words from a third language and never create a mixed-language transcription. " +
                       "If an unclear sound cannot be written confidently as a word in either selected language, omit only that unclear sound. " +
                       "Clearly spoken person, place, company and product names may keep their real spelling. " +
@@ -1567,8 +1576,11 @@ jobs:
                   boolean overGate = externalVadOverGate(vad16kFrame);
                   if(overGate) {
                       if(!voiceSendActive) {
+                          // A Silero nyitása előtt/fel-felvillanásakor felvett 24 kHz-es hang
+                          // külön előpufferben marad. A pozitív kereteket csak a megerősítésig
+                          // tartjuk pendingben, majd az előpuffer UTÁN, eredeti sorrendben küldjük.
                           rememberPendingSpeechAudio(stt24kFrame, stt24kFrame.length);
-                          if(pendingSpeechAudioDurationMs() < MIN_TRUE_SPEECH_AUDIO_MS) return;
+                          if(pendingSpeechAudioDurationMs() < VAD_START_CONFIRM_AUDIO_MS) return;
                           if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = now;
                           for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr);
                           for(byte[] ps : takePendingSpeechAudio()) sendAudioChunk(ps);
@@ -1582,6 +1594,12 @@ jobs:
                   if(voiceSendActive) {
                       voiceSendActive = false;
                       flushSpeechAudioWindow(true);
+                  } else if(pendingSpeechAudioDurationMs() > 0) {
+                      // V40.20 HIBAJAVÍTÁS: korábban egy rövid VAD-visszaesés az összes
+                      // addigi beszédkezdet-keretet törölte. Emiatt az első szó eleje vagy akár
+                      // az egész rövid első szó elveszhetett. Most a sikertelenül megerősített
+                      // keretek visszakerülnek a gördülő előpufferbe, tehát semmi nem vész el.
+                      for(byte[] ps : takePendingSpeechAudio()) rememberPreRollAudio(ps, ps.length);
                   }
                   clearPendingSpeechAudio();
                   rememberPreRollAudio(stt24kFrame, stt24kFrame.length);
@@ -1944,32 +1962,6 @@ jobs:
                   setInputRouteHeader("BEMENET: telefon beépített mikrofon • 48 kHz" + suffix);
               }
 
-              boolean routedToBuiltInPhoneMic(AudioRecord recorder) {
-                  if(recorder == null || Build.VERSION.SDK_INT < 23) return false;
-                  try {
-                      AudioDeviceInfo routed = recorder.getRoutedDevice();
-                      return routed != null && routed.isSource() && routed.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC;
-                  } catch(Exception e) {
-                      android.util.Log.e(LOG_TAG, "Actual input route verification failed", e);
-                      return false;
-                  }
-              }
-
-              boolean waitForBuiltInPhoneMicRoute(AudioRecord recorder, long timeoutMs) {
-                  long deadline = SystemClock.elapsedRealtime() + Math.max(0L, timeoutMs);
-                  while(SystemClock.elapsedRealtime() <= deadline) {
-                      try {
-                          AudioDeviceInfo routed = recorder == null ? null : recorder.getRoutedDevice();
-                          if(routed != null) return routed.isSource() && routed.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC;
-                      } catch(Exception e) {
-                          android.util.Log.e(LOG_TAG, "Phone microphone route wait failed", e);
-                          return false;
-                      }
-                      SystemClock.sleep(40L);
-                  }
-                  return false;
-              }
-
               void refreshActualInputRoute(AudioRecord recorder) {
                   if(recorder == null) { setInputRouteHeader("BEMENET: —"); return; }
                   try {
@@ -2104,6 +2096,9 @@ jobs:
                       clearPendingSpeechAudio();
                       clearPreRollAudio();
                       takeCapturedSttRemainder24k();
+                      // A TTS alatt a Silero nem kap kereteket. Ne vigyük tovább a TTS előtti
+                      // rekurzív VAD-állapotot a következő beszélő első szavára.
+                      closeExternalVad();
                   }
               }
 
@@ -2224,17 +2219,16 @@ jobs:
                   });
 
                   audioExec.submit(() -> {
-                      byte[] buf = new byte[CAPTURE_FRAME_BYTES * 4];
-                      if(!waitForBuiltInPhoneMicRoute(activeRec, 1200L)) {
-                          android.util.Log.e(LOG_TAG, "Recording aborted: routed input is not the built-in phone microphone");
-                          runOnUiThread(() -> {
-                              if(rec == activeRec) {
-                                  state.setText("tiltott mikrofonút – csak telefon mikrofon engedélyezett");
-                                  stop(false);
-                              }
-                          });
-                          return;
-                      }
+                      // Egyetlen 32 ms-os 48 kHz-es keretet olvasunk egyszerre. Ez csökkenti a
+                      // beszédkezdet feldolgozási és az útvonal-ellenőrzési késleltetését.
+                      byte[] buf = new byte[CAPTURE_FRAME_BYTES];
+                      // V40.20: az előző kód startRecording() után akár 1200 ms-ig NEM olvasott
+                      // az AudioRecordból, miközben a kért belső puffer csak kb. 256 ms volt.
+                      // Ez a mikrofon indításakor levághatta az első szót. Most az olvasás azonnal
+                      // indul; a hang csak akkor kerül feldolgozásra, ha a tényleges útvonalat
+                      // TYPE_BUILTIN_MIC-ként már ellenőriztük. Bluetooth/headset bemenet továbbra is tiltott.
+                      boolean builtInRouteConfirmed = false;
+                      long routeConfirmDeadlineMs = SystemClock.elapsedRealtime() + 1200L;
                       clearPreRollAudio();
                       clearPendingSpeechAudio();
                       clearSpeechAudioWindow();
@@ -2251,6 +2245,36 @@ jobs:
                           if(read > 0) {
                               if(!streaming && !finalizingStop) break;
                               try {
+                                  if(!builtInRouteConfirmed) {
+                                      AudioDeviceInfo routed = activeRec.getRoutedDevice();
+                                      if(routed != null) {
+                                          if(!routed.isSource() || routed.getType() != AudioDeviceInfo.TYPE_BUILTIN_MIC) {
+                                              android.util.Log.e(LOG_TAG, "Recording aborted: forbidden input route " + compactAudioDeviceLabel(routed));
+                                              runOnUiThread(() -> {
+                                                  if(rec == activeRec) {
+                                                      state.setText("tiltott mikrofonút – csak telefon mikrofon engedélyezett");
+                                                      stop(false);
+                                                  }
+                                              });
+                                              break;
+                                          }
+                                          builtInRouteConfirmed = true;
+                                          refreshActualInputRoute(activeRec);
+                                      } else if(SystemClock.elapsedRealtime() > routeConfirmDeadlineMs) {
+                                          android.util.Log.e(LOG_TAG, "Recording aborted: built-in phone microphone route could not be verified");
+                                          runOnUiThread(() -> {
+                                              if(rec == activeRec) {
+                                                  state.setText("telefon mikrofon útvonala nem ellenőrizhető");
+                                                  stop(false);
+                                              }
+                                          });
+                                          break;
+                                      } else {
+                                          // Ismeretlen útvonalú mintát nem dolgozunk fel és nem küldünk STT-be.
+                                          // A következő read azonnal folytatódik, nincs 40 ms-os polling-alvás.
+                                          continue;
+                                      }
+                                  }
                                   if(!microphonePcmReady) {
                                       microphonePcmReady = true;
                                       markMicrophoneUiReady(activeRec);
@@ -5405,14 +5429,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.19.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.19.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.20.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.20.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.19
+          name: V40.20
           path: |
             artifact/*.apk
             artifact/*.aab
