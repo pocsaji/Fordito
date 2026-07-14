@@ -1,4 +1,4 @@
-name: Build Android APK V40.23
+name: Build Android APK V40.19
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4023; versionName = "40.23" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4019; versionName = "40.19" }
 
               signingConfigs {
                   create("release") {
@@ -114,7 +114,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.23" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.19" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -248,17 +248,13 @@ jobs:
               int queuedTtsUtterances = 0;
               final LinkedHashMap<String,TtsJob> ttsJobs = new LinkedHashMap<>();
               AudioManager audioManager;
+              // V40.19: a rögzítési bemenet kizárólag a telefon beépített mikrofonja lehet.
+              // A Bluetooth/headset csak kimenet; bemeneti fallback, SCO és BLE mikrofonút nincs.
               AudioDeviceInfo preferredInterpreterInputDevice;
-              boolean interpreterCommunicationFallbackActive = false;
-              int rejectedInterpreterInputDeviceId = -1;
-              // V40.8: a BLE headset közvetlen útja natív 32 kHz/MIC felvételt használ,
-              // majd egyetlen lépésben 16 kHz-re alakítja a meglévő VAD/STT lánc előtt.
-              int activeCaptureSampleRate = 16000;
+              boolean interpreterCommunicationFallbackActive = false; // kompatibilitási állapot, mindig false
+              int rejectedInterpreterInputDeviceId = -1; // kompatibilitási állapot, nem használható headset bemenethez
+              int activeCaptureSampleRate = 48000;
               int activeCaptureChannelCount = 1;
-              boolean directBleCaptureActive = false;
-              final ByteArrayOutputStream captureRateRemainder = new ByteArrayOutputStream();
-              long directBleDigitalSilenceMs = 0L;
-              boolean directBleFallbackRequested = false;
               int activeCommunicationDeviceId = -1;
               String activeInterpreterRoute = "off"; // off, headset_output_phone_mic, speaker_half_duplex
               String activeCommunicationDeviceLabel = "";
@@ -288,54 +284,45 @@ jobs:
               String interpreterAudioMode = "off";
               String lastInterpreterAudioMode = "auto";
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV423";
-              static final int PRE_ROLL_AUDIO_MS = 320;
-              // V40.23: a gyári Silero út marad 16 kHz / 512 minta / 32 ms kerettel.
-              // A mondatrész 50 ms igazolt beszéd után nyit; a zárási szünetet a menü 300–700 ms között vezérli.
+              static final String LOG_TAG = "ForditoV419";
+              static final int PRE_ROLL_AUDIO_MS = 800;
+              // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
+              // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
               static final int SILERO_FRAME_SAMPLES = 512;
               static final int SILERO_FRAME_BYTES = SILERO_FRAME_SAMPLES * 2;
-              static final int SILERO_FRAME_MS = 32;
               static final int VAD_SPEECH_START_MS = 50;
-              static final int VAD_SPEECH_END_SILENCE_MS = 300;
+              static final int VAD_SPEECH_END_SILENCE_MS = 500;
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
-              // A telefon fő felvétele 48 kHz. Ugyanabból a 32 ms-os keretből készül
-              // 16 kHz a Silero számára és 24 kHz az OpenAI Realtime számára.
-              static final int CAPTURE_SAMPLE_RATE = 48000;
-              static final int AUDIO_SAMPLE_RATE = 16000;
-              static final int REALTIME_SAMPLE_RATE = 24000;
-              static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 4000;
-              static final int BLOCK_WINDOW_MS = MAX_CONTINUOUS_SPEECH_BLOCK_MS;
-              static final int BLOCK_ACCEPT_MS = MAX_CONTINUOUS_SPEECH_BLOCK_MS;
-              static final int BLOCK_OVERLAP_MS = 0;
+              // V40.19: az AudioRecord a telefon beépített mikrofonját használja; headset-bemeneti hanglánc nincs.
+              // Hangszórós tolmács módban TTS alatt a mikrofont továbbra is kapuzzuk a visszahallás ellen.
+              static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 8000;
               volatile boolean voiceSendActive = false;
-
-              static class PcmFramePair {
-                  final byte[] pcm16k;
-                  final byte[] pcm24k;
-                  PcmFramePair(byte[] pcm16k, byte[] pcm24k) {
-                      this.pcm16k = pcm16k == null ? new byte[0] : pcm16k;
-                      this.pcm24k = pcm24k == null ? new byte[0] : pcm24k;
-                  }
-              }
-
-              final ArrayDeque<PcmFramePair> preRollAudioFrames = new ArrayDeque<>();
-              int preRollAudioMs = 0;
-              final ArrayDeque<PcmFramePair> pendingSpeechAudioFrames = new ArrayDeque<>();
+              final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
+              int preRollAudioBytes = 0;
+              final ArrayDeque<byte[]> pendingSpeechAudioChunks = new ArrayDeque<>();
               int pendingSpeechAudioMs = 0;
+              // V40.19 rögzített hangarchitektúra:
+              // 48 kHz mono PCM telefonmikrofon -> közvetlen 16 kHz Silero VAD ág
+              //                                  -> közvetlen 24 kHz STT ág
+              // Tilos: 48 -> 16 -> 24 kHz.
+              static final int CAPTURE_SAMPLE_RATE = 48000;
+              static final int VAD_SAMPLE_RATE = 16000;
+              static final int STT_SAMPLE_RATE = 24000;
+              static final int CAPTURE_FRAME_SAMPLES = 1536; // 32 ms @ 48 kHz
+              static final int CAPTURE_FRAME_BYTES = CAPTURE_FRAME_SAMPLES * 2;
+              static final int STT_FRAME_SAMPLES = 768; // 32 ms @ 24 kHz
+              static final int STT_FRAME_BYTES = STT_FRAME_SAMPLES * 2;
+              static final int BLOCK_WINDOW_MS = 8000;
+              static final int BLOCK_ACCEPT_MS = 8000;
+              static final int BLOCK_OVERLAP_MS = 1000;
               final Object speechAudioWindowLock = new Object();
               ByteArrayOutputStream speechAudioWindow = new ByteArrayOutputStream();
-              boolean currentTurnRealtimeEligible = false;
-              int currentTurnRealtimeBytes = 0;
-              String vadEngineMode = "silero"; // dokumentált Silero NORMAL alap
+              String vadEngineMode = "silero"; // V40.0 alap: dokumentált Silero NORMAL
               Object speechVadInstance = null;
               String speechVadInstanceMode = "";
               final Object capturedFrameLock = new Object();
               final Object audioProcessingLock = new Object();
               ByteArrayOutputStream capturedFrameBuffer = new ByteArrayOutputStream();
-              boolean vadFallbackActive = false;
-              boolean vadFallbackReported = false;
-              double fallbackNoiseRms = 180.0;
-              int fallbackSpeechHangoverMs = 0;
 
               int sttSessionId = 0;
               int sttRequestSeq = 0;
@@ -382,11 +369,6 @@ jobs:
               boolean responseInProgress = false;
               String pendingOutput = "";
               String speechTranscriptBuffer = "";
-              // Élő mondatpuffer: a 4 másodperces technikai STT-részek ugyanabba a
-              // mondatba kerülnek. A részfordítás azonnal látszik, TTS csak lezárt mondatnál indul.
-              TextBlock activeSpeechSentenceBlock = null;
-              int pendingSpeechSourceRevision = 0;
-              String pendingSpeechSourceText = "";
               boolean speechTranslateMode = false;
               long firstSpeechHeardAt = 0L;
               long speechBufferStartedAt = 0L;
@@ -420,11 +402,6 @@ jobs:
                   int retryCount = 0;
                   boolean ttsSpoken = false;
                   int speechSeq = 0;
-                  // A beszéddarab technikai STT-ablak, nem automatikusan teljes mondat.
-                  boolean sentenceComplete = true;
-                  boolean sentenceBoundaryHint = false;
-                  boolean translationQueued = false;
-                  int sourceRevision = 0;
                   // Csak ez a lezárt mező olvasható fel. Nyers STT vagy részleges AI-válasz nem.
                   boolean finalReady = false;
                   int finalRevision = 0;
@@ -462,41 +439,6 @@ jobs:
                       this.error = error == null ? "" : error;
                   }
               }
-
-              static class RealtimeTurn {
-                  final int session;
-                  final int seq;
-                  final byte[] fallbackPcm16k;
-                  final boolean sentenceBoundaryHint;
-                  String itemId = "";
-                  String partialText = "";
-                  String finalText = "";
-                  String error = "";
-                  boolean completed = false;
-                  boolean fallbackStarted = false;
-                  TextBlock partialBlock;
-                  RealtimeTurn(int session, int seq, byte[] fallbackPcm16k, boolean sentenceBoundaryHint) {
-                      this.session = session;
-                      this.seq = seq;
-                      this.fallbackPcm16k = fallbackPcm16k == null ? new byte[0] : fallbackPcm16k;
-                      this.sentenceBoundaryHint = sentenceBoundaryHint;
-                  }
-              }
-
-              OkHttpClient realtimeClient;
-              WebSocket realtimeSocket;
-              final Object realtimeLock = new Object();
-              volatile boolean realtimeSocketOpen = false;
-              volatile boolean realtimeSessionReady = false;
-              volatile boolean realtimeReconnectScheduled = false;
-              int realtimeGeneration = 0;
-              int realtimeTurnSeq = 0;
-              int realtimeDeliverSeq = 1;
-              final ArrayDeque<RealtimeTurn> realtimeAwaitingCommitAck = new ArrayDeque<>();
-              final HashMap<String, RealtimeTurn> realtimeTurnsByItem = new HashMap<>();
-              final HashMap<String, StringBuilder> realtimeOrphanDeltas = new HashMap<>();
-              final HashMap<String, String> realtimeOrphanFinals = new HashMap<>();
-              final TreeMap<Integer, RealtimeTurn> realtimeCompletedTurns = new TreeMap<>();
           
               final ArrayList<TextBlock> textBlocks = new ArrayList<>();
               final ArrayList<int[]> topRanges = new ArrayList<>();
@@ -505,10 +447,10 @@ jobs:
               String apiKey = "";
               String model = "gpt-4o-mini";
               String profile = "general";
-              String mode = "precise";
-              String vadMode = "medium";
+              String mode = "natural";
+              String vadMode = "low";
               String delayMode = "medium";
-              String audioSourceMode = "recognition";
+              String audioSourceMode = "phone_mic_48k";
               String topLang = "hu";
               String bottomLang = "fr";
           
@@ -574,17 +516,14 @@ jobs:
               };
           
               final String[][] vadEngineModes = {
-                  {"Silero VAD – OFF / extra érzékeny", "silero_off"},
+                  {"Silero VAD – OFF / extra érzékeny, csak csendben", "silero_off"},
                   {"Silero VAD – NORMAL / ajánlott", "silero"},
                   {"Silero VAD – AGGRESSIVE", "silero_medium"},
                   {"Silero VAD – VERY AGGRESSIVE", "silero_truck"}
               };
           
               final String[][] audioSourceModes = {
-                  {"Beszédfelismerés / ajánlott","recognition"},
-                  {"Kommunikáció / régi","communication"},
-                  {"Nyers mikrofon / próba","unprocessed"},
-                  {"Alap mikrofon","mic"}
+                  {"Telefon beépített mikrofon • 48 kHz mono PCM","phone_mic_48k"}
               };
           
 
@@ -614,13 +553,13 @@ jobs:
                   model = sp.getString("model", "gpt-4o-mini");
                   if(!"gpt-4o-mini".equals(model) && !"gpt-4o".equals(model)) model = "gpt-4o-mini";
                   profile = sp.getString("profile", "general");
-                  mode = sp.getString("mode", "precise");
+                  mode = sp.getString("mode", "natural");
                   vadMode = sp.getString("vadMode", "medium");
                   delayMode = sp.getString("delayMode", "xhigh");
                   vadEngineMode = sp.getString("vadEngineMode", "silero");
-                  // V40.23: a WebRTC/pass ág megszűnt. Régi mentett érték esetén biztonságosan Silero NORMAL-ra migrálunk.
                   if(!"silero_off".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode)) vadEngineMode = "silero";
-                  audioSourceMode = sp.getString("audioSourceMode", "recognition");
+                  // V40.19: régi mentett hangforrás-beállítás nem írhatja felül a fix telefonmikrofont.
+                  audioSourceMode = "phone_mic_48k";
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   String storedInterpreterMode = sp.getString("interpreterAudioMode", interpreterMode ? "auto" : "off");
                   interpreterMode = interpreterMode && !"off".equals(storedInterpreterMode);
@@ -648,7 +587,7 @@ jobs:
                       // Csak a hanglánc dokumentált alapját migráljuk; a felhasználó többi
                       // beállítását (nyelvek, profil, tolmács mód) nem írjuk felül.
                       vadEngineMode = "silero";
-                      audioSourceMode = "recognition";
+                      audioSourceMode = "phone_mic_48k";
                       sp.edit().putInt("stableDefaultsVersion", 400).apply();
                       save();
                   }
@@ -660,9 +599,8 @@ jobs:
                       save();
                   }
                   if(last < 408) {
-                      // V40.8: BLE headsetnél MODE_NORMAL + MIC 32 kHz az elsődleges út, belső 16 kHz átalakítással.
-                      // A kommunikációs mód csak elutasított vagy digitálisan néma közvetlen bemenetnél maradhat.
-                      audioSourceMode = "recognition";
+                      // Régi hangforrás-beállítás migrációja; a V40.19 később kötelezően fix telefonmikrofonra állít.
+                      audioSourceMode = "phone_mic_48k";
                       sp.edit().putInt("stableDefaultsVersion", 408).apply();
                       save();
                   }
@@ -673,12 +611,14 @@ jobs:
                       sp.edit().putInt("stableDefaultsVersion", 412).apply();
                       save();
                   }
-                  if(last < 423) {
-                      // V40.23 javított alap: Silero NORMAL + pontos fordítás + tényleges mondatzárási profil.
+                  if(last < 419) {
+                      // V40.19: kötelező, fix hangút. Telefon mikrofon 48 kHz; Silero 16 kHz; STT 24 kHz.
+                      // A Bluetooth/headset bemenetet és minden kommunikációs bemeneti fallbacket felülírjuk.
                       vadEngineMode = "silero";
-                      vadMode = "medium";
-                      mode = "precise";
-                      sp.edit().putInt("stableDefaultsVersion", 423).apply();
+                      audioSourceMode = "phone_mic_48k";
+                      interpreterCommunicationFallbackActive = false;
+                      rejectedInterpreterInputDeviceId = -1;
+                      sp.edit().putInt("stableDefaultsVersion", 419).apply();
                       save();
                   }
               }
@@ -717,7 +657,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.23");
+                  TextView title = label("Fordito_V40.18");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -1227,10 +1167,10 @@ jobs:
               void applyTtsAudioAttributes() {
                   if(tts == null) return;
                   try {
-                      // V40.23: a headset kizárólag média-kimenet. Kommunikációs/SCO módot
-                      // soha nem nyitunk, ezért a Bluetooth mikrofon nem válhat bemenetté.
+                      // V40.19: a headset kizárólag kimenet, ezért a TTS mindig médiahang.
+                      int usage = AudioAttributes.USAGE_MEDIA;
                       AudioAttributes attributes = new AudioAttributes.Builder()
-                          .setUsage(AudioAttributes.USAGE_MEDIA)
+                          .setUsage(usage)
                           .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                           .build();
                       int result = tts.setAudioAttributes(attributes);
@@ -1328,7 +1268,7 @@ jobs:
                   b.finalTranslation = finalText;
                   b.finalTargetLang = targetLang == null ? "" : targetLang;
                   b.finalTranslationHash = ttsFinalHash(finalText);
-                  b.finalReady = b.sentenceComplete && b.translatedOk && b.pendingSourceText.trim().isEmpty() && !b.finalTranslationHash.isEmpty();
+                  b.finalReady = b.translatedOk && b.pendingSourceText.trim().isEmpty() && !b.finalTranslationHash.isEmpty();
                   if(b.finalReady) speakFinalBlockOnce(b);
               }
 
@@ -1437,7 +1377,6 @@ jobs:
                       microphoneStartUiEarliestMs = android.os.SystemClock.elapsedRealtime() + 800L;
                       state.setText("mikrofon előkészítés");
                       updateButtons();
-                      startRealtimeTranscriptionSession();
                       audioLoop();
                   } else {
                       state.setText("fordítás");
@@ -1467,70 +1406,67 @@ jobs:
               }
 
               void clearPreRollAudio() {
-                  synchronized(preRollAudioFrames) {
-                      preRollAudioFrames.clear();
-                      preRollAudioMs = 0;
+                  synchronized(preRollAudioChunks) {
+                      preRollAudioChunks.clear();
+                      preRollAudioBytes = 0;
                   }
               }
-
-              PcmFramePair copyFramePair(PcmFramePair frame) {
-                  if(frame == null) return new PcmFramePair(new byte[0], new byte[0]);
-                  return new PcmFramePair(Arrays.copyOf(frame.pcm16k, frame.pcm16k.length), Arrays.copyOf(frame.pcm24k, frame.pcm24k.length));
-              }
           
-              void rememberPreRollAudio(PcmFramePair frame) {
-                  if(frame == null || frame.pcm16k.length == 0) return;
-                  synchronized(preRollAudioFrames) {
-                      preRollAudioFrames.add(copyFramePair(frame));
-                      preRollAudioMs += SILERO_FRAME_MS;
-                      while(preRollAudioMs > PRE_ROLL_AUDIO_MS && !preRollAudioFrames.isEmpty()) {
-                          preRollAudioFrames.poll();
-                          preRollAudioMs = Math.max(0, preRollAudioMs - SILERO_FRAME_MS);
+              void rememberPreRollAudio(byte[] data, int len) {
+                  if(data == null || len <= 0) return;
+                  byte[] copy = Arrays.copyOf(data, len);
+                  int maxBytes = Math.max(1, STT_SAMPLE_RATE * 2 * PRE_ROLL_AUDIO_MS / 1000);
+                  synchronized(preRollAudioChunks) {
+                      preRollAudioChunks.add(copy);
+                      preRollAudioBytes += copy.length;
+                      while(preRollAudioBytes > maxBytes && !preRollAudioChunks.isEmpty()) {
+                          byte[] old = preRollAudioChunks.poll();
+                          if(old != null) preRollAudioBytes -= old.length;
                       }
                   }
               }
           
-              ArrayList<PcmFramePair> takePreRollAudio() {
-                  ArrayList<PcmFramePair> out = new ArrayList<>();
-                  synchronized(preRollAudioFrames) {
-                      while(!preRollAudioFrames.isEmpty()) {
-                          PcmFramePair b = preRollAudioFrames.poll();
+              ArrayList<byte[]> takePreRollAudio() {
+                  ArrayList<byte[]> out = new ArrayList<>();
+                  synchronized(preRollAudioChunks) {
+                      while(!preRollAudioChunks.isEmpty()) {
+                          byte[] b = preRollAudioChunks.poll();
                           if(b != null) out.add(b);
                       }
-                      preRollAudioMs = 0;
+                      preRollAudioBytes = 0;
                   }
                   return out;
               }
           
-              int pcm16Mono16kMs(int bytes) {
+              int pcm16MonoSttMs(int bytes) {
                   if(bytes <= 0) return 0;
-                  return Math.max(1, (int)Math.round(bytes * 1000.0 / (AUDIO_SAMPLE_RATE * 2.0)));
+                  return Math.max(1, (int)Math.round(bytes * 1000.0 / (STT_SAMPLE_RATE * 2.0)));
               }
           
               void clearPendingSpeechAudio() {
-                  synchronized(pendingSpeechAudioFrames) {
-                      pendingSpeechAudioFrames.clear();
+                  synchronized(pendingSpeechAudioChunks) {
+                      pendingSpeechAudioChunks.clear();
                       pendingSpeechAudioMs = 0;
                   }
               }
           
-              void rememberPendingSpeechAudio(PcmFramePair frame) {
-                  if(frame == null || frame.pcm16k.length == 0) return;
-                  synchronized(pendingSpeechAudioFrames) {
-                      pendingSpeechAudioFrames.add(copyFramePair(frame));
-                      pendingSpeechAudioMs += SILERO_FRAME_MS;
+              void rememberPendingSpeechAudio(byte[] data, int len) {
+                  if(data == null || len <= 0) return;
+                  synchronized(pendingSpeechAudioChunks) {
+                      pendingSpeechAudioChunks.add(Arrays.copyOf(data, len));
+                      pendingSpeechAudioMs += pcm16MonoSttMs(len);
                   }
               }
           
               int pendingSpeechAudioDurationMs() {
-                  synchronized(pendingSpeechAudioFrames) { return pendingSpeechAudioMs; }
+                  synchronized(pendingSpeechAudioChunks) { return pendingSpeechAudioMs; }
               }
           
-              ArrayList<PcmFramePair> takePendingSpeechAudio() {
-                  ArrayList<PcmFramePair> out = new ArrayList<>();
-                  synchronized(pendingSpeechAudioFrames) {
-                      while(!pendingSpeechAudioFrames.isEmpty()) {
-                          PcmFramePair b = pendingSpeechAudioFrames.poll();
+              ArrayList<byte[]> takePendingSpeechAudio() {
+                  ArrayList<byte[]> out = new ArrayList<>();
+                  synchronized(pendingSpeechAudioChunks) {
+                      while(!pendingSpeechAudioChunks.isEmpty()) {
+                          byte[] b = pendingSpeechAudioChunks.poll();
                           if(b != null) out.add(b);
                       }
                       pendingSpeechAudioMs = 0;
@@ -1551,22 +1487,11 @@ jobs:
 
               void resetCapturedFrameState() {
                   synchronized(capturedFrameLock) { capturedFrameBuffer.reset(); }
-                  vadFallbackActive = false;
-                  vadFallbackReported = false;
-                  fallbackNoiseRms = 180.0;
-                  fallbackSpeechHangoverMs = 0;
               }
 
               Object enumConst(String cls, String name) throws Exception {
                   Class<?> c = Class.forName(cls);
                   return Enum.valueOf((Class<Enum>)c.asSubclass(Enum.class), name);
-              }
-
-              int vadSilenceDurationMs() {
-                  if("low".equals(vadMode)) return 700;
-                  if("high".equals(vadMode)) return 300;
-                  if("auto".equals(vadMode)) return 450;
-                  return 450;
               }
 
               Object buildVadByReflection(String mode) throws Exception {
@@ -1580,40 +1505,22 @@ jobs:
                           : ("silero".equals(mode) ? "NORMAL"
                           : ("silero_medium".equals(mode) ? "AGGRESSIVE" : "VERY_AGGRESSIVE"));
                       b.getClass().getMethod("setMode", Class.forName("com.konovalov.vad.silero.config.Mode")).invoke(b, enumConst("com.konovalov.vad.silero.config.Mode", sileroModeName));
-                      b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, vadSilenceDurationMs());
+                      b.getClass().getMethod("setSilenceDurationMs", int.class).invoke(b, VAD_SPEECH_END_SILENCE_MS);
                       b.getClass().getMethod("setSpeechDurationMs", int.class).invoke(b, VAD_SPEECH_START_MS);
                       return b.getClass().getMethod("build").invoke(b);
                   }
                   return null;
               }
 
-              void activateVadFallback(String reason, Throwable error) {
-                  vadFallbackActive = true;
-                  closeExternalVad();
-                  if(!vadFallbackReported) {
-                      vadFallbackReported = true;
-                      if(error == null) android.util.Log.e(LOG_TAG, reason);
-                      else android.util.Log.e(LOG_TAG, reason, error);
-                      runOnUiThread(() -> state.setText("mikrofon aktív – VAD tartalék mód"));
-                  }
-              }
-
-              boolean ensureExternalVadReady() {
-                  if(vadFallbackActive) return true;
+              void ensureExternalVadReady() throws Exception {
                   if(!"silero_off".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode)) {
                       vadEngineMode = "silero";
                   }
-                  if(speechVadInstance != null && vadEngineMode.equals(speechVadInstanceMode)) return true;
+                  if(speechVadInstance != null && vadEngineMode.equals(speechVadInstanceMode)) return;
                   closeExternalVad();
-                  try {
-                      speechVadInstance = buildVadByReflection(vadEngineMode);
-                      speechVadInstanceMode = vadEngineMode;
-                      if(speechVadInstance == null) activateVadFallback("VAD builder returned null: " + vadEngineMode, null);
-                      return true;
-                  } catch(Exception e) {
-                      activateVadFallback("VAD initialization failed: " + vadEngineMode, e);
-                      return true;
-                  }
+                  speechVadInstance = buildVadByReflection(vadEngineMode);
+                  speechVadInstanceMode = vadEngineMode;
+                  if(speechVadInstance == null) throw new IllegalStateException("Silero VAD builder returned null: " + vadEngineMode);
               }
 
               int activeVadFrameBytes() {
@@ -1621,11 +1528,11 @@ jobs:
               }
 
               int frameDurationMs(int frameBytes) {
-                  return Math.max(1, pcm16Mono16kMs(frameBytes));
+                  return Math.max(1, (int)Math.round(frameBytes * 1000.0 / (VAD_SAMPLE_RATE * 2.0)));
               }
 
               boolean invokeVadOnExactFrame(byte[] frame) throws Exception {
-                  if(speechVadInstance == null) throw new IllegalStateException("VAD instance is null");
+                  if(speechVadInstance == null) throw new IllegalStateException("Silero VAD instance is null");
                   try {
                       Object r = speechVadInstance.getClass().getMethod("isSpeech", byte[].class).invoke(speechVadInstance, (Object)frame);
                       return Boolean.TRUE.equals(r);
@@ -1641,70 +1548,32 @@ jobs:
                   }
               }
 
-              boolean fallbackEnergyIsSpeech(byte[] frame) {
-                  if(frame == null || frame.length < 2) return false;
-                  double sum = 0.0;
-                  int samples = frame.length / 2;
-                  for(int i=0;i<samples;i++) {
-                      int lo = frame[i*2] & 0xff;
-                      int hi = frame[i*2+1];
-                      short v = (short)((hi << 8) | lo);
-                      sum += (double)v * (double)v;
-                  }
-                  double rms = Math.sqrt(sum / Math.max(1, samples));
-                  double threshold = Math.max(220.0, fallbackNoiseRms * 2.6);
-                  boolean rawSpeech = rms >= threshold;
-                  int frameMs = frameDurationMs(frame.length);
-                  if(rawSpeech) {
-                      fallbackSpeechHangoverMs = vadSilenceDurationMs();
-                  } else {
-                      fallbackSpeechHangoverMs = Math.max(0, fallbackSpeechHangoverMs - frameMs);
-                      if(!voiceSendActive) fallbackNoiseRms = fallbackNoiseRms * 0.96 + Math.min(rms, 1800.0) * 0.04;
-                  }
-                  return rawSpeech || fallbackSpeechHangoverMs > 0;
-              }
-
-              boolean externalVadOverGate(byte[] exactFrame) {
+              boolean externalVadOverGate(byte[] exactFrame) throws Exception {
                   ensureExternalVadReady();
-                  if(vadFallbackActive) return fallbackEnergyIsSpeech(exactFrame);
-                  try {
-                      return invokeVadOnExactFrame(exactFrame);
-                  } catch(Exception e) {
-                      activateVadFallback("VAD runtime failure: " + vadEngineMode, e);
-                      return fallbackEnergyIsSpeech(exactFrame);
-                  }
+                  return invokeVadOnExactFrame(exactFrame);
               }
 
-              void abortCurrentSpeechTurn() {
-                  voiceSendActive = false;
-                  clearPendingSpeechAudio();
-                  clearPreRollAudio();
-                  synchronized(speechAudioWindowLock) {
-                      speechAudioWindow.reset();
-                      currentTurnRealtimeEligible = false;
-                      currentTurnRealtimeBytes = 0;
-                  }
-                  sendRealtimeClearBuffer();
-              }
-
-              void processVadFrame(PcmFramePair frame) throws Exception {
-                  if(frame == null || frame.pcm16k.length == 0) return;
+              void processVadFrame(byte[] vad16kFrame, byte[] stt24kFrame) throws Exception {
+                  if(vad16kFrame == null || vad16kFrame.length != SILERO_FRAME_BYTES) return;
+                  if(stt24kFrame == null || stt24kFrame.length != STT_FRAME_BYTES) return;
                   if(shouldMuteMicForSpeakerTts()) {
-                      abortCurrentSpeechTurn();
+                      voiceSendActive = false;
+                      clearPendingSpeechAudio();
+                      clearPreRollAudio();
                       return;
                   }
 
                   long now = System.currentTimeMillis();
-                  boolean overGate = externalVadOverGate(frame.pcm16k);
+                  boolean overGate = externalVadOverGate(vad16kFrame);
                   if(overGate) {
                       if(!voiceSendActive) {
-                          rememberPendingSpeechAudio(frame);
+                          rememberPendingSpeechAudio(stt24kFrame, stt24kFrame.length);
                           if(pendingSpeechAudioDurationMs() < MIN_TRUE_SPEECH_AUDIO_MS) return;
                           if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = now;
-                          for(PcmFramePair pr : takePreRollAudio()) sendAudioFrame(pr);
-                          for(PcmFramePair ps : takePendingSpeechAudio()) sendAudioFrame(ps);
+                          for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr);
+                          for(byte[] ps : takePendingSpeechAudio()) sendAudioChunk(ps);
                       } else {
-                          sendAudioFrame(frame);
+                          sendAudioChunk(stt24kFrame);
                       }
                       voiceSendActive = true;
                       return;
@@ -1712,163 +1581,122 @@ jobs:
 
                   if(voiceSendActive) {
                       voiceSendActive = false;
-                      // A Silero csak beszédszünetet jelez. Ez mondatvégi támpont, nem önmagában végleges lezárás.
-                      flushSpeechAudioWindow(true, true);
+                      flushSpeechAudioWindow(true);
                   }
                   clearPendingSpeechAudio();
-                  rememberPreRollAudio(frame);
+                  rememberPreRollAudio(stt24kFrame, stt24kFrame.length);
               }
 
-              short[] decodeCapturedMono(byte[] raw, int offset, int frameBytes) {
-                  int channels = Math.max(1, activeCaptureChannelCount);
-                  int samples = frameBytes / (2 * channels);
-                  short[] mono = new short[samples];
-                  int pos = offset;
-                  for(int i=0;i<samples;i++) {
-                      long sum = 0L;
-                      for(int c=0;c<channels;c++) {
-                          short v = (short)(((raw[pos+1] & 0xff) << 8) | (raw[pos] & 0xff));
-                          sum += v;
-                          pos += 2;
-                      }
-                      mono[i] = (short)(sum / channels);
-                  }
-                  return mono;
+              short readPcm16Le(byte[] data, int byteOffset) {
+                  return (short)(((data[byteOffset + 1] & 0xff) << 8) | (data[byteOffset] & 0xff));
               }
 
-              byte[] resampleMonoPcm16(short[] input, int outputSamples) {
-                  if(input == null || input.length == 0 || outputSamples <= 0) return new byte[0];
-                  byte[] out = new byte[outputSamples * 2];
-                  if(input.length == 1) {
-                      for(int i=0;i<outputSamples;i++) {
-                          out[i*2] = (byte)(input[0] & 0xff);
-                          out[i*2+1] = (byte)((input[0] >> 8) & 0xff);
-                      }
-                      return out;
-                  }
-                  double scale = (input.length - 1.0) / Math.max(1.0, outputSamples - 1.0);
-                  for(int i=0;i<outputSamples;i++) {
-                      double src = i * scale;
-                      int a = (int)Math.floor(src);
-                      int b = Math.min(input.length - 1, a + 1);
-                      double f = src - a;
-                      int value = (int)Math.round(input[a] * (1.0 - f) + input[b] * f);
-                      value = Math.max(Short.MIN_VALUE, Math.min(Short.MAX_VALUE, value));
-                      out[i*2] = (byte)(value & 0xff);
-                      out[i*2+1] = (byte)((value >> 8) & 0xff);
+              byte[] downsample48kTo16kDirect(byte[] pcm48k) {
+                  if(pcm48k == null || pcm48k.length < 6) return new byte[0];
+                  int groups = pcm48k.length / 6; // 3 x 48 kHz sample -> 1 x 16 kHz sample
+                  byte[] out = new byte[groups * 2];
+                  for(int g=0; g<groups; g++) {
+                      int p = g * 6;
+                      int avg = (readPcm16Le(pcm48k, p) + readPcm16Le(pcm48k, p + 2) + readPcm16Le(pcm48k, p + 4)) / 3;
+                      out[g*2] = (byte)(avg & 0xff);
+                      out[g*2+1] = (byte)((avg >> 8) & 0xff);
                   }
                   return out;
               }
 
-              ArrayList<PcmFramePair> normalizeCapturedFrames(byte[] data, int len) {
-                  ArrayList<PcmFramePair> out = new ArrayList<>();
-                  if(data == null || len <= 0) return out;
-                  synchronized(captureRateRemainder) {
-                      captureRateRemainder.write(data, 0, len);
-                      byte[] all = captureRateRemainder.toByteArray();
-                      int channels = Math.max(1, activeCaptureChannelCount);
-                      int inputSamples = Math.max(1, activeCaptureSampleRate * SILERO_FRAME_MS / 1000);
-                      int inputFrameBytes = inputSamples * channels * 2;
-                      int pos = 0;
-                      while(pos + inputFrameBytes <= all.length) {
-                          short[] mono = decodeCapturedMono(all, pos, inputFrameBytes);
-                          byte[] pcm16 = resampleMonoPcm16(mono, SILERO_FRAME_SAMPLES);
-                          byte[] pcm24 = resampleMonoPcm16(mono, REALTIME_SAMPLE_RATE * SILERO_FRAME_MS / 1000);
-                          out.add(new PcmFramePair(pcm16, pcm24));
-                          pos += inputFrameBytes;
-                      }
-                      captureRateRemainder.reset();
-                      if(pos < all.length) captureRateRemainder.write(all, pos, all.length - pos);
+              byte[] downsample48kTo24kDirect(byte[] pcm48k) {
+                  if(pcm48k == null || pcm48k.length < 4) return new byte[0];
+                  int groups = pcm48k.length / 4; // 2 x 48 kHz sample -> 1 x 24 kHz sample
+                  byte[] out = new byte[groups * 2];
+                  for(int g=0; g<groups; g++) {
+                      int p = g * 4;
+                      int avg = (readPcm16Le(pcm48k, p) + readPcm16Le(pcm48k, p + 2)) / 2;
+                      out[g*2] = (byte)(avg & 0xff);
+                      out[g*2+1] = (byte)((avg >> 8) & 0xff);
                   }
                   return out;
               }
 
               void processCapturedAudio(byte[] data, int len) throws Exception {
-                  for(PcmFramePair frame : normalizeCapturedFrames(data, len)) processVadFrame(frame);
+                  if(data == null || len <= 0) return;
+                  ArrayList<byte[]> captureFrames48k = new ArrayList<>();
+                  synchronized(capturedFrameLock) {
+                      capturedFrameBuffer.write(data, 0, len);
+                      byte[] all = capturedFrameBuffer.toByteArray();
+                      int pos = 0;
+                      while(pos + CAPTURE_FRAME_BYTES <= all.length) {
+                          captureFrames48k.add(Arrays.copyOfRange(all, pos, pos + CAPTURE_FRAME_BYTES));
+                          pos += CAPTURE_FRAME_BYTES;
+                      }
+                      capturedFrameBuffer.reset();
+                      if(pos < all.length) capturedFrameBuffer.write(all, pos, all.length - pos);
+                  }
+                  for(byte[] frame48k : captureFrames48k) {
+                      // A két ág ugyanabból az eredeti 48 kHz-es 32 ms-os keretből, egymástól függetlenül készül.
+                      byte[] vad16k = downsample48kTo16kDirect(frame48k);
+                      byte[] stt24k = downsample48kTo24kDirect(frame48k);
+                      processVadFrame(vad16k, stt24k);
+                  }
               }
 
-              byte[] takeCapturedRemainder() {
-                  synchronized(captureRateRemainder) {
-                      byte[] out = captureRateRemainder.toByteArray();
-                      captureRateRemainder.reset();
-                      return out;
+              byte[] takeCapturedSttRemainder24k() {
+                  byte[] raw48k;
+                  synchronized(capturedFrameLock) {
+                      raw48k = capturedFrameBuffer.toByteArray();
+                      capturedFrameBuffer.reset();
                   }
+                  return downsample48kTo24kDirect(raw48k);
               }
 
               void clearSpeechAudioWindow() {
                   synchronized(speechAudioWindowLock) {
                       speechAudioWindow.reset();
-                      currentTurnRealtimeEligible = false;
-                      currentTurnRealtimeBytes = 0;
                   }
               }
           
               int speechAudioWindowMs() {
-                  synchronized(speechAudioWindowLock) { return pcm16Mono16kMs(speechAudioWindow.size()); }
+                  synchronized(speechAudioWindowLock) { return pcm16MonoSttMs(speechAudioWindow.size()); }
               }
-
-              boolean sendRealtimeAudio(byte[] pcm24k) {
-                  if(pcm24k == null || pcm24k.length == 0 || !realtimeSessionReady) return false;
-                  try {
-                      JSONObject event = new JSONObject()
-                          .put("type", "input_audio_buffer.append")
-                          .put("audio", Base64.encodeToString(pcm24k, Base64.NO_WRAP));
-                      return sendRealtimeJson(event);
-                  } catch(Exception e) {
-                      android.util.Log.e(LOG_TAG, "Realtime audio append failed", e);
-                      return false;
-                  }
-              }
-
-              void appendSpeechAudioFrame(PcmFramePair frame) {
-                  if(frame == null || frame.pcm16k.length == 0 || client == null) return;
-                  boolean forceCommit = false;
-                  synchronized(speechAudioWindowLock) {
-                      if(speechAudioWindow.size() == 0) {
-                          currentTurnRealtimeEligible = realtimeSessionReady;
-                          currentTurnRealtimeBytes = 0;
-                      }
-                      speechAudioWindow.write(frame.pcm16k, 0, frame.pcm16k.length);
-                      if(currentTurnRealtimeEligible) {
-                          if(sendRealtimeAudio(frame.pcm24k)) currentTurnRealtimeBytes += frame.pcm24k.length;
-                          else currentTurnRealtimeEligible = false;
-                      }
-                      forceCommit = pcm16Mono16kMs(speechAudioWindow.size()) >= BLOCK_WINDOW_MS;
-                  }
-                  if(forceCommit) flushSpeechAudioWindow(true, false);
-              }
-
-              void flushSpeechAudioWindow(boolean force) {
-                  flushSpeechAudioWindow(force, true);
-              }
-
-              void flushSpeechAudioWindow(boolean force, boolean sentenceBoundaryHint) {
+          
+              void appendSpeechAudioChunk(byte[] chunk) {
+                  if(chunk == null || chunk.length == 0 || client == null) return;
                   byte[] ready = null;
-                  boolean useRealtime = false;
                   synchronized(speechAudioWindowLock) {
-                      int minBytes = AUDIO_SAMPLE_RATE * 2 * (force ? MIN_TRUE_SPEECH_AUDIO_MS : 1200) / 1000;
+                      speechAudioWindow.write(chunk, 0, chunk.length);
+                      int needBytes = STT_SAMPLE_RATE * 2 * BLOCK_WINDOW_MS / 1000;
+                      if(speechAudioWindow.size() >= needBytes) {
+                          byte[] all = speechAudioWindow.toByteArray();
+                          ready = Arrays.copyOf(all, needBytes);
+                          int keepBytes = STT_SAMPLE_RATE * 2 * BLOCK_OVERLAP_MS / 1000;
+                          speechAudioWindow.reset();
+                          int start = Math.max(0, needBytes - keepBytes);
+                          speechAudioWindow.write(all, start, needBytes - start);
+                          if(all.length > needBytes) {
+                              speechAudioWindow.write(all, needBytes, all.length - needBytes);
+                          }
+                      }
+                  }
+                  if(ready != null) transcribeAudioWindow(ready, false);
+              }
+          
+              void flushSpeechAudioWindow(boolean force) {
+                  byte[] ready = null;
+                  synchronized(speechAudioWindowLock) {
+                      int minBytes = STT_SAMPLE_RATE * 2 * (force ? MIN_TRUE_SPEECH_AUDIO_MS : 1200) / 1000;
                       if(speechAudioWindow.size() >= minBytes) {
                           ready = speechAudioWindow.toByteArray();
-                          useRealtime = currentTurnRealtimeEligible && currentTurnRealtimeBytes > 0 && realtimeSessionReady;
                           speechAudioWindow.reset();
-                          currentTurnRealtimeEligible = false;
-                          currentTurnRealtimeBytes = 0;
                       }
                   }
-                  if(ready == null) return;
-                  if(useRealtime) commitRealtimeTurn(ready, sentenceBoundaryHint);
-                  else {
-                      sendRealtimeClearBuffer();
-                      transcribeAudioWindow(ready, sentenceBoundaryHint);
-                  }
+                  if(ready != null) transcribeAudioWindow(ready, true);
               }
-
-              byte[] wavFromPcm16k(byte[] pcm) throws Exception {
+          
+              byte[] wavFromPcm24k(byte[] pcm) throws Exception {
                   int dataLen = pcm == null ? 0 : pcm.length;
                   ByteArrayOutputStream out = new ByteArrayOutputStream(44 + dataLen);
                   writeAscii(out, "RIFF"); writeIntLE(out, 36 + dataLen); writeAscii(out, "WAVE");
                   writeAscii(out, "fmt "); writeIntLE(out, 16); writeShortLE(out, 1); writeShortLE(out, 1);
-                  writeIntLE(out, AUDIO_SAMPLE_RATE); writeIntLE(out, AUDIO_SAMPLE_RATE * 2); writeShortLE(out, 2); writeShortLE(out, 16);
+                  writeIntLE(out, STT_SAMPLE_RATE); writeIntLE(out, STT_SAMPLE_RATE * 2); writeShortLE(out, 2); writeShortLE(out, 16);
                   writeAscii(out, "data"); writeIntLE(out, dataLen);
                   if(pcm != null) out.write(pcm);
                   return out.toByteArray();
@@ -1919,7 +1747,7 @@ jobs:
                   final int session = requestOrder[0];
                   final int seq = requestOrder[1];
                   try {
-                      byte[] wav = wavFromPcm16k(pcm);
+                      byte[] wav = wavFromPcm24k(pcm);
                       MultipartBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
                           .addFormDataPart("model", "gpt-4o-mini-transcribe")
                           .addFormDataPart("response_format", "json")
@@ -1954,406 +1782,10 @@ jobs:
                   }
               }
 
-              void sendAudioFrame(PcmFramePair frame) {
-                  appendSpeechAudioFrame(frame);
+              void sendAudioChunk(byte[] chunk) throws Exception {
+                  appendSpeechAudioChunk(chunk);
               }
           
-              String realtimeDelaySetting() {
-                  // A menü ténylegesen hasson az élő STT-re. A pontosabb fokozatok LOW késleltetést kapnak,
-                  // a kifejezetten gyors mód marad MINIMAL.
-                  return "low".equals(delayMode) ? "minimal" : "low";
-              }
-
-              String realtimeNoiseReductionType() {
-                  // A telefonhoz és a headsethez a közelbeszélő profil illik.
-                  // A korábbi FAR_FIELD profil a ventilátorral együtt a beszédet is túl könnyen torzította.
-                  // UNPROCESSED bemenetnél marad a távoli mikrofonra való profil.
-                  return "unprocessed".equals(audioSourceMode) ? "far_field" : "near_field";
-              }
-
-              void startRealtimeTranscriptionSession() {
-                  closeRealtimeTranscriptionSession(false);
-                  if(!hasKey()) return;
-                  final int generation;
-                  synchronized(realtimeLock) {
-                      generation = ++realtimeGeneration;
-                      realtimeSocketOpen = false;
-                      realtimeSessionReady = false;
-                  }
-                  realtimeClient = new OkHttpClient.Builder()
-                      .connectTimeout(20, TimeUnit.SECONDS)
-                      .readTimeout(0, TimeUnit.MILLISECONDS)
-                      .writeTimeout(30, TimeUnit.SECONDS)
-                      .pingInterval(20, TimeUnit.SECONDS)
-                      .build();
-                  Request request = new Request.Builder()
-                      .url("wss://api.openai.com/v1/realtime?model=gpt-realtime-whisper")
-                      .addHeader("Authorization", "Bearer " + apiKey.trim())
-                      .build();
-                  realtimeSocket = realtimeClient.newWebSocket(request, new WebSocketListener() {
-                      @Override public void onOpen(WebSocket webSocket, Response response) {
-                          synchronized(realtimeLock) {
-                              if(generation != realtimeGeneration || realtimeSocket != webSocket) {
-                                  webSocket.close(1000, "stale");
-                                  return;
-                              }
-                              realtimeSocketOpen = true;
-                          }
-                          try {
-                              JSONObject transcription = new JSONObject()
-                                  .put("model", "gpt-realtime-whisper")
-                                  .put("delay", realtimeDelaySetting());
-                              JSONObject input = new JSONObject()
-                                  .put("format", new JSONObject().put("type", "audio/pcm").put("rate", REALTIME_SAMPLE_RATE))
-                                  // Közelbeszélő telefon/headset: NEAR_FIELD. Nyers bemenet: FAR_FIELD.
-                                  // Ez a Realtime pufferre hat, a Silero 16 kHz-es mondatvágását nem módosítja.
-                                  .put("noise_reduction", new JSONObject().put("type", realtimeNoiseReductionType()))
-                                  .put("transcription", transcription)
-                                  .put("turn_detection", JSONObject.NULL);
-                              JSONObject session = new JSONObject()
-                                  .put("type", "transcription")
-                                  .put("audio", new JSONObject().put("input", input));
-                              sendRealtimeJson(new JSONObject().put("type", "session.update").put("session", session));
-                          } catch(Exception e) {
-                              handleRealtimeTransportFailure(generation, "session beállítás", e);
-                          }
-                      }
-
-                      @Override public void onMessage(WebSocket webSocket, String text) {
-                          try {
-                              JSONObject event = new JSONObject(text);
-                              runOnUiThread(() -> handleRealtimeEvent(generation, event));
-                          } catch(Exception e) {
-                              android.util.Log.e(LOG_TAG, "Realtime event parse failed", e);
-                          }
-                      }
-
-                      @Override public void onFailure(WebSocket webSocket, Throwable t, Response response) {
-                          handleRealtimeTransportFailure(generation, "kapcsolat", t);
-                      }
-
-                      @Override public void onClosed(WebSocket webSocket, int code, String reason) {
-                          handleRealtimeTransportFailure(generation, "lezárva " + code, null);
-                      }
-                  });
-              }
-
-              boolean sendRealtimeJson(JSONObject event) {
-                  if(event == null) return false;
-                  WebSocket ws;
-                  synchronized(realtimeLock) {
-                      ws = realtimeSocket;
-                      if(ws == null || !realtimeSocketOpen) return false;
-                  }
-                  try { return ws.send(event.toString()); }
-                  catch(Exception e) {
-                      android.util.Log.e(LOG_TAG, "Realtime send failed", e);
-                      return false;
-                  }
-              }
-
-              void sendRealtimeClearBuffer() {
-                  if(!realtimeSocketOpen) return;
-                  try { sendRealtimeJson(new JSONObject().put("type", "input_audio_buffer.clear")); }
-                  catch(Exception ignored) {}
-              }
-
-              void closeRealtimeTranscriptionSession(boolean fallbackPending) {
-                  ArrayList<RealtimeTurn> pending = new ArrayList<>();
-                  WebSocket ws;
-                  OkHttpClient rc;
-                  synchronized(realtimeLock) {
-                      realtimeGeneration++;
-                      realtimeSocketOpen = false;
-                      realtimeSessionReady = false;
-                      realtimeReconnectScheduled = false;
-                      ws = realtimeSocket;
-                      rc = realtimeClient;
-                      realtimeSocket = null;
-                      realtimeClient = null;
-                      if(fallbackPending) {
-                          LinkedHashSet<RealtimeTurn> unique = new LinkedHashSet<>();
-                          unique.addAll(realtimeAwaitingCommitAck);
-                          unique.addAll(realtimeTurnsByItem.values());
-                          for(RealtimeTurn t : unique) if(t != null && !t.completed) pending.add(t);
-                      }
-                      realtimeAwaitingCommitAck.clear();
-                      realtimeTurnsByItem.clear();
-                      realtimeOrphanDeltas.clear();
-                      realtimeOrphanFinals.clear();
-                  }
-                  try { if(ws != null) ws.close(1000, "app"); } catch(Exception ignored) {}
-                  try { if(rc != null) rc.dispatcher().executorService().shutdown(); } catch(Exception ignored) {}
-                  if(fallbackPending) for(RealtimeTurn t : pending) startRealtimeTurnFallback(t, "élő STT megszakadt");
-              }
-
-              void handleRealtimeTransportFailure(int generation, String reason, Throwable error) {
-                  synchronized(realtimeLock) {
-                      if(generation != realtimeGeneration) return;
-                      realtimeSocketOpen = false;
-                      realtimeSessionReady = false;
-                  }
-                  if(error == null) android.util.Log.w(LOG_TAG, "Realtime " + reason);
-                  else android.util.Log.e(LOG_TAG, "Realtime " + reason, error);
-                  runOnUiThread(() -> {
-                      fallbackPendingRealtimeTurns("élő STT kapcsolat");
-                      scheduleRealtimeReconnect();
-                  });
-              }
-
-              void scheduleRealtimeReconnect() {
-                  synchronized(realtimeLock) {
-                      if(realtimeReconnectScheduled || !streaming || !hasKey()) return;
-                      realtimeReconnectScheduled = true;
-                  }
-                  new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                      synchronized(realtimeLock) { realtimeReconnectScheduled = false; }
-                      if(streaming && !finalizingStop && hasKey() && !realtimeSessionReady) startRealtimeTranscriptionSession();
-                  }, 1500L);
-              }
-
-              void handleRealtimeEvent(int generation, JSONObject event) {
-                  synchronized(realtimeLock) { if(generation != realtimeGeneration) return; }
-                  String type = event.optString("type", "");
-                  if("session.updated".equals(type)) {
-                      realtimeSessionReady = true;
-                      if(streaming && !microphoneStarting) state.setText("mikrofon aktív – élő STT");
-                      return;
-                  }
-                  if("input_audio_buffer.committed".equals(type)) {
-                      assignRealtimeItem(event.optString("item_id", ""));
-                      return;
-                  }
-                  if("conversation.item.input_audio_transcription.delta".equals(type)) {
-                      applyRealtimeDelta(event.optString("item_id", ""), event.optString("delta", ""));
-                      return;
-                  }
-                  if("conversation.item.input_audio_transcription.completed".equals(type)) {
-                      applyRealtimeCompleted(event.optString("item_id", ""), event.optString("transcript", ""));
-                      return;
-                  }
-                  if("conversation.item.input_audio_transcription.failed".equals(type) || "error".equals(type)) {
-                      String itemId = event.optString("item_id", "");
-                      String message = event.optJSONObject("error") == null ? type : event.optJSONObject("error").optString("message", type);
-                      if(itemId.length() > 0) failRealtimeItem(itemId, message);
-                      else {
-                          android.util.Log.e(LOG_TAG, "Realtime API error: " + message);
-                          fallbackPendingRealtimeTurns(message);
-                      }
-                  }
-              }
-
-              synchronized RealtimeTurn registerRealtimeTurn(byte[] pcm16k, boolean sentenceBoundaryHint) {
-                  RealtimeTurn turn = new RealtimeTurn(sttSessionId, ++realtimeTurnSeq, Arrays.copyOf(pcm16k, pcm16k.length), sentenceBoundaryHint);
-                  sttRequestsInFlight++;
-                  synchronized(realtimeLock) { realtimeAwaitingCommitAck.add(turn); }
-                  new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                      if(turn.session == sttSessionId && !turn.completed) {
-                          synchronized(realtimeLock) {
-                              realtimeAwaitingCommitAck.remove(turn);
-                              if(turn.itemId != null && turn.itemId.length() > 0) realtimeTurnsByItem.remove(turn.itemId);
-                          }
-                          startRealtimeTurnFallback(turn, "élő STT időtúllépés");
-                      }
-                  }, 15000L);
-                  return turn;
-              }
-
-              void commitRealtimeTurn(byte[] pcm16k, boolean sentenceBoundaryHint) {
-                  if(pcm16k == null || pcm16k.length == 0) return;
-                  RealtimeTurn turn = registerRealtimeTurn(pcm16k, sentenceBoundaryHint);
-                  boolean sent;
-                  try { sent = sendRealtimeJson(new JSONObject().put("type", "input_audio_buffer.commit")); }
-                  catch(Exception e) { sent = false; }
-                  if(!sent) {
-                      synchronized(realtimeLock) { realtimeAwaitingCommitAck.remove(turn); }
-                      startRealtimeTurnFallback(turn, "commit nem küldhető");
-                  }
-              }
-
-              void assignRealtimeItem(String itemId) {
-                  if(itemId == null || itemId.length() == 0) return;
-                  RealtimeTurn turn;
-                  String orphanDelta = "";
-                  String orphanFinal = null;
-                  synchronized(realtimeLock) {
-                      turn = realtimeAwaitingCommitAck.poll();
-                      if(turn == null) return;
-                      turn.itemId = itemId;
-                      realtimeTurnsByItem.put(itemId, turn);
-                      StringBuilder d = realtimeOrphanDeltas.remove(itemId);
-                      if(d != null) orphanDelta = d.toString();
-                      orphanFinal = realtimeOrphanFinals.remove(itemId);
-                  }
-                  if(orphanDelta.length() > 0) updateRealtimePartial(turn, orphanDelta);
-                  if(orphanFinal != null) finishRealtimeTurn(turn, orphanFinal, "");
-              }
-
-              void applyRealtimeDelta(String itemId, String delta) {
-                  if(itemId == null || itemId.length() == 0 || delta == null || delta.length() == 0) return;
-                  RealtimeTurn turn;
-                  synchronized(realtimeLock) {
-                      turn = realtimeTurnsByItem.get(itemId);
-                      if(turn == null) {
-                          realtimeOrphanDeltas.computeIfAbsent(itemId, k -> new StringBuilder()).append(delta);
-                          return;
-                      }
-                  }
-                  updateRealtimePartial(turn, turn.partialText + delta);
-              }
-
-              void updateRealtimePartial(RealtimeTurn turn, String text) {
-                  if(turn == null || turn.completed || turn.session != sttSessionId) return;
-                  String visible = text == null ? "" : text.trim();
-                  turn.partialText = visible;
-                  if(visible.length() == 0) return;
-                  boolean sourceTop = sourceIsTopBySelectedPair(visible, topActive);
-                  if(turn.partialBlock == null) {
-                      turn.partialBlock = new TextBlock();
-                      turn.partialBlock.translatedOk = false;
-                      textBlocks.add(turn.partialBlock);
-                  }
-                  TextBlock b = turn.partialBlock;
-                  b.sourceTop = sourceTop;
-                  b.pendingSourceText = visible;
-                  String displayPartial = displaySpeechFragment(visible, false);
-                  b.topText = sourceTop ? displayPartial : "";
-                  b.bottomText = sourceTop ? "" : displayPartial;
-                  renderBlocksKeepView();
-              }
-
-              void applyRealtimeCompleted(String itemId, String transcript) {
-                  if(itemId == null || itemId.length() == 0) return;
-                  RealtimeTurn turn;
-                  synchronized(realtimeLock) {
-                      turn = realtimeTurnsByItem.get(itemId);
-                      if(turn == null) {
-                          realtimeOrphanFinals.put(itemId, transcript == null ? "" : transcript);
-                          return;
-                      }
-                  }
-                  finishRealtimeTurn(turn, transcript, "");
-              }
-
-              void failRealtimeItem(String itemId, String error) {
-                  RealtimeTurn turn;
-                  synchronized(realtimeLock) { turn = realtimeTurnsByItem.get(itemId); }
-                  if(turn != null) startRealtimeTurnFallback(turn, error);
-              }
-
-              void removeRealtimePartialBlock(RealtimeTurn turn) {
-                  if(turn == null || turn.partialBlock == null) return;
-                  textBlocks.remove(turn.partialBlock);
-                  turn.partialBlock = null;
-                  renderBlocksKeepView();
-              }
-
-              void finishRealtimeTurn(RealtimeTurn turn, String transcript, String error) {
-                  if(turn == null || turn.completed || turn.session != sttSessionId) return;
-                  turn.completed = true;
-                  turn.finalText = transcript == null ? "" : transcript.trim();
-                  turn.error = error == null ? "" : error;
-                  synchronized(realtimeLock) {
-                      if(turn.itemId.length() > 0) realtimeTurnsByItem.remove(turn.itemId);
-                      realtimeAwaitingCommitAck.remove(turn);
-                  }
-                  realtimeCompletedTurns.put(turn.seq, turn);
-                  drainRealtimeTurnsInOrder();
-              }
-
-              void drainRealtimeTurnsInOrder() {
-                  while(true) {
-                      RealtimeTurn turn = realtimeCompletedTurns.remove(realtimeDeliverSeq);
-                      if(turn == null) break;
-                      realtimeDeliverSeq++;
-                      removeRealtimePartialBlock(turn);
-                      sttRequestsInFlight = Math.max(0, sttRequestsInFlight - 1);
-                      if(turn.finalText.length() > 0) handleTranscriptCompleted(turn.finalText, turn.sentenceBoundaryHint);
-                      else if(turn.error.length() > 0) {
-                          android.util.Log.e(LOG_TAG, "Realtime STT failed: " + turn.error);
-                          state.setText(streaming ? "mikrofon aktív – STT hiba" : "STT hiba – az előző átiratok megmaradtak");
-                      }
-                  }
-                  maybeFinishStop();
-              }
-
-              void startRealtimeTurnFallback(RealtimeTurn turn, String reason) {
-                  if(Looper.myLooper() != Looper.getMainLooper()) {
-                      runOnUiThread(() -> startRealtimeTurnFallback(turn, reason));
-                      return;
-                  }
-                  if(turn == null || turn.completed || turn.fallbackStarted || turn.session != sttSessionId) return;
-                  turn.fallbackStarted = true;
-                  removeRealtimePartialBlock(turn);
-                  if(turn.fallbackPcm16k.length == 0 || client == null || !hasKey()) {
-                      finishRealtimeTurn(turn, "", reason);
-                      return;
-                  }
-                  try {
-                      byte[] wav = wavFromPcm16k(turn.fallbackPcm16k);
-                      MultipartBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
-                          .addFormDataPart("model", "gpt-4o-mini-transcribe")
-                          .addFormDataPart("response_format", "json")
-                          .addFormDataPart("prompt", speechTranscriptionPrompt())
-                          .addFormDataPart("file", "speech.wav", RequestBody.create(MediaType.parse("audio/wav"), wav))
-                          .build();
-                      Request req = new Request.Builder().url("https://api.openai.com/v1/audio/transcriptions")
-                          .addHeader("Authorization", "Bearer " + apiKey.trim())
-                          .post(body).build();
-                      client.newCall(req).enqueue(new Callback() {
-                          @Override public void onFailure(Call call, java.io.IOException e) {
-                              runOnUiThread(() -> finishRealtimeTurn(turn, "", reason + ": " + e.getMessage()));
-                          }
-                          @Override public void onResponse(Call call, Response response) throws java.io.IOException {
-                              String raw = response.body() == null ? "" : response.body().string();
-                              if(!response.isSuccessful()) {
-                                  runOnUiThread(() -> finishRealtimeTurn(turn, "", "HTTP " + response.code()));
-                                  return;
-                              }
-                              try {
-                                  String text = new JSONObject(raw).optString("text", "").trim();
-                                  runOnUiThread(() -> finishRealtimeTurn(turn, text, text.length() == 0 ? reason : ""));
-                              } catch(Exception e) {
-                                  runOnUiThread(() -> finishRealtimeTurn(turn, "", "tartalék válasz nem értelmezhető"));
-                              }
-                          }
-                      });
-                  } catch(Exception e) {
-                      finishRealtimeTurn(turn, "", reason + ": " + e.getMessage());
-                  }
-              }
-
-              void fallbackPendingRealtimeTurns(String reason) {
-                  ArrayList<RealtimeTurn> pending = new ArrayList<>();
-                  synchronized(realtimeLock) {
-                      LinkedHashSet<RealtimeTurn> unique = new LinkedHashSet<>();
-                      unique.addAll(realtimeAwaitingCommitAck);
-                      unique.addAll(realtimeTurnsByItem.values());
-                      for(RealtimeTurn t : unique) if(t != null && !t.completed) pending.add(t);
-                      realtimeAwaitingCommitAck.clear();
-                      realtimeTurnsByItem.clear();
-                      realtimeOrphanDeltas.clear();
-                      realtimeOrphanFinals.clear();
-                  }
-                  for(RealtimeTurn t : pending) startRealtimeTurnFallback(t, reason);
-              }
-
-              void resetRealtimeTurnState() {
-                  ArrayList<RealtimeTurn> turnsToRemove = new ArrayList<>();
-                  synchronized(realtimeLock) {
-                      LinkedHashSet<RealtimeTurn> unique = new LinkedHashSet<>();
-                      unique.addAll(realtimeAwaitingCommitAck);
-                      unique.addAll(realtimeTurnsByItem.values());
-                      unique.addAll(realtimeCompletedTurns.values());
-                      turnsToRemove.addAll(unique);
-                  }
-                  closeRealtimeTranscriptionSession(false);
-                  for(RealtimeTurn turn : turnsToRemove) removeRealtimePartialBlock(turn);
-                  realtimeCompletedTurns.clear();
-                  realtimeTurnSeq = 0;
-                  realtimeDeliverSeq = 1;
-              }
-
               String delayLabel() {
                   if("low".equals(delayMode)) return "Gyors – rövidebb bevitel";
                   if("medium".equals(delayMode)) return "Átlagos – ajánlott";
@@ -2384,164 +1816,80 @@ jobs:
               }
           
               int selectedAudioSource() {
-                  // V40.7: tolmács módban is ugyanazt a bevált AudioRecord forrást használjuk, mint normál módban.
-                  // Headsetnél nincs második szoftveres előszűrés; alapérték: VOICE_RECOGNITION.
-                  if("recognition".equals(audioSourceMode)) return MediaRecorder.AudioSource.VOICE_RECOGNITION;
-                  if("communication".equals(audioSourceMode)) return MediaRecorder.AudioSource.VOICE_COMMUNICATION;
-                  if("unprocessed".equals(audioSourceMode)) return MediaRecorder.AudioSource.UNPROCESSED;
+                  // V40.19: fix telefonmikrofon. Nincs VOICE_COMMUNICATION, SCO vagy headset bemeneti mód.
                   return MediaRecorder.AudioSource.MIC;
               }
 
               String audioSourceLabel(int source) {
-                  if(source == MediaRecorder.AudioSource.VOICE_RECOGNITION) return "VOICE_RECOGNITION";
-                  if(source == MediaRecorder.AudioSource.VOICE_COMMUNICATION) return "VOICE_COMMUNICATION";
-                  if(source == MediaRecorder.AudioSource.UNPROCESSED) return "UNPROCESSED";
                   if(source == MediaRecorder.AudioSource.MIC) return "MIC";
                   return "source=" + source;
               }
 
               AudioRecord createInitializedAudioRecord(int source, int sampleRate, int requestedBufferBytes) {
-                  return createInitializedAudioRecord(source, sampleRate, requestedBufferBytes, AudioFormat.CHANNEL_IN_MONO);
-              }
-
-              AudioRecord createInitializedAudioRecord(int source, int sampleRate, int requestedBufferBytes, int channelMask) {
                   AudioRecord candidate = null;
                   try {
-                      int min = AudioRecord.getMinBufferSize(
-                          sampleRate,
-                          channelMask,
-                          AudioFormat.ENCODING_PCM_16BIT
-                      );
-                      int channelCount = channelMask == AudioFormat.CHANNEL_IN_STEREO ? 2 : 1;
-                      int safeMin = min > 0 ? min : SILERO_FRAME_BYTES * 8 * channelCount;
-                      int bufferBytes = Math.max(requestedBufferBytes, safeMin);
-                      // Legalább több teljes 32 ms-os keret férjen a rendszerpufferbe.
-                      bufferBytes = Math.max(bufferBytes, SILERO_FRAME_BYTES * 8 * channelCount);
-
+                      int min = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+                      int safeMin = min > 0 ? min : CAPTURE_FRAME_BYTES * 8;
+                      int bufferBytes = Math.max(requestedBufferBytes, Math.max(safeMin, CAPTURE_FRAME_BYTES * 8));
                       AudioFormat format = new AudioFormat.Builder()
                           .setSampleRate(sampleRate)
                           .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                          .setChannelMask(channelMask)
+                          .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
                           .build();
-
                       candidate = new AudioRecord.Builder()
                           .setAudioSource(source)
                           .setAudioFormat(format)
                           .setBufferSizeInBytes(bufferBytes)
                           .build();
-
                       if(candidate.getState() == AudioRecord.STATE_INITIALIZED) {
-                          android.util.Log.i(LOG_TAG, "AudioRecord initialized with " + audioSourceLabel(source) +
-                              ", sampleRate=" + sampleRate + ", channels=" + channelCount + ", buffer=" + bufferBytes);
+                          if(candidate.getSampleRate() != sampleRate || candidate.getChannelCount() != 1) {
+                              android.util.Log.e(LOG_TAG, "AudioRecord format mismatch: requested=" + sampleRate + " Hz mono, actual=" + candidate.getSampleRate() + " Hz channels=" + candidate.getChannelCount());
+                              try { candidate.release(); } catch(Exception ignored) {}
+                              return null;
+                          }
                           return candidate;
                       }
-                      android.util.Log.w(LOG_TAG, "AudioRecord remained uninitialized with " + audioSourceLabel(source));
                   } catch(Exception e) {
-                      android.util.Log.w(LOG_TAG, "AudioRecord creation failed with " + audioSourceLabel(source), e);
+                      android.util.Log.w(LOG_TAG, "Phone microphone AudioRecord creation failed", e);
                   }
-                  if(candidate != null) {
-                      try { candidate.release(); }
-                      catch(Exception e) { android.util.Log.w(LOG_TAG, "Failed AudioRecord candidate release", e); }
-                  }
+                  if(candidate != null) try { candidate.release(); } catch(Exception ignored) {}
                   return null;
               }
 
-              AudioRecord tryPreferredAudioRecord(int source, int sampleRate, int requestedBufferBytes, AudioDeviceInfo preferredDevice) {
-                  return tryPreferredAudioRecord(source, sampleRate, requestedBufferBytes, preferredDevice, AudioFormat.CHANNEL_IN_MONO);
+              List<AudioDeviceInfo> availableInputDevicesCompat() {
+                  ArrayList<AudioDeviceInfo> out = new ArrayList<>();
+                  if(audioManager == null || Build.VERSION.SDK_INT < 23) return out;
+                  try { out.addAll(Arrays.asList(audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS))); }
+                  catch(Exception e) { android.util.Log.w(LOG_TAG, "Input device query failed", e); }
+                  return out;
               }
 
-              AudioRecord tryPreferredAudioRecord(int source, int sampleRate, int requestedBufferBytes,
-                                                   AudioDeviceInfo preferredDevice, int channelMask) {
-                  AudioRecord candidate = createInitializedAudioRecord(source, sampleRate, requestedBufferBytes, channelMask);
-                  if(candidate == null) return null;
-                  if(preferredDevice == null) return candidate;
-                  boolean accepted = false;
-                  try {
-                      accepted = candidate.setPreferredDevice(preferredDevice);
-                      android.util.Log.i(LOG_TAG, "Preferred input " + audioDeviceLabel(preferredDevice) +
-                          " accepted=" + accepted + ", source=" + audioSourceLabel(source) + ", sampleRate=" + sampleRate +
-                          ", channels=" + (channelMask == AudioFormat.CHANNEL_IN_STEREO ? 2 : 1));
-                  } catch(Exception e) {
-                      android.util.Log.w(LOG_TAG, "Preferred input selection failed", e);
-                  }
-                  if(accepted) return candidate;
-                  try { candidate.release(); } catch(Exception ignored) {}
-                  return null;
-              }
-
-              AudioRecord tryAudioRecordCandidates(int sampleRate, int requestedBufferBytes, AudioDeviceInfo preferredDevice) {
-                  LinkedHashSet<Integer> candidates = new LinkedHashSet<>();
-                  candidates.add(selectedAudioSource());
-                  candidates.add(MediaRecorder.AudioSource.VOICE_RECOGNITION);
-                  candidates.add(MediaRecorder.AudioSource.MIC);
-
-                  for(Integer source : candidates) {
-                      if(source == null) continue;
-                      AudioRecord candidate = tryPreferredAudioRecord(source, sampleRate, requestedBufferBytes, preferredDevice);
-                      if(candidate != null) return candidate;
+              AudioDeviceInfo findBuiltInInterpreterMic() {
+                  for(AudioDeviceInfo d : availableInputDevicesCompat()) {
+                      if(d != null && d.isSource() && d.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC) return d;
                   }
                   return null;
-              }
-
-              boolean isBleHeadsetInput(AudioDeviceInfo device) {
-                  return device != null && Build.VERSION.SDK_INT >= 31 && device.getType() == AudioDeviceInfo.TYPE_BLE_HEADSET;
-              }
-
-              boolean deviceAdvertisesSampleRate(AudioDeviceInfo device, int sampleRate) {
-                  if(device == null) return false;
-                  try {
-                      int[] rates = device.getSampleRates();
-                      if(rates == null || rates.length == 0) return true;
-                      for(int rate : rates) if(rate == sampleRate) return true;
-                  } catch(Exception e) {
-                      android.util.Log.w(LOG_TAG, "Input sample-rate query failed", e);
-                      return true;
-                  }
-                  return false;
-              }
-
-              int preferredBleChannelMask(AudioDeviceInfo device) {
-                  if(device == null) return AudioFormat.CHANNEL_IN_MONO;
-                  try {
-                      int[] counts = device.getChannelCounts();
-                      if(counts == null || counts.length == 0) return AudioFormat.CHANNEL_IN_MONO;
-                      boolean stereo = false;
-                      for(int count : counts) if(count >= 2) stereo = true;
-                      // A BLE Audio útmutató szerint támogatott kétcsatornás bemenetnél
-                      // sztereót kérünk, majd a beszédfeldolgozás előtt monóra keverjük.
-                      if(stereo) return AudioFormat.CHANNEL_IN_STEREO;
-                  } catch(Exception e) {
-                      android.util.Log.w(LOG_TAG, "Input channel-count query failed", e);
-                  }
-                  return AudioFormat.CHANNEL_IN_MONO;
               }
 
               AudioRecord makeBestAudioRecord(int sampleRate, int requestedBufferBytes) {
-                  activeCaptureSampleRate = sampleRate;
+                  activeCaptureSampleRate = CAPTURE_SAMPLE_RATE;
                   activeCaptureChannelCount = 1;
-                  directBleCaptureActive = false;
-                  directBleDigitalSilenceMs = 0L;
-                  directBleFallbackRequested = false;
-                  synchronized(captureRateRemainder) { captureRateRemainder.reset(); }
-
-                  // V40.23: kizárólag a telefon beépített mikrofonja engedélyezett.
-                  // Ha az Android nem fogadja el a BUILTIN_MIC eszközt, a felvétel leáll;
-                  // nincs rendszer-alapértelmezett, Bluetooth, vezetékes vagy USB mikrofonos tartalék út.
-                  if(audioManager == null) audioManager = (AudioManager)getSystemService(AUDIO_SERVICE);
-                  AudioDeviceInfo phoneMic = findBuiltInInterpreterMic();
-                  if(phoneMic == null) {
-                      android.util.Log.e(LOG_TAG, "Built-in phone microphone not found; recording refused");
+                  preferredInterpreterInputDevice = findBuiltInInterpreterMic();
+                  if(preferredInterpreterInputDevice == null) {
+                      android.util.Log.e(LOG_TAG, "No built-in phone microphone was reported by AudioManager");
                       return null;
                   }
-                  preferredInterpreterInputDevice = phoneMic;
-                  AudioRecord phoneRecord = tryAudioRecordCandidates(sampleRate, requestedBufferBytes, phoneMic);
-                  if(phoneRecord != null) {
-                      activeCaptureSampleRate = sampleRate;
-                      activeCaptureChannelCount = 1;
-                      return phoneRecord;
+                  AudioRecord candidate = createInitializedAudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, requestedBufferBytes);
+                  if(candidate == null) return null;
+                  boolean accepted = false;
+                  try { accepted = candidate.setPreferredDevice(preferredInterpreterInputDevice); }
+                  catch(Exception e) { android.util.Log.e(LOG_TAG, "Built-in microphone preference failed", e); }
+                  if(!accepted) {
+                      try { candidate.release(); } catch(Exception ignored) {}
+                      android.util.Log.e(LOG_TAG, "Built-in microphone preference was rejected; refusing non-phone input fallback");
+                      return null;
                   }
-                  android.util.Log.e(LOG_TAG, "Built-in phone microphone preference was rejected; headset fallback is forbidden");
-                  return null;
+                  return candidate;
               }
 
               boolean isHeadsetOutputDeviceType(int type) {
@@ -2555,11 +1903,6 @@ jobs:
                       (Build.VERSION.SDK_INT >= 31 && (type == AudioDeviceInfo.TYPE_BLE_HEADSET || type == AudioDeviceInfo.TYPE_BLE_SPEAKER));
               }
 
-              boolean isHeadsetInputDeviceType(int type) {
-                  // V40.23: külső/headset mikrofon semmilyen formában nem engedélyezett.
-                  return false;
-              }
-
               String audioDeviceLabel(AudioDeviceInfo d) {
                   if(d == null) return "rendszer alapértelmezett";
                   CharSequence name = d.getProductName();
@@ -2568,13 +1911,14 @@ jobs:
               }
 
               String audioDeviceTypeShortLabel(int type) {
-                  if(type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) return "BT-SCO";
-                  if(type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) return "BT-A2DP";
-                  if(type == AudioDeviceInfo.TYPE_WIRED_HEADSET) return "vezetékes";
-                  if(type == AudioDeviceInfo.TYPE_USB_HEADSET || type == AudioDeviceInfo.TYPE_USB_DEVICE) return "USB";
-                  if(type == AudioDeviceInfo.TYPE_HEARING_AID) return "hallókészülék";
+                  if(type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) return "BT-SCO kimenet";
+                  if(type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) return "BT-A2DP kimenet";
+                  if(type == AudioDeviceInfo.TYPE_WIRED_HEADSET) return "vezetékes kimenet";
+                  if(type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES) return "vezetékes fejhallgató";
+                  if(type == AudioDeviceInfo.TYPE_USB_HEADSET || type == AudioDeviceInfo.TYPE_USB_DEVICE) return "USB kimenet";
+                  if(type == AudioDeviceInfo.TYPE_HEARING_AID) return "hallókészülék kimenet";
                   if(type == AudioDeviceInfo.TYPE_BUILTIN_MIC) return "telefon mikrofon";
-                  if(Build.VERSION.SDK_INT >= 31 && type == AudioDeviceInfo.TYPE_BLE_HEADSET) return "BLE headset";
+                  if(Build.VERSION.SDK_INT >= 31 && type == AudioDeviceInfo.TYPE_BLE_HEADSET) return "BLE headset kimenet";
                   if(Build.VERSION.SDK_INT >= 31 && type == AudioDeviceInfo.TYPE_BLE_SPEAKER) return "BLE hangszóró";
                   return "típus " + type;
               }
@@ -2595,52 +1939,56 @@ jobs:
               }
 
               void showPlannedInputRoute() {
-                  if(preferredInterpreterInputDevice != null &&
-                     preferredInterpreterInputDevice.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC) {
-                      String suffix = activeCommunicationDeviceLabel == null || activeCommunicationDeviceLabel.isEmpty()
-                          ? "" : " • kimenet: " + activeCommunicationDeviceLabel;
-                      setInputRouteHeader("BEMENET: telefon mikrofon" + suffix);
-                  } else {
-                      setInputRouteHeader("BEMENET: telefon mikrofon keresése…");
+                  String suffix = activeCommunicationDeviceLabel == null || activeCommunicationDeviceLabel.isEmpty()
+                      ? "" : " • kimenet: " + activeCommunicationDeviceLabel;
+                  setInputRouteHeader("BEMENET: telefon beépített mikrofon • 48 kHz" + suffix);
+              }
+
+              boolean routedToBuiltInPhoneMic(AudioRecord recorder) {
+                  if(recorder == null || Build.VERSION.SDK_INT < 23) return false;
+                  try {
+                      AudioDeviceInfo routed = recorder.getRoutedDevice();
+                      return routed != null && routed.isSource() && routed.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC;
+                  } catch(Exception e) {
+                      android.util.Log.e(LOG_TAG, "Actual input route verification failed", e);
+                      return false;
                   }
               }
 
-              void rejectNonPhoneInputRoute(AudioRecord recorder, AudioDeviceInfo routed) {
-                  if(recorder == null || routed == null || routed.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC) return;
-                  android.util.Log.e(LOG_TAG, "Forbidden non-phone microphone route: " + compactAudioDeviceLabel(routed));
-                  setInputRouteHeader("BEMENET: TILTOTT KÜLSŐ MIKROFON");
-                  runOnUiThread(() -> {
-                      if(rec == recorder && streaming) {
-                          state.setText("külső/Bluetooth mikrofon tiltva");
-                          Toast.makeText(this, "A program kizárólag a telefon mikrofonját használhatja.", Toast.LENGTH_LONG).show();
-                          stop(false);
+              boolean waitForBuiltInPhoneMicRoute(AudioRecord recorder, long timeoutMs) {
+                  long deadline = SystemClock.elapsedRealtime() + Math.max(0L, timeoutMs);
+                  while(SystemClock.elapsedRealtime() <= deadline) {
+                      try {
+                          AudioDeviceInfo routed = recorder == null ? null : recorder.getRoutedDevice();
+                          if(routed != null) return routed.isSource() && routed.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC;
+                      } catch(Exception e) {
+                          android.util.Log.e(LOG_TAG, "Phone microphone route wait failed", e);
+                          return false;
                       }
-                  });
+                      SystemClock.sleep(40L);
+                  }
+                  return false;
               }
 
               void refreshActualInputRoute(AudioRecord recorder) {
-                  if(recorder == null) {
-                      setInputRouteHeader("BEMENET: —");
-                      return;
-                  }
+                  if(recorder == null) { setInputRouteHeader("BEMENET: —"); return; }
                   try {
                       AudioDeviceInfo routed = recorder.getRoutedDevice();
-                      if(routed == null) {
+                      if(routed != null && routed.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC) {
+                          String suffix = activeCommunicationDeviceLabel == null || activeCommunicationDeviceLabel.isEmpty()
+                              ? "" : " • kimenet: " + activeCommunicationDeviceLabel;
+                          setInputRouteHeader("BEMENET: " + compactAudioDeviceLabel(routed) + " • 48 kHz" + suffix);
+                      } else if(routed != null) {
+                          setInputRouteHeader("BEMENET TILTVA: " + compactAudioDeviceLabel(routed));
+                          android.util.Log.e(LOG_TAG, "Forbidden non-phone microphone route detected: " + compactAudioDeviceLabel(routed));
+                          if(streaming && rec == recorder) runOnUiThread(() -> stop(false));
+                      } else {
                           setInputRouteHeader("BEMENET: telefon mikrofon ellenőrzése…");
-                          return;
                       }
-                      if(routed.getType() != AudioDeviceInfo.TYPE_BUILTIN_MIC) {
-                          rejectNonPhoneInputRoute(recorder, routed);
-                          return;
-                      }
-                      String suffix = activeCaptureSampleRate == CAPTURE_SAMPLE_RATE
-                          ? " • 48k→16/24k" : " • " + activeCaptureSampleRate + "→16/24k";
-                      if(activeCommunicationDeviceLabel != null && !activeCommunicationDeviceLabel.isEmpty())
-                          suffix += " • kimenet: " + activeCommunicationDeviceLabel;
-                      setInputRouteHeader("BEMENET: telefon mikrofon" + suffix);
                   } catch(Exception e) {
-                      android.util.Log.w(LOG_TAG, "Actual input route query failed", e);
+                      android.util.Log.e(LOG_TAG, "Actual input route query failed", e);
                       setInputRouteHeader("BEMENET: ellenőrzési hiba");
+                      if(streaming && rec == recorder) runOnUiThread(() -> stop(false));
                   }
               }
 
@@ -2655,21 +2003,6 @@ jobs:
                   } catch(Exception e) {
                       android.util.Log.w(LOG_TAG, "AudioRecord route listener registration failed", e);
                   }
-              }
-
-              List<AudioDeviceInfo> availableInputDevicesCompat() {
-                  ArrayList<AudioDeviceInfo> out = new ArrayList<>();
-                  if(audioManager == null || Build.VERSION.SDK_INT < 23) return out;
-                  try { out.addAll(Arrays.asList(audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS))); }
-                  catch(Exception e) { android.util.Log.w(LOG_TAG, "Input device query failed", e); }
-                  return out;
-              }
-
-              AudioDeviceInfo findBuiltInInterpreterMic() {
-                  for(AudioDeviceInfo d : availableInputDevicesCompat()) {
-                      if(d != null && d.isSource() && d.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC) return d;
-                  }
-                  return null;
               }
 
               List<AudioDeviceInfo> availableOutputDevicesCompat() {
@@ -2697,97 +2030,39 @@ jobs:
                   int bestPriority = -1;
                   for(AudioDeviceInfo d : availableOutputDevicesCompat()) {
                       int priority = interpreterHeadsetOutputPriority(d);
-                      if(priority > bestPriority) {
-                          best = d;
-                          bestPriority = priority;
-                      }
+                      if(priority > bestPriority) { best = d; bestPriority = priority; }
                   }
                   return best;
               }
 
-              int headsetInputPriority(AudioDeviceInfo d) {
-                  return -1;
-              }
-
-              boolean isInputDeviceIdPresent(int deviceId) {
-                  if(deviceId < 0) return false;
-                  for(AudioDeviceInfo d : availableInputDevicesCompat()) {
-                      if(d != null && d.getId() == deviceId) return true;
-                  }
-                  return false;
-              }
-
-              AudioDeviceInfo findPreferredInterpreterInputDevice() {
-                  // V40.23: headset/külső bemenet keresése végleg tiltva.
-                  return null;
-              }
-
-              List<AudioDeviceInfo> availableCommunicationDevicesCompat() {
-                  ArrayList<AudioDeviceInfo> out = new ArrayList<>();
-                  if(audioManager == null) return out;
-                  try {
-                      if(Build.VERSION.SDK_INT >= 31) out.addAll(audioManager.getAvailableCommunicationDevices());
-                      else out.addAll(Arrays.asList(audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)));
-                  } catch(Exception e) {
-                      android.util.Log.w(LOG_TAG, "Communication device query failed", e);
-                  }
-                  return out;
-              }
-
-              AudioDeviceInfo findCommunicationHeadset() {
-                  // Kimeneti eszköz lehet headset, kommunikációs bemeneti út nem.
-                  return null;
-              }
-
-              boolean isHeadsetInterpreterRoute() { return activeInterpreterRoute != null && activeInterpreterRoute.startsWith("headset"); }
-              boolean isSpeakerInterpreterRoute() { return activeInterpreterRoute != null && activeInterpreterRoute.startsWith("speaker"); }
+              boolean isHeadsetInterpreterRoute() { return "headset_output_phone_mic".equals(activeInterpreterRoute); }
+              boolean isSpeakerInterpreterRoute() { return "speaker_half_duplex".equals(activeInterpreterRoute); }
               boolean isHalfDuplexSpeakerRoute() { return "speaker_half_duplex".equals(activeInterpreterRoute); }
 
               void clearForcedCommunicationRoute() {
                   if(audioManager == null) audioManager = (AudioManager)getSystemService(AUDIO_SERVICE);
                   activeCommunicationDeviceId = -1;
+                  interpreterCommunicationFallbackActive = false;
                   if(audioManager == null) return;
-                  try {
-                      if(Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice();
-                  } catch(Exception e) {
-                      android.util.Log.w(LOG_TAG, "Communication device clear failed", e);
-                  }
+                  try { if(Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice(); } catch(Exception ignored) {}
                   try { audioManager.stopBluetoothSco(); } catch(Exception ignored) {}
                   try { audioManager.setBluetoothScoOn(false); } catch(Exception ignored) {}
                   try { audioManager.setSpeakerphoneOn(false); } catch(Exception ignored) {}
-                  try { audioManager.setMode(AudioManager.MODE_NORMAL); }
-                  catch(Exception e) { android.util.Log.w(LOG_TAG, "MODE_NORMAL restore failed", e); }
-              }
-
-              boolean waitForCommunicationDeviceActivation(long timeoutMs) {
-                  return false;
-              }
-
-              boolean activateInterpreterCommunicationFallback() {
-                  // V40.23: MODE_IN_COMMUNICATION, SCO és headset mikrofon tiltva.
-                  clearForcedCommunicationRoute();
-                  interpreterCommunicationFallbackActive = false;
-                  activeCommunicationDeviceId = -1;
-                  return false;
+                  try { audioManager.setMode(AudioManager.MODE_NORMAL); } catch(Exception ignored) {}
               }
 
               void configureInterpreterAudioRoute(boolean announce) {
-                  if(!interpreterMode) {
-                      restoreNormalAudioRoute();
-                      return;
-                  }
+                  if(!interpreterMode) { restoreNormalAudioRoute(); return; }
                   if(audioManager == null) audioManager = (AudioManager)getSystemService(AUDIO_SERVICE);
                   interpreterRouteReconfiguring = true;
                   try {
-                      // Minden kommunikációs/SCO út lezárása. A TTS médiahangként a rendszer
-                      // aktuális kimenetén (pl. Buds/A2DP) szól, a bemenet mindig BUILTIN_MIC.
+                      // Semmilyen headset/BT kommunikációs eszközt nem állítunk be bemenetként.
+                      // A média-TTS-t az Android a csatlakoztatott kimenetre irányíthatja, a rögzítés ettől független.
                       clearForcedCommunicationRoute();
-                      AudioDeviceInfo headsetOutput = findPreferredInterpreterOutputDevice();
-                      AudioDeviceInfo phoneMic = findBuiltInInterpreterMic();
-                      preferredInterpreterInputDevice = phoneMic;
+                      preferredInterpreterInputDevice = findBuiltInInterpreterMic();
                       interpreterCommunicationFallbackActive = false;
-                      activeCommunicationDeviceId = -1;
-
+                      rejectedInterpreterInputDeviceId = -1;
+                      AudioDeviceInfo headsetOutput = findPreferredInterpreterOutputDevice();
                       if(headsetOutput != null) {
                           activeInterpreterRoute = "headset_output_phone_mic";
                           activeCommunicationDeviceLabel = audioDeviceLabel(headsetOutput);
@@ -2795,22 +2070,11 @@ jobs:
                           activeInterpreterRoute = "speaker_half_duplex";
                           activeCommunicationDeviceLabel = "telefon hangszóró";
                       }
-                      if(phoneMic == null) activeCommunicationDeviceLabel += " • telefon mikrofon nem található";
-
                       applyTtsAudioAttributes();
                       showPlannedInputRoute();
                       refreshInterpreterFloatingButton();
                       refreshOpenInterpreterMenuButton();
                       if(announce) Toast.makeText(this, interpreterLabel(), Toast.LENGTH_SHORT).show();
-                  } catch(Exception e) {
-                      android.util.Log.e(LOG_TAG, "Interpreter output route configuration failed", e);
-                      clearForcedCommunicationRoute();
-                      preferredInterpreterInputDevice = findBuiltInInterpreterMic();
-                      interpreterCommunicationFallbackActive = false;
-                      activeCommunicationDeviceId = -1;
-                      activeInterpreterRoute = "speaker_half_duplex";
-                      activeCommunicationDeviceLabel = "telefon hangszóró";
-                      applyTtsAudioAttributes();
                   } finally {
                       interpreterRouteReconfiguring = false;
                   }
@@ -2818,7 +2082,7 @@ jobs:
 
               void restoreNormalAudioRoute() {
                   clearForcedCommunicationRoute();
-                  preferredInterpreterInputDevice = null;
+                  preferredInterpreterInputDevice = findBuiltInInterpreterMic();
                   interpreterCommunicationFallbackActive = false;
                   activeCommunicationDeviceId = -1;
                   activeInterpreterRoute = "off";
@@ -2839,8 +2103,7 @@ jobs:
                       voiceSendActive = false;
                       clearPendingSpeechAudio();
                       clearPreRollAudio();
-                      takeCapturedRemainder();
-                      fallbackSpeechHangoverMs = 0;
+                      takeCapturedSttRemainder24k();
                   }
               }
 
@@ -2875,14 +2138,8 @@ jobs:
                       if(!interpreterMode || interpreterRouteReconfiguring || finalizingStop) return;
                       boolean headsetOutputNow = findPreferredInterpreterOutputDevice() != null;
                       boolean headsetOutputWas = "headset_output_phone_mic".equals(activeInterpreterRoute);
-                      AudioDeviceInfo phoneMicNow = findBuiltInInterpreterMic();
-                      boolean phoneMicWas = preferredInterpreterInputDevice != null &&
-                          preferredInterpreterInputDevice.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC;
-                      if(headsetOutputNow == headsetOutputWas && (phoneMicNow != null) == phoneMicWas) return;
-                      boolean wasStreaming = streaming;
-                      if(wasStreaming) stop(false);
+                      if(headsetOutputNow == headsetOutputWas) return;
                       configureInterpreterAudioRoute(false);
-                      if(wasStreaming) new Handler(Looper.getMainLooper()).postDelayed(() -> start(true), 500L);
                       updateButtons();
                   }, 850L);
               }
@@ -2899,20 +2156,11 @@ jobs:
                   clearSpeechAudioWindow();
                   closeExternalVad();
                   resetCapturedFrameState();
-                  synchronized(captureRateRemainder) { captureRateRemainder.reset(); }
                   activeCaptureSampleRate = CAPTURE_SAMPLE_RATE;
                   activeCaptureChannelCount = 1;
-                  directBleCaptureActive = false;
-                  directBleDigitalSilenceMs = 0L;
-                  directBleFallbackRequested = false;
                   resetSttOrderingForNewSession();
-                  resetRealtimeTurnState();
                   try { if(rec != null) { rec.stop(); rec.release(); } } catch(Exception e) { android.util.Log.w(LOG_TAG, "AudioRecord reset failed", e); }
                   rec = null;
-              }
-
-              void monitorDirectBleSignal(byte[] pcm16k, int len) {
-                  // V40.23: nincs Bluetooth/headset bemeneti út.
               }
 
               void markMicrophoneUiReady(AudioRecord activeRec) {
@@ -2921,7 +2169,7 @@ jobs:
                   new Handler(Looper.getMainLooper()).postDelayed(() -> {
                       if(!microphoneStarting || !microphonePcmReady || !streaming || rec != activeRec) return;
                       microphoneStarting = false;
-                      String base = vadFallbackActive ? "mikrofon aktív – VAD tartalék mód" : "mikrofon aktív";
+                      String base = "mikrofon aktív";
                       if(interpreterMode) base += " – " + interpreterRuntimeShortLabel();
                       state.setText(base);
                       scheduleMicLifeSignal();
@@ -2932,7 +2180,7 @@ jobs:
               void audioLoop() {
                   int sr = CAPTURE_SAMPLE_RATE;
                   int min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-                  int bs = Math.max(min, sr * 2 * SILERO_FRAME_MS / 1000 * 6);
+                  int bs = Math.max(min, CAPTURE_FRAME_BYTES * 8);
 
                   rec = makeBestAudioRecord(sr, bs);
                   if(rec == null) {
@@ -2947,16 +2195,6 @@ jobs:
                       ensureExternalVadReady();
                       rec.startRecording();
                       if(rec.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) throw new IllegalStateException("AudioRecord did not enter recording state");
-                      // Egyetlen hangminta sem kerülhet feldolgozásra, amíg nem bizonyított,
-                      // hogy az Android ténylegesen a telefon beépített mikrofonjára irányított.
-                      AudioDeviceInfo verifiedRoute = null;
-                      for(int routeTry=0; routeTry<15; routeTry++) {
-                          verifiedRoute = rec.getRoutedDevice();
-                          if(verifiedRoute != null) break;
-                          SystemClock.sleep(40L);
-                      }
-                      if(verifiedRoute == null || verifiedRoute.getType() != AudioDeviceInfo.TYPE_BUILTIN_MIC)
-                          throw new IllegalStateException("Forbidden microphone route: " + compactAudioDeviceLabel(verifiedRoute));
                   } catch(Exception e) {
                       android.util.Log.e(LOG_TAG, "Microphone start failed", e);
                       connected = false;
@@ -2986,9 +2224,17 @@ jobs:
                   });
 
                   audioExec.submit(() -> {
-                      int captureSamplesPerFrame = Math.max(1, activeCaptureSampleRate * SILERO_FRAME_MS / 1000);
-                      int captureFrameBytes = captureSamplesPerFrame * Math.max(1, activeCaptureChannelCount) * 2;
-                      byte[] buf = new byte[captureFrameBytes];
+                      byte[] buf = new byte[CAPTURE_FRAME_BYTES * 4];
+                      if(!waitForBuiltInPhoneMicRoute(activeRec, 1200L)) {
+                          android.util.Log.e(LOG_TAG, "Recording aborted: routed input is not the built-in phone microphone");
+                          runOnUiThread(() -> {
+                              if(rec == activeRec) {
+                                  state.setText("tiltott mikrofonút – csak telefon mikrofon engedélyezett");
+                                  stop(false);
+                              }
+                          });
+                          return;
+                      }
                       clearPreRollAudio();
                       clearPendingSpeechAudio();
                       clearSpeechAudioWindow();
@@ -3005,21 +2251,17 @@ jobs:
                           if(read > 0) {
                               if(!streaming && !finalizingStop) break;
                               try {
-                                  ArrayList<PcmFramePair> frames = normalizeCapturedFrames(buf, read);
-                                  if(frames.isEmpty()) continue;
                                   if(!microphonePcmReady) {
                                       microphonePcmReady = true;
                                       markMicrophoneUiReady(activeRec);
                                   }
-                                  for(PcmFramePair frame : frames) {
-                                      monitorDirectBleSignal(frame.pcm16k, frame.pcm16k.length);
-                                      synchronized(audioProcessingLock) {
-                                          processVadFrame(frame);
-                                      }
+                                  synchronized(audioProcessingLock) {
+                                      processCapturedAudio(buf, read);
                                   }
                               } catch(Exception e) {
-                                  android.util.Log.e(LOG_TAG, "Audio processing failed", e);
-                                  activateVadFallback("Audio processing failure", e);
+                                  android.util.Log.e(LOG_TAG, "Silero/audio processing failed", e);
+                                  runOnUiThread(() -> state.setText("Silero VAD / hangfeldolgozási hiba"));
+                                  break;
                               }
                           } else if(read < 0) {
                               final int code = read;
@@ -3105,7 +2347,6 @@ jobs:
                   // Azonnali belső leállításnál a régi HTTP válaszok nem kerülhetnek
                   // egy később induló mikrofonmenet blokkjaiba.
                   resetSttOrderingForNewSession();
-                  closeRealtimeTranscriptionSession(false);
                   finishStopCleanup();
               }
 
@@ -3114,9 +2355,11 @@ jobs:
                   catch(Exception e) { android.util.Log.w(LOG_TAG, "AudioRecord delayed release failed", e); }
                   if(stopSession != sttSessionId || !finalizingStop) return;
                   synchronized(audioProcessingLock) {
-                      if(!voiceSendActive && pendingSpeechAudioDurationMs() >= MIN_TRUE_SPEECH_AUDIO_MS) {
-                          for(PcmFramePair pr : takePreRollAudio()) sendAudioFrame(pr);
-                          for(PcmFramePair ps : takePendingSpeechAudio()) sendAudioFrame(ps);
+                      byte[] remainder = takeCapturedSttRemainder24k();
+                      if(voiceSendActive && remainder.length > 0) appendSpeechAudioChunk(remainder);
+                      if(!voiceSendActive && pendingSpeechAudioDurationMs() > 0) {
+                          for(byte[] pr : takePreRollAudio()) appendSpeechAudioChunk(pr);
+                          for(byte[] ps : takePendingSpeechAudio()) appendSpeechAudioChunk(ps);
                       }
                       voiceSendActive = false;
                       clearPendingSpeechAudio();
@@ -3149,11 +2392,7 @@ jobs:
                   clearSpeechAudioWindow();
                   resetCapturedFrameState();
                   closeExternalVad();
-                  closeRealtimeTranscriptionSession(false);
                   speechTranscriptBuffer = "";
-                  activeSpeechSentenceBlock = null;
-                  pendingSpeechSourceRevision = 0;
-                  pendingSpeechSourceText = "";
                   firstSpeechHeardAt = 0L;
                   speechBufferStartedAt = 0L;
                   speechIdleFlushToken++;
@@ -3161,9 +2400,6 @@ jobs:
                   firstSpeechBlockReleased = false;
                   speechTranslateMode = false;
                   pendingSpeechBlockId = -1;
-                  pendingSpeechSourceRevision = 0;
-                  pendingSpeechSourceText = "";
-                  activeSpeechSentenceBlock = null;
                   speechTranslateQueue.clear();
                   manualResponseMode = false;
                   clipboardResponseMode = false;
@@ -3362,81 +2598,53 @@ jobs:
                   }
               }
 
-              String normalizeIncomingSpeechPiece(String raw) {
-                  if(raw == null) return "";
-                  String b = cleanTranscriptForSelectedPair(raw);
-                  b = collapseAdjacentRepeatedPhrase(b);
-                  b = finalizeSpeechBlockText(b);
-                  b = applyTinyHungarianTermFixes(b);
-                  b = trimRecentSpeechBlockOverlap(b);
-                  return b == null ? "" : b.trim().replaceAll("\\s+", " ");
-              }
-
-              void queueSpeechBlock(TextBlock b) {
-                  if(b == null || b.translationQueued) return;
-                  int id = textBlocks.indexOf(b);
-                  if(id < 0) return;
-                  b.translationQueued = true;
-                  speechTranslateQueue.add(id);
-                  processNextSpeechTranslation();
-              }
-
-              void updateActiveSpeechSentence(String aggregate, boolean boundaryHint) {
-                  if(aggregate == null || aggregate.trim().isEmpty()) return;
-                  boolean sourceGuessTop = sourceIsTopBySelectedPair(aggregate, topActive);
-                  TextBlock b = activeSpeechSentenceBlock;
-                  if(b == null || !textBlocks.contains(b) || b.sentenceComplete) {
-                      int id = addSourceOnlyBlock(sourceGuessTop, aggregate);
-                      if(id < 0 || id >= textBlocks.size()) return;
-                      b = textBlocks.get(id);
-                      activeSpeechSentenceBlock = b;
-                  } else {
-                      boolean oldSourceTop = b.sourceTop;
-                      String oldTarget = oldSourceTop ? b.bottomText : b.topText;
-                      b.sourceTop = sourceGuessTop;
-                      b.pendingSourceText = aggregate.trim();
-                      String visibleSource = userVisibleSpeechTextOrEmpty(b.pendingSourceText);
-                      if(sourceGuessTop) {
-                          b.topText = visibleSource;
-                          b.bottomText = oldSourceTop == sourceGuessTop ? oldTarget : "";
-                      } else {
-                          b.bottomText = visibleSource;
-                          b.topText = oldSourceTop == sourceGuessTop ? oldTarget : "";
-                      }
-                      renderBlocksKeepView();
-                  }
-                  b.sentenceComplete = false;
-                  b.finalReady = false;
-                  b.sentenceBoundaryHint = b.sentenceBoundaryHint || boundaryHint;
-                  b.sourceRevision++;
-                  firstSpeechBlockReleased = true;
-                  lastSpeechBlockReleasedAt = System.currentTimeMillis();
-                  queueSpeechBlock(b);
-              }
-
-              void handleTranscriptCompleted(String transcript, boolean sentenceBoundaryHint) {
-                  String piece = normalizeIncomingSpeechPiece(transcript);
-                  if(piece.length() == 0 || isAlreadyReleasedTranscript(piece)) {
+              void handleTranscriptCompleted(String transcript, boolean finalFlush) {
+                  if(transcript == null || transcript.trim().length() == 0) {
                       speechIdleFlushToken++;
                       return;
                   }
 
-                  if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = System.currentTimeMillis();
-                  if(speechBufferStartedAt == 0L) speechBufferStartedAt = System.currentTimeMillis();
-                  speechTranscriptBuffer = appendSpeechPart(speechTranscriptBuffer, piece);
-                  updateActiveSpeechSentence(speechTranscriptBuffer, sentenceBoundaryHint);
+                  if(isAlreadyReleasedTranscript(transcript)) {
+                      speechIdleFlushToken++;
+                      return;
+                  }
+
+                  if(!finalFlush) {
+                      // V343: egy teljes 8 másodperces audioablak STT-válasza pontosan egy kész blokk.
+                      // Nem kerül vissza a második időalapú speechTranscriptBuffer-darabolásba,
+                      // ezért ugyanaz az STT-válasz nem tud két-három blokkot egyszerre kiengedni.
+                      String b = normalizeAndDeduplicateSpeechBlock(transcript);
+                      if(b.length() > 0) {
+                          boolean sourceGuessTop = sourceIsTopBySelectedPair(b, topActive);
+                          int id = addSourceOnlyBlock(sourceGuessTop, b);
+                          if(id >= 0) {
+                              firstSpeechBlockReleased = true;
+                              speechTranslateQueue.add(id);
+                              lastSpeechBlockReleasedAt = System.currentTimeMillis();
+                              processNextSpeechTranslation();
+                          }
+                      }
+                      speechTranscriptBuffer = "";
+                      firstSpeechHeardAt = 0L;
+                      speechBufferStartedAt = 0L;
+                      speechIdleFlushToken++;
+                      return;
+                  }
+
+                  // A beszéd végi, 8 másodpercnél rövidebb maradék továbbra is a meglévő
+                  // biztonságos lezárási úton kerül kiadásra.
+                  speechTranscriptBuffer = transcript;
+                  int released = flushReadyTranscriptBlocks(true);
+                  if(released > 0) lastSpeechBlockReleasedAt = System.currentTimeMillis();
                   speechIdleFlushToken++;
               }
-
+          
               void resetSpeechRecognitionTimingState() {
                   // V318: beszédfelismerési időzítés váltásakor nem várunk és nem építünk új kaput.
                   // Csak az élő, még le nem zárt transcript állapotot nullázzuk, hogy a régi mód
                   // puffer/időzítője ne zárhasson rá az új mód szabályaira. A már kiadott blokkok
                   // nem tudja újra behozni ugyanazt a mondatot.
                   speechTranscriptBuffer = "";
-                  activeSpeechSentenceBlock = null;
-                  pendingSpeechSourceRevision = 0;
-                  pendingSpeechSourceText = "";
                   firstSpeechHeardAt = 0L;
                   speechBufferStartedAt = 0L;
                   speechIdleFlushToken++;
@@ -4131,9 +3339,6 @@ jobs:
                   b.speechSeq = ++speechSourceBlockSeq;
                   b.sourceTop = sourceIsTop;
                   b.translatedOk = false;
-                  b.sentenceComplete = false;
-                  b.sentenceBoundaryHint = false;
-                  b.sourceRevision = 0;
                   b.pendingSourceText = original == null ? "" : original.trim();
                   // V40.3: a nyers STT azonnal látható; az AI-válasz után ugyanennek a blokknak
                   // a forrásoldalát a finoman javított clean_source váltja fel.
@@ -4219,7 +3424,6 @@ jobs:
                   int id = idObj.intValue();
                   if(id < 0 || id >= textBlocks.size()) { processNextSpeechTranslation(); return; }
                   TextBlock b = textBlocks.get(id);
-                  b.translationQueued = false;
                   boolean sourceIsTop = b.sourceTop;
                   String src = b.pendingSourceText != null && b.pendingSourceText.trim().length() > 0
                       ? b.pendingSourceText
@@ -4228,8 +3432,6 @@ jobs:
           
                   try {
                       pendingSpeechBlockId = id;
-                      pendingSpeechSourceRevision = b.sourceRevision;
-                      pendingSpeechSourceText = src.trim();
                       speechTranslateMode = true;
                       responseInProgress = true;
                       final int requestSession = sttSessionId;
@@ -4244,8 +3446,7 @@ jobs:
                           "SELECTED_TOP_LANG: " + topCode + "\n" +
                           "SELECTED_BOTTOM_LANG: " + bottomCode + "\n" +
                           speechPreviousContextHint() +
-                          "CURRENT_BOUNDARY_HINT: " + (b.sentenceBoundaryHint ? "SPEECH_PAUSE" : "TIMED_PREVIEW") + "\n" +
-                          "RAW_SPEECH_TEXT (the accumulated current utterance to clean and translate):\n" + src.trim()));
+                          "RAW_SPEECH_TEXT (the only text to clean and translate):\n" + src.trim()));
                       root.put("messages", messages);
 
                       // V341: strict Structured Outputs. A forrásnyelv csak a kiválasztott két kód egyike lehet.
@@ -4257,11 +3458,9 @@ jobs:
                           .put("description", "Corrected transcription entirely in source_lang. No ordinary words from a third language and no target-language mixture; only genuine proper names may retain their real spelling."));
                       properties.put("translation", new JSONObject().put("type", "string")
                           .put("description", "Translation entirely in the other selected language, without source-language or third-language mixture except genuine proper names."));
-                      properties.put("sentence_complete", new JSONObject().put("type", "boolean")
-                          .put("description", "True only when the accumulated utterance is linguistically complete and safe to speak aloud. A pause alone is not enough."));
                       JSONObject schema = new JSONObject()
                           .put("type", "object").put("properties", properties)
-                          .put("required", new JSONArray().put("source_lang").put("clean_source").put("translation").put("sentence_complete"))
+                          .put("required", new JSONArray().put("source_lang").put("clean_source").put("translation"))
                           .put("additionalProperties", false);
                       JSONObject jsonSchema = new JSONObject()
                           .put("name", "speech_clean_and_translate").put("strict", true).put("schema", schema);
@@ -4319,8 +3518,6 @@ jobs:
                   responseInProgress = false;
                   speechTranslateMode = false;
                   pendingSpeechBlockId = -1;
-                  pendingSpeechSourceRevision = 0;
-                  pendingSpeechSourceText = "";
                   pendingOutput = "";
 
                   if(id >= 0 && id < textBlocks.size()) {
@@ -4335,125 +3532,92 @@ jobs:
                   else maybeFinishStop();
               }
           
-              boolean rawTextEndsWithHardSentenceEnd(String text) {
-                  if(text == null) return false;
-                  String t = text.trim();
-                  if(t.isEmpty()) return false;
-                  char c = t.charAt(t.length() - 1);
-                  return c == '.' || c == '!' || c == '?' || c == '…';
-              }
+              void applySpeechTranslation(String out) {
+                  int id = pendingSpeechBlockId;
+                  String speakText = null;
+                  String speakLang = null;
+                  if(id >= 0 && id < textBlocks.size()) {
+                      TextBlock b = textBlocks.get(id);
+                      String sourceLang = "";
+                      String original = b.pendingSourceText == null ? "" : b.pendingSourceText.trim();
+                      String translation = "";
+                      boolean sourceIsTop = b.sourceTop;
 
-              String displaySpeechFragment(String text, boolean sentenceComplete) {
-                  String t = text == null ? "" : text.trim();
-                  if(t.length() == 0 || sentenceComplete || rawTextEndsWithHardSentenceEnd(t)) return t;
-                  return t + "…";
-              }
+                      try {
+                          JSONObject structured = new JSONObject(out);
+                          sourceLang = structured.optString("source_lang", "");
+                          original = structured.optString("clean_source", "");
+                          translation = structured.optString("translation", "");
+                      } catch(Exception parseError) {
+                          // Strict válasznál nincs találgatás és nincs új AI-kör.
+                          retrySpeechBlockOrRender(id);
+                          return;
+                      }
 
-              void finishCurrentSpeechRequestAndContinue() {
+                      String normalizedSource = normalizeAiSourceLangCode(sourceLang);
+                      String topCode = code(topLang).toUpperCase(Locale.ROOT);
+                      String bottomCode = code(bottomLang).toUpperCase(Locale.ROOT);
+                      if(!normalizedSource.equals(topCode) && !normalizedSource.equals(bottomCode)) {
+                          retrySpeechBlockOrRender(id);
+                          return;
+                      }
+                      sourceIsTop = normalizedSource.equals(topCode);
+
+                      original = cleanTranscriptForSelectedPair(original);
+                      translation = cleanTranscriptForSelectedPair(cleanOneBlockTranslation(translation));
+          
+                      if(looksLikeInternalLeak(original) || looksLikeInternalLeak(translation)) {
+                          retrySpeechBlockOrRender(id);
+                          return;
+                      }
+          
+                      if(original.length() == 0 || translation.length() == 0) {
+                          retrySpeechBlockOrRender(id);
+                          return;
+                      }
+          
+                      String no = normalizeSpeechBlockHash(original);
+                      String nt = normalizeSpeechBlockHash(translation);
+                      if(no.length() >= 12 && no.equals(nt)) {
+                          retrySpeechBlockOrRender(id);
+                          return;
+                      }
+          
+                      b.sourceTop = sourceIsTop;
+                      b.pendingSourceText = "";
+                      // 2026-07-09: csak az aktuális blokk saját ideiglenes maradványát takarítjuk.
+                      // Nem nyúlunk más blokkokhoz és nem törlünk teljes ablakot. Előbb ürítjük ennek
+                      // a TextBlocknak mindkét oldalát, majd az AI által eldöntött SOURCE_LANG szerint
+                      // azonnal visszaírjuk az eredetit és a fordítást a helyes két oldalra.
+                      b.topText = "";
+                      b.bottomText = "";
+                      if(sourceIsTop) {
+                          b.topText = original;
+                          b.bottomText = translation;
+                          speakText = translation;
+                          speakLang = bottomLang;
+                      } else {
+                          b.bottomText = original;
+                          b.topText = translation;
+                          speakText = translation;
+                          speakLang = topLang;
+                      }
+                      b.translatedOk = true;
+                      b.retryCount = 0;
+                      lastSureSpeechOriginal = original;
+                      lastSureSpeechTranslation = translation;
+                      setDetectedSourceSide(sourceIsTop);
+                      renderBlocksKeepView();
+                      if(speakText != null && speakLang != null) {
+                          markFinalTranslationReadyAndSpeak(b, speakText, speakLang);
+                      }
+                  }
                   pendingSpeechBlockId = -1;
-                  pendingSpeechSourceRevision = 0;
-                  pendingSpeechSourceText = "";
                   speechTranslateMode = false;
                   if(!speechTranslateQueue.isEmpty()) processNextSpeechTranslation();
                   else maybeFinishStop();
               }
-
-              void applySpeechTranslation(String out) {
-                  int id = pendingSpeechBlockId;
-                  if(id < 0 || id >= textBlocks.size()) {
-                      finishCurrentSpeechRequestAndContinue();
-                      return;
-                  }
-                  TextBlock b = textBlocks.get(id);
-
-                  // Ha az AI-válasz közben új STT-rész érkezett, a régi válasz nem írhatja felül az új mondatot.
-                  if(b.sourceRevision != pendingSpeechSourceRevision ||
-                     !normSpeech(b.pendingSourceText).equals(normSpeech(pendingSpeechSourceText))) {
-                      finishCurrentSpeechRequestAndContinue();
-                      return;
-                  }
-
-                  String sourceLang;
-                  String original;
-                  String translation;
-                  boolean sentenceComplete;
-                  try {
-                      JSONObject structured = new JSONObject(out);
-                      sourceLang = structured.optString("source_lang", "");
-                      original = structured.optString("clean_source", "");
-                      translation = structured.optString("translation", "");
-                      sentenceComplete = structured.optBoolean("sentence_complete", false);
-                  } catch(Exception parseError) {
-                      retrySpeechBlockOrRender(id);
-                      return;
-                  }
-
-                  String normalizedSource = normalizeAiSourceLangCode(sourceLang);
-                  String topCode = code(topLang).toUpperCase(Locale.ROOT);
-                  String bottomCode = code(bottomLang).toUpperCase(Locale.ROOT);
-                  if(!normalizedSource.equals(topCode) && !normalizedSource.equals(bottomCode)) {
-                      retrySpeechBlockOrRender(id);
-                      return;
-                  }
-                  boolean sourceIsTop = normalizedSource.equals(topCode);
-                  original = cleanTranscriptForSelectedPair(original);
-                  translation = cleanTranscriptForSelectedPair(cleanOneBlockTranslation(translation));
-
-                  if(looksLikeInternalLeak(original) || looksLikeInternalLeak(translation) ||
-                     original.length() == 0 || translation.length() == 0) {
-                      retrySpeechBlockOrRender(id);
-                      return;
-                  }
-                  String no = normalizeSpeechBlockHash(original);
-                  String nt = normalizeSpeechBlockHash(translation);
-                  if(no.length() >= 12 && no.equals(nt)) {
-                      retrySpeechBlockOrRender(id);
-                      return;
-                  }
-
-                  // A 4 mp-es technikai ablak önmagában soha nem mondatvég. Szünetnél is az AI
-                  // nyelvtani döntése kell; félbemaradt kötőszavas rész nem olvasható fel.
-                  if(looksLikeDanglingSpeechFragment(original)) sentenceComplete = false;
-                  if(!b.sentenceBoundaryHint && !rawTextEndsWithHardSentenceEnd(pendingSpeechSourceText)) sentenceComplete = false;
-
-                  b.sourceTop = sourceIsTop;
-                  b.topText = "";
-                  b.bottomText = "";
-                  String displayOriginal = displaySpeechFragment(original, sentenceComplete);
-                  String displayTranslation = displaySpeechFragment(translation, sentenceComplete);
-                  if(sourceIsTop) {
-                      b.topText = displayOriginal;
-                      b.bottomText = displayTranslation;
-                  } else {
-                      b.bottomText = displayOriginal;
-                      b.topText = displayTranslation;
-                  }
-                  b.translatedOk = true;
-                  b.retryCount = 0;
-                  b.sentenceComplete = sentenceComplete;
-                  b.sentenceBoundaryHint = false;
-
-                  if(sentenceComplete) {
-                      b.pendingSourceText = "";
-                      rememberSpeechBlockHash(normalizeSpeechBlockHash(original));
-                      lastSureSpeechOriginal = original;
-                      lastSureSpeechTranslation = translation;
-                      speechTranscriptBuffer = "";
-                      activeSpeechSentenceBlock = null;
-                  } else {
-                      // A teljes nyers mondat marad a pufferben; a következő STT-rész ehhez fűződik.
-                      b.pendingSourceText = pendingSpeechSourceText;
-                      b.finalReady = false;
-                  }
-
-                  setDetectedSourceSide(sourceIsTop);
-                  renderBlocksKeepView();
-                  if(sentenceComplete) {
-                      markFinalTranslationReadyAndSpeak(b, translation, sourceIsTop ? bottomLang : topLang);
-                  }
-                  finishCurrentSpeechRequestAndContinue();
-              }
-
+          
               void routeAiOutput(String out) {
                   if(clipboardResponseMode && clipboardDialog != null && clipboardDialog.isShowing()) {
                       clipboardResponseMode = false;
@@ -5399,8 +4563,8 @@ jobs:
               }
           
               String interpreterRuntimeShortLabel() {
-                  if("headset_output_phone_mic".equals(activeInterpreterRoute)) return "headset kimenet – telefon mikrofon";
-                                    if("speaker_half_duplex".equals(activeInterpreterRoute)) return "hangszóró – váltott";
+                  if("headset_output_phone_mic".equals(activeInterpreterRoute)) return "headset csak kimenet / telefon mikrofon";
+                  if("speaker_half_duplex".equals(activeInterpreterRoute)) return "hangszóró – váltott";
                   return "automatikus tolmács";
               }
 
@@ -5436,7 +4600,6 @@ jobs:
                   if(wasStreaming) stop(false);
                   interpreterMode = true;
                   interpreterAudioMode = "auto";
-                  mode = "precise";
                   interpreterSpeechOutputEnabled = true;
                   lastInterpreterAudioMode = "auto";
                   rejectedInterpreterInputDeviceId = -1;
@@ -5674,7 +4837,7 @@ jobs:
           
               void chooseModel() { chooseFrom("AI modell", models, model, v -> { model = v; save(); restartIfNeeded(); }); }
               void chooseProfile() { chooseFrom("Beszélgetési profil", profiles, profile, v -> { profile = v; save(); refreshOpenProfileMenuButton(); }); }
-              void chooseMode() { chooseFrom("Fordítás stílusa", modes, mode, v -> { mode = interpreterMode ? "precise" : v; save(); }); }
+              void chooseMode() { chooseFrom("Fordítás stílusa", modes, mode, v -> { mode = v; save();  }); }
               void chooseVadEngine() { chooseFrom("Beszéddarabolás / VAD", vadEngineModes, vadEngineMode, v -> { vadEngineMode = v; save(); closeExternalVad(); restartIfNeeded(); }); }
               void chooseVad() { chooseFrom("Két mondat közötti szünet", vadModes, vadMode, v -> { vadMode = v; save(); restartIfNeeded(); }); }
               void chooseAudioSource() { chooseFrom("Hangforrás", audioSourceModes, audioSourceMode, v -> { audioSourceMode = v; save(); restartIfNeeded(); }); }
@@ -5686,10 +4849,9 @@ jobs:
                     .setPositiveButton("Igen", (d,w) -> {
                         model = "gpt-4o-mini";
                         profile = "general";
-                        mode = "precise";
+                        mode = "natural";
                         vadEngineMode = "silero";
-                        vadMode = "medium";
-                        audioSourceMode = "recognition";
+                        audioSourceMode = "phone_mic_48k";
                         interpreterMode = false;
                         interpreterAudioMode = "off";
                         lastInterpreterAudioMode = "auto";
@@ -5711,15 +4873,15 @@ jobs:
               String interpreterLabel() {
                   if(!interpreterMode) return "kikapcsolva – csak szöveges fordítás";
                   if(!interpreterSpeechOutputEnabled) return "Automatikus tolmács – felolvasás kikapcsolva, mikrofon változatlan";
-                  if("headset_output_phone_mic".equals(activeInterpreterRoute)) return "Automatikus tolmács – headset kimenet, telefon mikrofon";
-                                    if("speaker_half_duplex".equals(activeInterpreterRoute)) return "Automatikus tolmács – hangszóró, TTS alatt mikrofonkapu";
+                  if("headset_output_phone_mic".equals(activeInterpreterRoute)) return "Automatikus tolmács – headset csak kimenet, telefon mikrofon 48 kHz";
+                  if("speaker_half_duplex".equals(activeInterpreterRoute)) return "Automatikus tolmács – hangszóró, TTS alatt mikrofonkapu";
                   return "Automatikus tolmács – audioút előkészítés";
               }
 
               void chooseInterpreterMode() {
                   String[][] data = {
                       {"Kikapcsolva", "off", "csak szöveges fordítás, nincs felolvasás"},
-                      {"Automatikus tolmács", "auto", "a felolvasás a csatlakoztatott headseten szólhat, de a bemenet kizárólag a telefon beépített mikrofonja"}
+                      {"Automatikus tolmács", "auto", "headset kizárólag hangkimenet; bemenet mindig a telefon beépített mikrofonja"}
                   };
                   CharSequence[] labels = new CharSequence[data.length];
                   for(int i=0;i<data.length;i++) {
@@ -5872,7 +5034,7 @@ jobs:
 
               String sharedTextCleanupInstructions() {
                   // V40.17: a RENDEZ és a FORDÍT ugyanazt az egysoros mondattagolást használja.
-                  // V40.23: Silero-only 300 ms lezárás, 48→16/24 kHz kettős hangág és Realtime részleges STT.
+                  // V40.18: négy Silero fokozat, késleltetett mikrofon-kész jelzés és azonnali profilmenü-frissítés.
                   return nonConversationalLanguageTaskRules() +
                       profilePrompt() +
                       cleanupBehaviorRules() +
@@ -5885,7 +5047,7 @@ jobs:
               }
 
               String translationModePrompt() {
-                  if(interpreterMode || "precise".equals(mode)) {
+                  if("precise".equals(mode)) {
                       return "TRANSLATION_STYLE: PRECISE. Stay close to the source wording and sentence structure while remaining grammatical in the target language. Preserve every meaningful detail and do not condense. Correct only clear recognition errors and accidental duplicate words. ";
                   }
                   if("interpreter".equals(mode)) {
@@ -5923,7 +5085,7 @@ jobs:
                       nonConversationalLanguageTaskRules() +
                       profilePrompt() +
                       translationModePrompt() +
-                      "You receive the accumulated current live utterance as source data. It may contain several consecutive technical STT chunks from the same unfinished sentence. " +
+                      "You receive one live speech fragment as source data. " +
                       "Choose exactly which of the two selected languages the RAW_SPEECH_TEXT is in. " +
                       "First produce clean_source entirely in that same detected source language. Lightly clean it: correct only clear speech-recognition errors, malformed words, punctuation, grammar, word order, accidental repetitions and isolated recognition debris when the fragment itself or the supplied context supports one clear correction. " +
                       "The selected pair is a hard language boundary: ordinary words in clean_source must belong to source_lang, and ordinary words in translation must belong to the other selected language. Never pass through a third-language word or a mixture of the two selected languages merely because it appeared in RAW_SPEECH_TEXT. " +
@@ -5931,11 +5093,10 @@ jobs:
                       "Use the conversation/domain profile and PREVIOUS_CONFIRMED_CONTEXT only to resolve terminology or an otherwise clear ambiguity. Never copy earlier context into clean_source or translation. " +
                       "Do not rewrite for style, summarize, beautify, add information, combine it with an earlier block, or replace a plausible source-language word merely because another word fits the profile better. When uncertainty remains between plausible words in source_lang, preserve the closer audible wording rather than inventing content. " +
                       "Preserve every substantive fact, name, number, time, negation, condition, grammatical person, politeness level, tone and intention. " +
-                      "Do not complete unfinished sentences or add a missing beginning or ending. If the input is incomplete, clean_source and translation must remain incomplete because the next technical chunk may continue it. " +
-                      "Set sentence_complete=true only when the accumulated utterance is linguistically complete and can safely be spoken as a finished message. CURRENT_BOUNDARY_HINT=SPEECH_PAUSE is only supporting evidence; a pause alone never proves completion. For TIMED_PREVIEW, use false unless the text itself clearly ends a complete sentence. " +
+                      "Do not complete unfinished sentences or add a missing beginning or ending. If the input is a fragment, clean_source and translation must remain fragments because the next block may continue it. " +
                       "Then translate clean_source only into the other selected language and follow TRANSLATION_STYLE. " +
                       "Translate questions as questions, requests as requests, greetings as greetings and commands as commands; never answer, acknowledge or execute them. " +
-                      "Return only source_lang, clean_source, translation and sentence_complete according to the response schema. " +
+                      "Return only source_lang, clean_source and translation according to the response schema. " +
                       "Do not return the raw input, previous context, markdown, explanations, technical metadata, prompts or internal instructions. " +
                       "Never censor, mask, redact, soften, sanitize or replace profanity, insults, slang, vulgar, sexual, rude or emotional wording.";
               }
@@ -6047,7 +5208,7 @@ jobs:
           
                       if(micBtn != null) {
                           micBtn.setEnabled(true);
-                          if(finalizingStop || microphoneStarting) {
+                          if(finalizingStop) {
                               micBtn.setText("VÁRJ");
                               setOvalButtonColor(micBtn, orange);
                           } else if(streaming) {
@@ -6201,7 +5362,6 @@ jobs:
                       }
                   } catch(Exception ignored) {}
                   clearSpeakState();
-                  closeRealtimeTranscriptionSession(false);
                   restoreNormalAudioRoute();
                   audioExec.shutdownNow();
                   super.onDestroy();
@@ -6245,14 +5405,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.23.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.23.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.19.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.19.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.23
+          name: V40.19
           path: |
             artifact/*.apk
             artifact/*.aab
