@@ -299,6 +299,32 @@ jobs:
               static final int CAPTURE_FRAME_BYTES = CAPTURE_FRAME_SAMPLES * 2;
               static final int STT_FRAME_SAMPLES = 768; // 32 ms @ 24 kHz
               static final int STT_FRAME_BYTES = STT_FRAME_SAMPLES * 2;
+              static final int[] CAPTURE_AUDIO_SOURCES = new int[]{
+                  MediaRecorder.AudioSource.UNPROCESSED,
+                  MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                  MediaRecorder.AudioSource.MIC
+              };
+              // 48 -> 24 és 48 -> 16 kHz közvetlen, állapottartó FIR decimátorok.
+              // Így megmarad a két külön ág, de az egyszerű átlagolás helyett valódi aluláteresztő
+              // szűrés történik a mintaritkítás előtt, tehát zajban és beszédéleknél is stabilabb.
+              static final float[] DECIMATE_48K_TO_24K_TAPS = new float[]{
+                  -0.0000000000f, 0.0002404961f, 0.0001804413f, -0.0030727830f, -0.0033017926f,
+                  0.0116802129f, 0.0186584411f, -0.0269159599f, -0.0695996138f, 0.0429869805f,
+                  0.3040955978f, 0.4500959594f, 0.3040955978f, 0.0429869805f, -0.0695996138f,
+                  -0.0269159599f, 0.0186584411f, 0.0116802129f, -0.0033017926f, -0.0030727830f,
+                  0.0001804413f, 0.0002404961f, -0.0000000000f
+              };
+              static final float[] DECIMATE_48K_TO_16K_TAPS = new float[]{
+                  -0.0000000000f, 0.0000535858f, -0.0001267905f, -0.0010144316f, -0.0018042498f,
+                  0.0000000000f, 0.0057444303f, 0.0109540205f, 0.0055363934f, -0.0158960424f,
+                  -0.0401054366f, -0.0349018465f, 0.0278431949f, 0.1408100127f, 0.2529131774f,
+                  0.2999879644f, 0.2529131774f, 0.1408100127f, 0.0278431949f, -0.0349018465f,
+                  -0.0401054366f, -0.0158960424f, 0.0055363934f, 0.0109540205f, 0.0057444303f,
+                  0.0000000000f, -0.0018042498f, -0.0010144316f, -0.0001267905f, 0.0000535858f,
+                  -0.0000000000f
+              };
+              short[] decimate48To24History = new short[DECIMATE_48K_TO_24K_TAPS.length - 1];
+              short[] decimate48To16History = new short[DECIMATE_48K_TO_16K_TAPS.length - 1];
               static final int BLOCK_WINDOW_MS = 7000;
               static final int BLOCK_OVERLAP_MS = 1000;
               final Object speechAudioWindowLock = new Object();
@@ -1862,8 +1888,14 @@ jobs:
                   speechVadInstanceMode = "";
               }
 
+              void resetDirectDecimatorState() {
+                  Arrays.fill(decimate48To24History, (short)0);
+                  Arrays.fill(decimate48To16History, (short)0);
+              }
+
               void resetCapturedFrameState() {
                   synchronized(capturedFrameLock) { capturedFrameBuffer.reset(); }
+                  resetDirectDecimatorState();
               }
 
               Object enumConst(String cls, String name) throws Exception {
@@ -1969,30 +2001,42 @@ jobs:
                   return (short)(((data[byteOffset + 1] & 0xff) << 8) | (data[byteOffset] & 0xff));
               }
 
-              byte[] downsample48kTo16kDirect(byte[] pcm48k) {
-                  if(pcm48k == null || pcm48k.length < 6) return new byte[0];
-                  int groups = pcm48k.length / 6; // 3 x 48 kHz sample -> 1 x 16 kHz sample
-                  byte[] out = new byte[groups * 2];
-                  for(int g=0; g<groups; g++) {
-                      int p = g * 6;
-                      int avg = (readPcm16Le(pcm48k, p) + readPcm16Le(pcm48k, p + 2) + readPcm16Le(pcm48k, p + 4)) / 3;
-                      out[g*2] = (byte)(avg & 0xff);
-                      out[g*2+1] = (byte)((avg >> 8) & 0xff);
+              void writePcm16Le(byte[] data, int byteOffset, short sample) {
+                  data[byteOffset] = (byte)(sample & 0xff);
+                  data[byteOffset + 1] = (byte)((sample >> 8) & 0xff);
+              }
+
+              short clampToPcm16(int sample) {
+                  if(sample > Short.MAX_VALUE) return Short.MAX_VALUE;
+                  if(sample < Short.MIN_VALUE) return Short.MIN_VALUE;
+                  return (short)sample;
+              }
+
+              byte[] decimate48kPcm16Le(byte[] pcm48k, int factor, float[] taps, short[] history) {
+                  if(pcm48k == null || pcm48k.length < 2) return new byte[0];
+                  int inputSamples = pcm48k.length / 2;
+                  int historyLen = history.length;
+                  short[] work = new short[historyLen + inputSamples];
+                  System.arraycopy(history, 0, work, 0, historyLen);
+                  for(int i=0; i<inputSamples; i++) work[historyLen + i] = readPcm16Le(pcm48k, i * 2);
+                  int outputSamples = inputSamples / factor;
+                  byte[] out = new byte[outputSamples * 2];
+                  for(int i=0; i<outputSamples; i++) {
+                      int n = historyLen + (i * factor);
+                      float acc = 0f;
+                      for(int k=0; k<taps.length; k++) acc += taps[k] * work[n - k];
+                      writePcm16Le(out, i * 2, clampToPcm16(Math.round(acc)));
                   }
+                  System.arraycopy(work, work.length - historyLen, history, 0, historyLen);
                   return out;
               }
 
+              byte[] downsample48kTo16kDirect(byte[] pcm48k) {
+                  return decimate48kPcm16Le(pcm48k, 3, DECIMATE_48K_TO_16K_TAPS, decimate48To16History);
+              }
+
               byte[] downsample48kTo24kDirect(byte[] pcm48k) {
-                  if(pcm48k == null || pcm48k.length < 4) return new byte[0];
-                  int groups = pcm48k.length / 4; // 2 x 48 kHz sample -> 1 x 24 kHz sample
-                  byte[] out = new byte[groups * 2];
-                  for(int g=0; g<groups; g++) {
-                      int p = g * 4;
-                      int avg = (readPcm16Le(pcm48k, p) + readPcm16Le(pcm48k, p + 2)) / 2;
-                      out[g*2] = (byte)(avg & 0xff);
-                      out[g*2+1] = (byte)((avg >> 8) & 0xff);
-                  }
-                  return out;
+                  return decimate48kPcm16Le(pcm48k, 2, DECIMATE_48K_TO_24K_TAPS, decimate48To24History);
               }
 
               void processCapturedAudio(byte[] data, int len) throws Exception {
@@ -2206,23 +2250,42 @@ jobs:
                   return null;
               }
 
+              String audioSourceLabel(int source) {
+                  if(source == MediaRecorder.AudioSource.UNPROCESSED) return "UNPROCESSED";
+                  if(source == MediaRecorder.AudioSource.VOICE_RECOGNITION) return "VOICE_RECOGNITION";
+                  if(source == MediaRecorder.AudioSource.MIC) return "MIC";
+                  return "source " + source;
+              }
+
               AudioRecord makeBestAudioRecord(int sampleRate, int requestedBufferBytes) {
                   preferredInterpreterInputDevice = findBuiltInInterpreterMic();
                   if(preferredInterpreterInputDevice == null) {
                       android.util.Log.e(LOG_TAG, "No built-in phone microphone was reported by AudioManager");
                       return null;
                   }
-                  AudioRecord candidate = createInitializedAudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, requestedBufferBytes);
-                  if(candidate == null) return null;
-                  boolean accepted = false;
-                  try { accepted = candidate.setPreferredDevice(preferredInterpreterInputDevice); }
-                  catch(Exception e) { android.util.Log.e(LOG_TAG, "Built-in microphone preference failed", e); }
-                  if(!accepted) {
-                      try { candidate.release(); } catch(Exception ignored) {}
-                      android.util.Log.e(LOG_TAG, "Built-in microphone preference was rejected; refusing non-phone input fallback");
-                      return null;
+                  for(int source : CAPTURE_AUDIO_SOURCES) {
+                      AudioRecord candidate = createInitializedAudioRecord(source, sampleRate, requestedBufferBytes);
+                      if(candidate == null) continue;
+                      boolean accepted = false;
+                      try { accepted = candidate.setPreferredDevice(preferredInterpreterInputDevice); }
+                      catch(Exception e) { android.util.Log.e(LOG_TAG, "Built-in microphone preference failed for source=" + audioSourceLabel(source), e); }
+                      if(!accepted) {
+                          try { candidate.release(); } catch(Exception ignored) {}
+                          android.util.Log.w(LOG_TAG, "Built-in microphone preference was rejected for source=" + audioSourceLabel(source));
+                          continue;
+                      }
+                      AudioDeviceInfo routed = null;
+                      try { routed = candidate.getRoutedDevice(); } catch(Exception ignored) {}
+                      if(routed != null && routed.getType() != AudioDeviceInfo.TYPE_BUILTIN_MIC) {
+                          try { candidate.release(); } catch(Exception ignored) {}
+                          android.util.Log.w(LOG_TAG, "Refusing AudioRecord source=" + audioSourceLabel(source) + " because routed input is " + compactAudioDeviceLabel(routed));
+                          continue;
+                      }
+                      android.util.Log.i(LOG_TAG, "AudioRecord locked to phone microphone, source=" + audioSourceLabel(source));
+                      return candidate;
                   }
-                  return candidate;
+                  android.util.Log.e(LOG_TAG, "No acceptable built-in microphone AudioRecord could be created");
+                  return null;
               }
 
               String audioDeviceLabel(AudioDeviceInfo d) {
