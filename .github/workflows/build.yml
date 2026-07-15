@@ -1,4 +1,4 @@
-name: Build Android APK V40.25
+name: Build Android APK V40.26
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4025; versionName = "40.25" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4026; versionName = "40.26" }
 
               signingConfigs {
                   create("release") {
@@ -114,7 +114,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.25" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.26" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -264,22 +264,21 @@ jobs:
               // V40.25: a lebegő Bluetooth/hangszóró gomb valóban a TTS kimeneti útját váltja.
               // A felolvasást többé nem lehet véletlenül ezzel a route-gombbal lenémítani.
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV425";
-              // V40.20: a beszédkezdet 24 kHz-es hangja gördülő előpufferben marad.
-              // 960 ms = pontosan 30 darab 32 ms-os keret; a VAD késői/fel-felvillanó nyitása
-              // ezért nem vághatja le az első szót.
-              static final int PRE_ROLL_AUDIO_MS = 960;
+              static final String LOG_TAG = "ForditoV426";
+              // V40.26: 480 ms = 15 darab 32 ms-os előpuffer.
+              // Továbbra is védi az első szó elejét, de a korábbi háttérzaj fele kerül az STT elé.
+              static final int PRE_ROLL_AUDIO_MS = 480;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 350 ms csend után zár.
               static final int SILERO_FRAME_SAMPLES = 512;
               static final int SILERO_FRAME_BYTES = SILERO_FRAME_SAMPLES * 2;
               static final int VAD_SPEECH_START_MS = 50;
               static final int VAD_SPEECH_END_SILENCE_MS = 350;
-              // V40.20: a Silero saját 50 ms-os beszédkapuja után három 32 ms-os pozitív
-              // keret elég a beszédindítás megerősítésére. A 150 ms-os minimum továbbra is
-              // megmarad az STT-ablak tényleges elküldési minimumának.
-              static final int VAD_START_CONFIRM_AUDIO_MS = 96;
-              static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
+              // V40.26: a Silero nyitása után öt 32 ms-os pozitív keret (160 ms) kell.
+              // A küldési minimum is 160 ms, így a pre-roll többé nem tud önmagában
+              // egy 96 ms-os fals VAD-villanást STT-kéréssé tenni.
+              static final int VAD_START_CONFIRM_AUDIO_MS = 160;
+              static final int MIN_TRUE_SPEECH_AUDIO_MS = 160;
               static final int POST_TTS_SPEAKER_GUARD_MS = 180;
               // V40.19: az AudioRecord a telefon beépített mikrofonját használja; headset-bemeneti hanglánc nincs.
               // Hangszórós tolmács módban TTS alatt a mikrofont továbbra is kapuzzuk a visszahallás ellen.
@@ -326,9 +325,12 @@ jobs:
               short[] decimate48To24History = new short[DECIMATE_48K_TO_24K_TAPS.length - 1];
               short[] decimate48To16History = new short[DECIMATE_48K_TO_16K_TAPS.length - 1];
               static final int BLOCK_WINDOW_MS = 7000;
-              static final int BLOCK_OVERLAP_MS = 1000;
+              // V40.26: csak 10 darab 32 ms-os kontextus marad át a következő ablakra.
+              static final int BLOCK_OVERLAP_MS = 320;
               final Object speechAudioWindowLock = new Object();
               ByteArrayOutputStream speechAudioWindow = new ByteArrayOutputStream();
+              // V40.26: csak a még soha el nem küldött hang számít friss audiónak.
+              int speechAudioWindowFreshBytes = 0;
               String vadEngineMode = "silero"; // V40.0 alap: dokumentált Silero NORMAL
               Object speechVadInstance = null;
               String speechVadInstanceMode = "";
@@ -2073,6 +2075,7 @@ jobs:
               void clearSpeechAudioWindow() {
                   synchronized(speechAudioWindowLock) {
                       speechAudioWindow.reset();
+                      speechAudioWindowFreshBytes = 0;
                   }
               }
 
@@ -2081,17 +2084,26 @@ jobs:
                   byte[] ready = null;
                   synchronized(speechAudioWindowLock) {
                       speechAudioWindow.write(chunk, 0, chunk.length);
+                      speechAudioWindowFreshBytes += chunk.length;
+
                       int needBytes = STT_SAMPLE_RATE * 2 * BLOCK_WINDOW_MS / 1000;
                       if(speechAudioWindow.size() >= needBytes) {
                           byte[] all = speechAudioWindow.toByteArray();
                           ready = Arrays.copyOf(all, needBytes);
+
                           int keepBytes = STT_SAMPLE_RATE * 2 * BLOCK_OVERLAP_MS / 1000;
+                          int excessBytes = Math.max(0, all.length - needBytes);
+
                           speechAudioWindow.reset();
                           int start = Math.max(0, needBytes - keepBytes);
                           speechAudioWindow.write(all, start, needBytes - start);
                           if(all.length > needBytes) {
                               speechAudioWindow.write(all, needBytes, all.length - needBytes);
                           }
+
+                          // V40.26: a megtartott overlap már egyszer elküldött hang.
+                          // Csak a 7 másodperces határon túli valódi többlet marad friss.
+                          speechAudioWindowFreshBytes = excessBytes;
                       }
                   }
                   if(ready != null) transcribeAudioWindow(ready, false);
@@ -2100,10 +2112,19 @@ jobs:
               void flushSpeechAudioWindow(boolean force) {
                   byte[] ready = null;
                   synchronized(speechAudioWindowLock) {
-                      int minBytes = STT_SAMPLE_RATE * 2 * (force ? MIN_TRUE_SPEECH_AUDIO_MS : 1200) / 1000;
-                      if(speechAudioWindow.size() >= minBytes) {
+                      int minFreshBytes = STT_SAMPLE_RATE * 2 *
+                          (force ? MIN_TRUE_SPEECH_AUDIO_MS : 1200) / 1000;
+
+                      if(speechAudioWindowFreshBytes >= minFreshBytes &&
+                         speechAudioWindow.size() > 0) {
                           ready = speechAudioWindow.toByteArray();
                           speechAudioWindow.reset();
+                          speechAudioWindowFreshBytes = 0;
+                      } else if(force) {
+                          // V40.26: overlap-only vagy 160 ms-nál rövidebb új hang
+                          // nem lehet külön STT-kérés.
+                          speechAudioWindow.reset();
+                          speechAudioWindowFreshBytes = 0;
                       }
                   }
                   if(ready != null) transcribeAudioWindow(ready, true);
@@ -2169,7 +2190,7 @@ jobs:
                       MultipartBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
                           .addFormDataPart("model", "gpt-4o-mini-transcribe")
                           .addFormDataPart("response_format", "json")
-                          .addFormDataPart("prompt", speechTranscriptionPrompt())
+                          .addFormDataPart("temperature", "0")
                           .addFormDataPart("file", "speech.wav", RequestBody.create(MediaType.parse("audio/wav"), wav))
                           .build();
                       Request req = new Request.Builder().url("https://api.openai.com/v1/audio/transcriptions")
@@ -2761,15 +2782,17 @@ jobs:
                   if(stopSession != sttSessionId || !finalizingStop) return;
                   synchronized(audioProcessingLock) {
                       byte[] remainder = takeCapturedSttRemainder24k();
-                      if(voiceSendActive && remainder.length > 0) appendSpeechAudioChunk(remainder);
-                      if(!voiceSendActive && pendingSpeechAudioDurationMs() > 0) {
-                          for(byte[] pr : takePreRollAudio()) appendSpeechAudioChunk(pr);
-                          for(byte[] ps : takePendingSpeechAudio()) appendSpeechAudioChunk(ps);
+                      if(voiceSendActive) {
+                          if(remainder.length > 0) appendSpeechAudioChunk(remainder);
+                          flushSpeechAudioWindow(true);
+                      } else {
+                          // V40.26: a STOP nem küldhet meg nem erősített VAD-pendinget
+                          // és korábbi pre-roll zajt az STT-re.
+                          clearSpeechAudioWindow();
                       }
                       voiceSendActive = false;
                       clearPendingSpeechAudio();
                       clearPreRollAudio();
-                      flushSpeechAudioWindow(true);
                   }
                   closeExternalVad();
                   stopAudioDrainPending = false;
@@ -5510,14 +5533,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.25.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.25.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.26.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.26.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.25
+          name: V40.26
           path: |
             artifact/*.apk
             artifact/*.aab
