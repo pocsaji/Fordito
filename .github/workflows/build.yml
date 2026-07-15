@@ -1,4 +1,4 @@
-name: Build Android APK V40.27
+name: Build Android APK V40.28
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4027; versionName = "40.27" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4028; versionName = "40.28" }
 
               signingConfigs {
                   create("release") {
@@ -114,7 +114,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.27" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.28" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -264,7 +264,7 @@ jobs:
               // V40.25: a lebegő Bluetooth/hangszóró gomb valóban a TTS kimeneti útját váltja.
               // A felolvasást többé nem lehet véletlenül ezzel a route-gombbal lenémítani.
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV427";
+              static final String LOG_TAG = "ForditoV428";
               // V40.26: 480 ms = 15 darab 32 ms-os előpuffer.
               // Továbbra is védi az első szó elejét, de a korábbi háttérzaj fele kerül az STT elé.
               static final int PRE_ROLL_AUDIO_MS = 480;
@@ -2655,7 +2655,7 @@ jobs:
                       boolean builtInRouteConfirmed = false;
                       long routeConfirmDeadlineMs = SystemClock.elapsedRealtime() + 1200L;
                       long lastBuiltInRouteVerifiedMs = 0L;
-                      // V40.27: amíg az Android az induláskor még null route-ot ad vissza,
+                      // V40.28: amíg az Android az induláskor még null route-ot ad vissza,
                       // legfeljebb 1200 ms nyers 48 kHz-es hangot megőrzünk. Nincs várakozás,
                       // nincs új szál és nincs folyamatos többletterhelés; a puffer csak egyszer,
                       // az első igazolt TYPE_BUILTIN_MIC útvonalnál kerül feldolgozásra.
@@ -2682,7 +2682,7 @@ jobs:
                                   if(routed == null) {
                                       long now = SystemClock.elapsedRealtime();
                                       if(!builtInRouteConfirmed && now <= routeConfirmDeadlineMs) {
-                                          // V40.27: az induláskori route-null alatt nem dobjuk el az első mondatot.
+                                          // V40.28: az induláskori route-null alatt nem dobjuk el az első mondatot.
                                           // Csak a fix, legfeljebb 1200 ms-os nyers pufferbe másolunk; ez az egyetlen
                                           // plusz művelet az útvonal első igazolásáig.
                                           int remaining = startupRouteAudioMaxBytes - startupRouteAudioBytes;
@@ -5559,14 +5559,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.27.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.27.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.28.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.28.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.27
+          name: V40.28
           path: |
             artifact/*.apk
             artifact/*.aab
