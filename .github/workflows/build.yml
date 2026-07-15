@@ -1,4 +1,5 @@
-name: Build Android APK V40.29
+name: Build Android APK V40.30
+# DELIVERY_MARKER: V40.30-NO-BUILDCONFIG-VERIFIED
 
 on:
   workflow_dispatch:
@@ -38,7 +39,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4029; versionName = "40.29" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4030; versionName = "40.30" }
 
               signingConfigs {
                   create("release") {
@@ -114,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.29" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.30" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -263,7 +264,9 @@ jobs:
               // V40.25: a lebegő Bluetooth/hangszóró gomb valóban a TTS kimeneti útját váltja.
               // A felolvasást többé nem lehet véletlenül ezzel a route-gombbal lenémítani.
               volatile long ttsMuteUntilMs = 0L;
-              static final String LOG_TAG = "ForditoV" + BuildConfig.VERSION_CODE;
+              static final int APP_VERSION_CODE = 4030;
+              static final String APP_VERSION_NAME = "40.30";
+              static final String LOG_TAG = "ForditoV" + APP_VERSION_CODE;
               // V40.26: 480 ms = 15 darab 32 ms-os előpuffer.
               // Továbbra is védi az első szó elejét, de a korábbi háttérzaj fele kerül az STT elé.
               static final int PRE_ROLL_AUDIO_MS = 480;
@@ -973,7 +976,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V" + BuildConfig.VERSION_NAME);
+                  TextView title = label("Fordito_V" + APP_VERSION_NAME);
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -1216,7 +1219,7 @@ jobs:
                   }
                   ArrayList<int[]> ranges = top ? topRanges : bottomRanges;
                   if(ranges == null || ranges.isEmpty()) {
-                      // V40.29: ha a tartománytérkép már nem használható, a látható kézi szöveg
+                      // V40.30: ha a tartománytérkép már nem használható, a látható kézi szöveg
                       // az elsődleges adat. Nem hagyjuk, hogy egy későbbi render régi blokkadatot írjon vissza.
                       invalidateSpeechTranslationStateKeepSession();
                       initializeManualBlockModelFromBoxes(top);
@@ -1232,7 +1235,7 @@ jobs:
                       visible.add(b);
                   }
                   if(visible.size() != ranges.size()) {
-                      // V40.29: szerkezeti eltérésnél egyetlen, aktuális kézi blokkmodellre váltunk.
+                      // V40.30: szerkezeti eltérésnél egyetlen, aktuális kézi blokkmodellre váltunk.
                       invalidateSpeechTranslationStateKeepSession();
                       initializeManualBlockModelFromBoxes(top);
                       return;
@@ -1250,7 +1253,7 @@ jobs:
                       if(localInsertion || localReplaceOrDelete) { rangeIndex = i; break; }
                   }
           
-                  // V40.29: több blokk határát érintő törlés/beillesztés esetén nem hagyunk
+                  // V40.30: több blokk határát érintő törlés/beillesztés esetén nem hagyunk
                   // elavult blokkokat a háttérben. A két látható ablak pillanatnyi tartalma lesz
                   // az új egyetlen kézi blokkmodell, így későbbi render nem tud szöveget visszatörölni.
                   if(rangeIndex < 0 || rangeIndex >= visible.size()) {
@@ -3002,7 +3005,7 @@ jobs:
               void manualTranslate() {
                   if(finalizingStop) return;
           
-                  // V40.29: a FORDÍT kizárólag fordít. A felhasználó által kézzel javított
+                  // V40.30: a FORDÍT kizárólag fordít. A felhasználó által kézzel javított
                   // forrásablakot sem a modell, sem a válaszkezelő nem írhatja át vagy rövidítheti le.
                   if(streaming) stop(false);
           
@@ -3475,7 +3478,7 @@ jobs:
                   String[] nw = h.split("\\s+");
                   String[] rawWords = raw.split("\\s+");
           
-                  // V40.29: átfedést csak a legutóbbi néhány blokkal keresünk, legújabbtól
+                  // V40.30: átfedést csak a legutóbbi néhány blokkal keresünk, legújabbtól
                   // visszafelé. A korábbi, akár 80 blokkal ezelőtti azonos mondatrész jogos
                   // ismétlés lehet, ezért nem törölhető automatikusan.
                   int checked = 0;
@@ -4059,7 +4062,7 @@ jobs:
                       String tr = normalizeSentenceLineLayout(restoreGlossaryTerms(structured.optString("translation", ""), safeProtection));
                       if(tr.length() == 0) throw new Exception("empty manual translation");
           
-                      // V40.29: egy hosszú, többmondatos forrást egy feltűnően rövid, részleges
+                      // V40.30: egy hosszú, többmondatos forrást egy feltűnően rövid, részleges
                       // modellválasz sem írhat felül a célablakban. Ilyenkor inkább megőrizzük
                       // a korábbi célszöveget és hibát jelzünk.
                       String sourceForLengthCheck = stripDisplayBlockNumbers(sourceSnapshot == null ? "" : sourceSnapshot)
@@ -4101,7 +4104,7 @@ jobs:
           
               void rebuildBlocksFromCurrentBoxes(boolean sourceTop) {
                   TextBlock b = new TextBlock();
-                  // V40.29: a kézi ablakok pontos tartalmát őrizzük meg. Az ürességvizsgálat
+                  // V40.30: a kézi ablakok pontos tartalmát őrizzük meg. Az ürességvizsgálat
                   // továbbra is trim()-mel történik, de a modell újraépítése nem vághat le
                   // kézzel beírt sortörést vagy szóközt a forrás elejéről/végéről.
                   b.topText = topBox == null ? "" : topBox.getText().toString();
@@ -5550,6 +5553,21 @@ jobs:
           }
           EOF
 
+      - name: Verify generated V40.30 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN="app/src/main/java/com/attila/forditokonzol/MainActivity.java"
+          test -f "$MAIN"
+          if grep -n "BuildConfig" "$MAIN"; then
+            echo "ERROR: BuildConfig reference must not exist in V40.30 MainActivity.java" >&2
+            exit 1
+          fi
+          grep -Fq 'static final int APP_VERSION_CODE = 4030;' "$MAIN"
+          grep -Fq 'static final String APP_VERSION_NAME = "40.30";' "$MAIN"
+          grep -Fq 'TextView title = label("Fordito_V" + APP_VERSION_NAME);' "$MAIN"
+          echo "V40.30 source verification OK: no BuildConfig references."
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
@@ -5586,14 +5604,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.29.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.29.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.30.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.30.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.29
+          name: V40.30
           path: |
             artifact/*.apk
             artifact/*.aab
