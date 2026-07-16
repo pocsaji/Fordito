@@ -1,5 +1,5 @@
-name: Build Android APK V40.32
-# DELIVERY_MARKER: V40.32-AUDIO-STABILITY
+name: Build Android APK V40.33
+# DELIVERY_MARKER: V40.33-LANGUAGE-PAIR-STT-GUARD
 
 on:
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4032; versionName = "40.32" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4033; versionName = "40.33" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.32" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.33" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -264,8 +264,8 @@ jobs:
               // V40.25: a lebegő Bluetooth/hangszóró gomb valóban a TTS kimeneti útját váltja.
               // A felolvasást többé nem lehet véletlenül ezzel a route-gombbal lenémítani.
               volatile long ttsMuteUntilMs = 0L;
-              static final int APP_VERSION_CODE = 4032;
-              static final String APP_VERSION_NAME = "40.32";
+              static final int APP_VERSION_CODE = 4033;
+              static final String APP_VERSION_NAME = "40.33";
               static final String LOG_TAG = "ForditoV" + APP_VERSION_CODE;
               // 480 ms előpuffer védi az első szó elejét, de önmagában nem számít igazolt beszédnek.
               static final int PRE_ROLL_AUDIO_MS = 480;
@@ -2154,6 +2154,10 @@ jobs:
                           .addFormDataPart("model", "gpt-4o-mini-transcribe")
                           .addFormDataPart("response_format", "json")
                           .addFormDataPart("temperature", "0")
+                          // V40.33: a kiválasztott nyelvpárra, szótárra és profilra felépített
+                          // STT-korlát eddig csak elkészült, de nem került bele a multipart kérésbe.
+                          // Emiatt a transcribe végpont szabad automatikus nyelvfelismeréssel dolgozott.
+                          .addFormDataPart("prompt", speechTranscriptionPrompt())
                           .addFormDataPart("file", "speech.wav", RequestBody.create(MediaType.parse("audio/wav"), wav))
                           .build();
                       Request req = new Request.Builder().url("https://api.openai.com/v1/audio/transcriptions")
@@ -5553,32 +5557,37 @@ jobs:
           }
           EOF
 
-      - name: Verify generated V40.32 source
+      - name: Verify generated V40.33 source
         shell: bash
         run: |
           set -euo pipefail
           MAIN="app/src/main/java/com/attila/forditokonzol/MainActivity.java"
           test -f "$MAIN"
           if grep -n "BuildConfig" "$MAIN"; then
-            echo "ERROR: BuildConfig reference must not exist in V40.32 MainActivity.java" >&2
+            echo "ERROR: BuildConfig reference must not exist in V40.33 MainActivity.java" >&2
             exit 1
           fi
-          grep -Fq 'static final int APP_VERSION_CODE = 4032;' "$MAIN"
-          grep -Fq 'static final String APP_VERSION_NAME = "40.32";' "$MAIN"
+          grep -Fq 'static final int APP_VERSION_CODE = 4033;' "$MAIN"
+          grep -Fq 'static final String APP_VERSION_NAME = "40.33";' "$MAIN"
           grep -Fq 'TextView title = label("Fordito_V" + APP_VERSION_NAME);' "$MAIN"
           grep -Fq 'static final int CAPTURE_SAMPLE_RATE = 16000;' "$MAIN"
           grep -Fq 'static final int STT_SAMPLE_RATE = 16000;' "$MAIN"
           if grep -Fq 'DECIMATE_48K_TO_' "$MAIN"; then
-            echo "ERROR: application-side 48 kHz decimator remained in V40.32" >&2
+            echo "ERROR: application-side 48 kHz decimator remained in V40.33" >&2
             exit 1
           fi
           if grep -Fq 'MediaRecorder.AudioSource.UNPROCESSED' "$MAIN"; then
-            echo "ERROR: UNPROCESSED capture source remained in V40.32" >&2
+            echo "ERROR: UNPROCESSED capture source remained in V40.33" >&2
             exit 1
           fi
           grep -Fq 'MediaRecorder.AudioSource.MIC,' "$MAIN"
           grep -Fq 'VAD_END_REQUIRED_SILENCE_FRAMES = 9;' "$MAIN"
-          echo "V40.32 source verification OK: single 16 kHz path and application-side VAD close."
+          grep -Fq '.addFormDataPart("prompt", speechTranscriptionPrompt())' "$MAIN"
+          grep -Fq 'The speech language is exactly one of these two languages:' "$MAIN"
+          grep -Fq 'String visibleSource = localSideCertain ? userVisibleSpeechTextOrEmpty(raw) : "";' "$MAIN"
+          grep -Fq 'if(localSideCertain) renderBlocksKeepView();' "$MAIN"
+          grep -Fq 'if(rawShortWords > 0 && rawShortWords <= 3 && cleanShortWords > rawShortWords)' "$MAIN"
+          echo "V40.33 source verification OK: audio path unchanged; selected-pair STT prompt is transmitted and prior display/short-reply guards remain enforced."
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -5616,14 +5625,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.32.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.32.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.33.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.33.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.32
+          name: V40.33
           path: |
             artifact/*.apk
             artifact/*.aab
