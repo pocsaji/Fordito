@@ -1,5 +1,5 @@
-name: Build Android APK V40.33
-# DELIVERY_MARKER: V40.33-LANGUAGE-PAIR-STT-GUARD
+name: Build Android APK V40.34
+# DELIVERY_MARKER: V40.34-AUDIO-PAIR-VALIDATION
 
 on:
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4033; versionName = "40.33" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4034; versionName = "40.34" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.33" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.34" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -264,8 +264,8 @@ jobs:
               // V40.25: a lebegő Bluetooth/hangszóró gomb valóban a TTS kimeneti útját váltja.
               // A felolvasást többé nem lehet véletlenül ezzel a route-gombbal lenémítani.
               volatile long ttsMuteUntilMs = 0L;
-              static final int APP_VERSION_CODE = 4033;
-              static final String APP_VERSION_NAME = "40.33";
+              static final int APP_VERSION_CODE = 4034;
+              static final String APP_VERSION_NAME = "40.34";
               static final String LOG_TAG = "ForditoV" + APP_VERSION_CODE;
               // 480 ms előpuffer védi az első szó elejét, de önmagában nem számít igazolt beszédnek.
               static final int PRE_ROLL_AUDIO_MS = 480;
@@ -276,12 +276,12 @@ jobs:
               static final int VAD_SPEECH_START_MS = 0;
               // Nyers Silero-keretdöntést kérünk; a lezárási hiszterézist az alkalmazás végzi.
               static final int VAD_SPEECH_END_SILENCE_MS = 0;
-              static final int VAD_START_CONFIRM_FRAMES = 3;          // 96 ms
+              static final int VAD_START_CONFIRM_FRAMES = 3;          // 96 ms: a rövid igen/oui/ja válaszokat sem vágja le
               static final int VAD_END_WINDOW_FRAMES = 12;            // 384 ms
-              static final int VAD_END_REQUIRED_SILENCE_FRAMES = 9;   // legalább 75% csend
+              static final int VAD_END_REQUIRED_SILENCE_FRAMES = 9;   // legalább 75% csend, rövid zajcsúcs nem tartja nyitva
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 96;
               static final int POST_TTS_SPEAKER_GUARD_MS = 180;
-              static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 7000;
+              static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 20000;
               volatile boolean voiceSendActive = false;
               int vadStartPositiveFrames = 0;
               final ArrayDeque<Boolean> vadEndDecisionWindow = new ArrayDeque<>();
@@ -298,12 +298,17 @@ jobs:
               static final int CAPTURE_FRAME_BYTES = CAPTURE_FRAME_SAMPLES * 2;
               static final int STT_FRAME_SAMPLES = 512;
               static final int STT_FRAME_BYTES = STT_FRAME_SAMPLES * 2;
-              // Elsődleges a normál telefonmikrofon. A VOICE_RECOGNITION csak tartalék.
+              // Ugyanaz a beépített telefonmikrofon marad, de először az Android beszédfelismerésre
+              // hangolt VOICE_RECOGNITION forrását kérjük; MIC csak kompatibilitási tartalék.
               static final int[] CAPTURE_AUDIO_SOURCES = new int[]{
-                  MediaRecorder.AudioSource.MIC,
-                  MediaRecorder.AudioSource.VOICE_RECOGNITION
+                  MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                  MediaRecorder.AudioSource.MIC
               };
-              static final int BLOCK_WINDOW_MS = 7000;
+              // Nem gyártunk többé 7 másodperces normál blokkokat. Ez csak végső memória-védelmi plafon,
+              // a rendes lezárást minden esetben a Silero-csend végzi.
+              static final int MAX_AUDIO_SEGMENT_MS = 20000;
+              static final double STT_MIN_AVG_LOGPROB = -1.10;
+              static final double STT_MIN_TOKEN_LOGPROB = -3.20;
               final Object speechAudioWindowLock = new Object();
               ByteArrayOutputStream speechAudioWindow = new ByteArrayOutputStream();
               int speechAudioWindowConfirmedSpeechBytes = 0;
@@ -368,7 +373,7 @@ jobs:
               final CopyOnWriteArrayList<GlossaryEntry> glossaryEntries = new CopyOnWriteArrayList<>();
               GlossaryProtection pendingSpeechGlossaryProtection = GlossaryProtection.empty();
               GlossaryProtection pendingManualGlossaryProtection = GlossaryProtection.empty();
-              // Hangos szótárbevitel is ugyanazt az egyetlen gpt-4o-mini-transcribe STT utat használja.
+              // Hangos szótárbevitel is ugyanazt az egyetlen gpt-4o-transcribe STT utat használja.
               // Nincs Android SpeechRecognizer vagy második STT-modell.
               volatile boolean glossaryVoiceCaptureMode = false;
               EditText glossaryVoiceTarget;
@@ -378,6 +383,9 @@ jobs:
                   String topText = "";
                   String bottomText = "";
                   String pendingSourceText = "";
+                  // A két, azonos modellű, kiválasztott nyelvre korlátozott STT-hipotézis
+                  // közül kiválasztott forrásnyelv. A szöveges fordító ezt nem írhatja felül.
+                  String sttSourceLang = "";
                   boolean sourceTop = true;
                   boolean translatedOk = false;
                   int retryCount = 0;
@@ -415,12 +423,36 @@ jobs:
           
               static class SttResult {
                   final String transcript;
+                  final String sourceLang;
                   final boolean finalFlush;
                   final String error;
-                  SttResult(String transcript, boolean finalFlush, String error) {
+                  SttResult(String transcript, String sourceLang, boolean finalFlush, String error) {
                       this.transcript = transcript == null ? "" : transcript;
+                      this.sourceLang = sourceLang == null ? "" : sourceLang;
                       this.finalFlush = finalFlush;
                       this.error = error == null ? "" : error;
+                  }
+              }
+
+              static class TranscriptionCandidate {
+                  final String text;
+                  final String languageCode;
+                  final double averageLogProb;
+                  final double minimumLogProb;
+                  final int tokenCount;
+                  final String error;
+                  TranscriptionCandidate(String text, String languageCode, double averageLogProb,
+                                         double minimumLogProb, int tokenCount, String error) {
+                      this.text = text == null ? "" : text.trim();
+                      this.languageCode = languageCode == null ? "" : languageCode.toUpperCase(Locale.ROOT);
+                      this.averageLogProb = averageLogProb;
+                      this.minimumLogProb = minimumLogProb;
+                      this.tokenCount = tokenCount;
+                      this.error = error == null ? "" : error;
+                  }
+                  boolean usable() {
+                      return error.length() == 0 && text.length() > 0 && tokenCount > 0 &&
+                          averageLogProb >= STT_MIN_AVG_LOGPROB && minimumLogProb >= STT_MIN_TOKEN_LOGPROB;
                   }
               }
           
@@ -602,7 +634,7 @@ jobs:
                       save();
                   }
                   if(last < 419) {
-                      // V40.19: kötelező, fix hangút. Telefon mikrofon 48 kHz; Silero 16 kHz; STT 24 kHz.
+                      // Fix hangút: a telefon beépített mikrofonja közvetlenül 16 kHz mono PCM-et ad ugyanannak a Silero- és STT-láncnak.
                       // A Bluetooth/headset bemenetet és minden kommunikációs bemeneti fallbacket felülírjuk.
                       vadEngineMode = "silero";
                       sp.edit().putInt("stableDefaultsVersion", 419).apply();
@@ -844,6 +876,26 @@ jobs:
                       "FREQUENT_DOMAIN_VOCABULARY=" + vocabulary.toString() + ". ";
               }
           
+              String glossaryTranscriptionVocabulary() {
+                  LinkedHashSet<String> terms = new LinkedHashSet<>();
+                  for(GlossaryEntry e : glossaryEntries) {
+                      if(e == null || !e.enabled) continue;
+                      String canonical = sanitizeGlossaryTerm(e.text);
+                      if(canonical.length() > 0) terms.add(canonical);
+                      for(String alias : e.aliases) {
+                          String cleanAlias = sanitizeGlossaryTerm(alias);
+                          if(cleanAlias.length() > 0) terms.add(cleanAlias);
+                      }
+                  }
+                  StringBuilder out = new StringBuilder();
+                  for(String term : terms) {
+                      if(out.length() > 0) out.append(", ");
+                      if(out.length() + term.length() > 900) break;
+                      out.append(term);
+                  }
+                  return out.toString();
+              }
+
               String glossaryTranslationPrompt() {
                   JSONArray names = glossaryTermsJson(GLOSSARY_TYPE_NAME);
                   JSONArray protectedTerms = glossaryTermsJson(GLOSSARY_TYPE_PROTECTED);
@@ -1794,30 +1846,6 @@ jobs:
                   updateButtons();
               }
           
-              String speechTranscriptionPrompt() {
-                  if(glossaryVoiceCaptureMode) {
-                      return "This audio is a single user-dictated candidate glossary term, company name, place name or cargo label. " +
-                          "Transcribe only what is clearly audible, in whatever language or spelling the audio supports. Do not translate, explain, expand or normalize it into another term. " +
-                          glossaryRecognitionPrompt() +
-                          "Return only the transcription text. If uncertain, keep the closest audible wording; the user will manually verify and correct it before saving.";
-                  }
-                  String top = code(topLang).toUpperCase(Locale.ROOT);
-                  String bottom = code(bottomLang).toUpperCase(Locale.ROOT);
-                  return "Transcribe only the words that are clearly audible. " +
-                      "The speech language is exactly one of these two languages: " + top + " or " + bottom + ". " +
-                      "A speaker may switch between those two languages from one utterance to the next. Use the entire audio clip to determine the language before deciding how to write the opening word; do not bias the first word toward the previously spoken language. " +
-                      "For ordinary speech, never output words from a third language and never create a mixed-language transcription. " +
-                      "If an unclear sound cannot be written confidently as a word in either selected language, omit only that unclear sound. " +
-                      "Clearly spoken person, place, company and product names may keep their real spelling. " +
-                      glossaryRecognitionPrompt() +
-                      transcriptionProfilePrompt() +
-                      "Do not translate. Do not paraphrase. Do not repair meaning. " +
-                      "Do not complete unfinished sentences or add a sentence ending. " +
-                      "Do not infer or invent missing words. Keep fragments and incomplete phrases incomplete. " +
-                      "Preserve clearly audible names, numbers, slang and profanity exactly as heard. " +
-                      "If a word is unclear, omit only that unclear word instead of guessing or creating a full sentence.";
-              }
-          
               void clearPreRollAudio() {
                   synchronized(preRollAudioChunks) {
                       preRollAudioChunks.clear();
@@ -2062,19 +2090,21 @@ jobs:
           
               void appendSpeechAudioChunk(byte[] chunk, boolean confirmedSpeech) {
                   if(chunk == null || chunk.length == 0 || client == null) return;
-                  byte[] ready = null;
+                  byte[] emergencyReady = null;
                   synchronized(speechAudioWindowLock) {
                       speechAudioWindow.write(chunk, 0, chunk.length);
                       if(confirmedSpeech) speechAudioWindowConfirmedSpeechBytes += chunk.length;
-                      int needBytes = STT_SAMPLE_RATE * 2 * BLOCK_WINDOW_MS / 1000;
+                      int hardLimitBytes = STT_SAMPLE_RATE * 2 * MAX_AUDIO_SEGMENT_MS / 1000;
                       int minSpeechBytes = STT_SAMPLE_RATE * 2 * MIN_TRUE_SPEECH_AUDIO_MS / 1000;
-                      if(speechAudioWindow.size() >= needBytes) {
-                          if(speechAudioWindowConfirmedSpeechBytes >= minSpeechBytes) ready = speechAudioWindow.toByteArray();
+                      // Normál esetben itt nincs küldés: a blokkot a VAD-csend zárja le.
+                      // Csak egy rendellenesen soha le nem záródó, 20 másodperces szegmens kap memória-védelmi vágást.
+                      if(speechAudioWindow.size() >= hardLimitBytes) {
+                          if(speechAudioWindowConfirmedSpeechBytes >= minSpeechBytes) emergencyReady = speechAudioWindow.toByteArray();
                           speechAudioWindow.reset();
                           speechAudioWindowConfirmedSpeechBytes = 0;
                       }
                   }
-                  if(ready != null) transcribeAudioWindow(ready, false);
+                  if(emergencyReady != null) transcribeAudioWindow(emergencyReady, false);
               }
           
               void flushSpeechAudioWindow(boolean force) {
@@ -2114,16 +2144,16 @@ jobs:
                   return new int[]{sttSessionId, ++sttRequestSeq};
               }
           
-              void completeSttRequest(int session, int seq, String transcript, boolean finalFlush, String error) {
+              void completeSttRequest(int session, int seq, String transcript, String sourceLang, boolean finalFlush, String error) {
                   if(session != sttSessionId) return;
                   sttRequestsInFlight = Math.max(0, sttRequestsInFlight - 1);
-                  pendingSttResults.put(seq, new SttResult(transcript, finalFlush, error));
+                  pendingSttResults.put(seq, new SttResult(transcript, sourceLang, finalFlush, error));
                   while(true) {
                       SttResult ready = pendingSttResults.remove(sttDeliverSeq);
                       if(ready == null) break;
                       sttDeliverSeq++;
                       if(ready.transcript.trim().length() > 0) {
-                          handleTranscriptCompleted(ready.transcript.trim(), ready.finalFlush);
+                          handleTranscriptCompleted(ready.transcript.trim(), ready.sourceLang, ready.finalFlush);
                       } else if(ready.error.length() > 0) {
                           android.util.Log.e(LOG_TAG, "STT request failed: " + ready.error);
                           state.setText(streaming ? "mikrofon aktív – STT hiba" : "STT hiba – az előző átiratok megmaradtak");
@@ -2140,54 +2170,172 @@ jobs:
                   pendingSttResults.clear();
               }
           
+              TranscriptionCandidate parseTranscriptionCandidate(JSONObject obj, String languageCode) {
+                  if(obj == null) return new TranscriptionCandidate("", languageCode, Double.NEGATIVE_INFINITY, Double.NEGATIVE_INFINITY, 0, "üres STT válasz");
+                  String text = obj.optString("text", "").trim();
+                  JSONArray probs = obj.optJSONArray("logprobs");
+                  if(probs == null || probs.length() == 0) {
+                      return new TranscriptionCandidate(text, languageCode, Double.NEGATIVE_INFINITY, Double.NEGATIVE_INFINITY, 0, "hiányzó STT logprobs");
+                  }
+                  double sum = 0.0;
+                  double min = 0.0;
+                  int count = 0;
+                  for(int i=0; i<probs.length(); i++) {
+                      JSONObject item = probs.optJSONObject(i);
+                      if(item == null) continue;
+                      String token = item.optString("token", "");
+                      if(token.replaceAll("[^\\p{L}\\p{N}]", "").length() == 0) continue;
+                      double lp = item.optDouble("logprob", Double.NaN);
+                      if(Double.isNaN(lp) || Double.isInfinite(lp)) continue;
+                      if(count == 0 || lp < min) min = lp;
+                      sum += lp;
+                      count++;
+                  }
+                  if(count == 0) return new TranscriptionCandidate(text, languageCode, Double.NEGATIVE_INFINITY, Double.NEGATIVE_INFINITY, 0, "nincs értékelhető STT token");
+                  return new TranscriptionCandidate(text, languageCode, sum / count, min, count, "");
+              }
+
+              double pairCandidateScore(TranscriptionCandidate candidate) {
+                  if(candidate == null || !candidate.usable()) return Double.NEGATIVE_INFINITY;
+                  String candidateLang = candidate.languageCode.toLowerCase(Locale.ROOT);
+                  String languageText = stripLanguageNeutralGlossaryTerms(candidate.text);
+                  if(languageText.length() == 0 && languageNeutralGlossaryOnly(candidate.text)) return candidate.averageLogProb;
+                  if(hasUnsupportedPairDiacriticWithoutSelectedEvidence(languageText)) return Double.NEGATIVE_INFINITY;
+                  String third = strongThirdLanguageCode(languageText);
+                  if(third.length() > 0) return Double.NEGATIVE_INFINITY;
+                  String evidence = pairEvidenceLanguageCode(languageText);
+                  if(evidence.length() > 0 && !evidence.equalsIgnoreCase(candidateLang)) return Double.NEGATIVE_INFINITY;
+                  double score = candidate.averageLogProb;
+                  if(evidence.equalsIgnoreCase(candidateLang)) score += 0.08;
+                  if(exactShortReplyLanguageCode(candidate.text).equalsIgnoreCase(candidateLang)) score += 0.08;
+                  return score;
+              }
+
+              TranscriptionCandidate choosePairTranscriptionCandidate(TranscriptionCandidate[] candidates) {
+                  TranscriptionCandidate best = null;
+                  double bestScore = Double.NEGATIVE_INFINITY;
+                  double secondScore = Double.NEGATIVE_INFINITY;
+                  for(TranscriptionCandidate candidate : candidates) {
+                      double score = pairCandidateScore(candidate);
+                      if(score > bestScore) {
+                          secondScore = bestScore;
+                          bestScore = score;
+                          best = candidate;
+                      } else if(score > secondScore) {
+                          secondScore = score;
+                      }
+                  }
+                  if(best == null || Double.isInfinite(bestScore)) return null;
+                  // Két eltérő, majdnem azonos valószínűségű nyelvi hipotézisnél nem találunk ki irányt.
+                  // Egyetlen használható hipotézis, illetve legalább kismértékű akusztikai előny esetén elfogadjuk a jobbat.
+                  if(!Double.isInfinite(secondScore) && bestScore - secondScore < 0.03) return null;
+                  return best;
+              }
+
+              MultipartBody transcriptionBody(byte[] wav, String languageCode, boolean glossaryRequest) {
+                  MultipartBody.Builder builder = new MultipartBody.Builder().setType(MultipartBody.FORM)
+                      .addFormDataPart("model", "gpt-4o-transcribe")
+                      .addFormDataPart("response_format", "json")
+                      .addFormDataPart("temperature", "0")
+                      .addFormDataPart("include[]", "logprobs");
+                  if(!glossaryRequest) {
+                      // Az API egy kérésben egyetlen input language értéket fogad. Ezért ugyanazzal
+                      // az egyetlen STT-modellel párhuzamosan elkészítjük a két kiválasztott nyelv
+                      // kényszerített hipotézisét, és a token-logvalószínűség alapján választunk.
+                      builder.addFormDataPart("language", languageCode.toLowerCase(Locale.ROOT));
+                  }
+                  // Nem küldünk angol utasításszöveget ismeretlen nyelvű hanghoz. A prompt kizárólag
+                  // a felhasználó kanonikus szótári alakjainak és aliasainak rövid adatlistája.
+                  String vocabulary = glossaryTranscriptionVocabulary();
+                  if(vocabulary.length() > 0) builder.addFormDataPart("prompt", vocabulary);
+                  return builder.addFormDataPart("file", "speech.wav",
+                      RequestBody.create(MediaType.parse("audio/wav"), wav)).build();
+              }
+
               void transcribeAudioWindow(byte[] pcm, boolean finalFlush) {
                   if(pcm == null || pcm.length == 0 || client == null || !hasKey()) return;
-                  // Belső, azonnali leállítás után a még futó audio-szál nem indíthat
-                  // új STT-kérést. Graceful STOP alatt viszont a maradék még elküldhető.
                   int[] requestOrder = allocateSttRequestOrder();
                   if(requestOrder == null) return;
                   final int session = requestOrder[0];
                   final int seq = requestOrder[1];
                   try {
-                      byte[] wav = wavFromPcmStt(pcm);
-                      MultipartBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
-                          .addFormDataPart("model", "gpt-4o-mini-transcribe")
-                          .addFormDataPart("response_format", "json")
-                          .addFormDataPart("temperature", "0")
-                          // V40.33: a kiválasztott nyelvpárra, szótárra és profilra felépített
-                          // STT-korlát eddig csak elkészült, de nem került bele a multipart kérésbe.
-                          // Emiatt a transcribe végpont szabad automatikus nyelvfelismeréssel dolgozott.
-                          .addFormDataPart("prompt", speechTranscriptionPrompt())
-                          .addFormDataPart("file", "speech.wav", RequestBody.create(MediaType.parse("audio/wav"), wav))
-                          .build();
-                      Request req = new Request.Builder().url("https://api.openai.com/v1/audio/transcriptions")
-                          .addHeader("Authorization", "Bearer " + apiKey.trim())
-                          .post(body).build();
-                      client.newCall(req).enqueue(new Callback() {
-                          @Override public void onFailure(Call call, java.io.IOException e) {
-                              runOnUiThread(() -> completeSttRequest(session, seq, "", finalFlush, "kapcsolat: " + e.getMessage()));
-                          }
-                          @Override public void onResponse(Call call, Response response) throws java.io.IOException {
-                              String raw = response.body() == null ? "" : response.body().string();
-                              if(!response.isSuccessful()) {
-                                  runOnUiThread(() -> completeSttRequest(session, seq, "", finalFlush, "HTTP " + response.code()));
-                                  return;
+                      final byte[] wav = wavFromPcmStt(pcm);
+                      final boolean glossaryRequest = glossaryVoiceCaptureMode;
+                      String topCode = code(topLang).toLowerCase(Locale.ROOT);
+                      String bottomCode = code(bottomLang).toLowerCase(Locale.ROOT);
+                      final String[] languages = glossaryRequest
+                          ? new String[]{"glossary"}
+                          : (topCode.equals(bottomCode) ? new String[]{topCode} : new String[]{topCode, bottomCode});
+                      final TranscriptionCandidate[] candidates = new TranscriptionCandidate[languages.length];
+                      final int[] remaining = new int[]{languages.length};
+                      final Object pairLock = new Object();
+
+                      for(int i=0; i<languages.length; i++) {
+                          final int index = i;
+                          final String languageCode = languages[i];
+                          Request req = new Request.Builder().url("https://api.openai.com/v1/audio/transcriptions")
+                              .addHeader("Authorization", "Bearer " + apiKey.trim())
+                              .post(transcriptionBody(wav, languageCode, glossaryRequest)).build();
+                          client.newCall(req).enqueue(new Callback() {
+                              void finishCandidate(TranscriptionCandidate candidate) {
+                                  boolean pairFinished;
+                                  synchronized(pairLock) {
+                                      candidates[index] = candidate;
+                                      remaining[0]--;
+                                      pairFinished = remaining[0] == 0;
+                                  }
+                                  if(!pairFinished) return;
+                                  TranscriptionCandidate chosen = glossaryRequest
+                                      ? (candidates.length > 0 && candidates[0] != null && candidates[0].usable() ? candidates[0] : null)
+                                      : choosePairTranscriptionCandidate(candidates);
+                                  String combinedError = "";
+                                  if(chosen == null) {
+                                      StringBuilder errors = new StringBuilder();
+                                      for(TranscriptionCandidate c : candidates) {
+                                          if(c == null) continue;
+                                          if(c.error.length() > 0) {
+                                              if(errors.length() > 0) errors.append("; ");
+                                              errors.append(c.languageCode).append(": ").append(c.error);
+                                          }
+                                      }
+                                      combinedError = errors.length() > 0 ? errors.toString() :
+                                          (glossaryRequest ? "bizonytalan szótári hangbevitel" : "bizonytalan kiválasztott nyelvpár-hipotézis");
+                                  }
+                                  final TranscriptionCandidate result = chosen;
+                                  final String errorText = combinedError;
+                                  runOnUiThread(() -> completeSttRequest(session, seq,
+                                      result == null ? "" : result.text,
+                                      result == null ? "" : result.languageCode,
+                                      finalFlush, errorText));
                               }
-                              try {
-                                  JSONObject obj = new JSONObject(raw);
-                                  String tr = obj.optString("text", "").trim();
-                                  runOnUiThread(() -> completeSttRequest(session, seq, tr, finalFlush, ""));
-                              } catch(Exception e) {
-                                  runOnUiThread(() -> completeSttRequest(session, seq, "", finalFlush, "válasz nem értelmezhető"));
+
+                              @Override public void onFailure(Call call, java.io.IOException e) {
+                                  finishCandidate(new TranscriptionCandidate("", languageCode, Double.NEGATIVE_INFINITY,
+                                      Double.NEGATIVE_INFINITY, 0, "kapcsolat: " + e.getMessage()));
                               }
-                          }
-                      });
+
+                              @Override public void onResponse(Call call, Response response) throws java.io.IOException {
+                                  String raw = response.body() == null ? "" : response.body().string();
+                                  if(!response.isSuccessful()) {
+                                      finishCandidate(new TranscriptionCandidate("", languageCode, Double.NEGATIVE_INFINITY,
+                                          Double.NEGATIVE_INFINITY, 0, "HTTP " + response.code()));
+                                      return;
+                                  }
+                                  try {
+                                      finishCandidate(parseTranscriptionCandidate(new JSONObject(raw), languageCode));
+                                  } catch(Exception e) {
+                                      finishCandidate(new TranscriptionCandidate("", languageCode, Double.NEGATIVE_INFINITY,
+                                          Double.NEGATIVE_INFINITY, 0, "válasz nem értelmezhető"));
+                                  }
+                              }
+                          });
+                      }
                   } catch(Exception e) {
                       android.util.Log.e(LOG_TAG, "STT preparation failed", e);
-                      runOnUiThread(() -> completeSttRequest(session, seq, "", finalFlush, "előkészítés: " + e.getMessage()));
+                      runOnUiThread(() -> completeSttRequest(session, seq, "", "", finalFlush, "előkészítés: " + e.getMessage()));
                   }
               }
-          
+
               void sendAudioChunk(byte[] chunk, boolean confirmedSpeech) throws Exception {
                   appendSpeechAudioChunk(chunk, confirmedSpeech);
               }
@@ -2313,7 +2461,7 @@ jobs:
               void showPlannedInputRoute() {
                   String suffix = activeInterpreterOutputLabel == null || activeInterpreterOutputLabel.isEmpty()
                       ? "" : " • kimenet: " + activeInterpreterOutputLabel;
-                  setInputRouteHeader("BEMENET: telefon beépített mikrofon • 48 kHz" + suffix);
+                  setInputRouteHeader("BEMENET: telefon beépített mikrofon • 16 kHz" + suffix);
               }
           
               void refreshActualInputRoute(AudioRecord recorder) {
@@ -2323,7 +2471,7 @@ jobs:
                       if(routed != null && routed.getType() == AudioDeviceInfo.TYPE_BUILTIN_MIC) {
                           String suffix = activeInterpreterOutputLabel == null || activeInterpreterOutputLabel.isEmpty()
                               ? "" : " • kimenet: " + activeInterpreterOutputLabel;
-                          setInputRouteHeader("BEMENET: " + compactAudioDeviceLabel(routed) + " • 48 kHz" + suffix);
+                          setInputRouteHeader("BEMENET: " + compactAudioDeviceLabel(routed) + " • 16 kHz" + suffix);
                       } else if(routed != null) {
                           setInputRouteHeader("BEMENET TILTVA: " + compactAudioDeviceLabel(routed));
                           android.util.Log.e(LOG_TAG, "Forbidden non-phone microphone route detected: " + compactAudioDeviceLabel(routed));
@@ -2622,7 +2770,7 @@ jobs:
                       long routeConfirmDeadlineMs = SystemClock.elapsedRealtime() + 1200L;
                       long lastBuiltInRouteVerifiedMs = 0L;
                       // V40.28: amíg az Android az induláskor még null route-ot ad vissza,
-                      // legfeljebb 1200 ms nyers 48 kHz-es hangot megőrzünk. Nincs várakozás,
+                      // legfeljebb 1200 ms nyers 16 kHz-es hangot megőrzünk. Nincs várakozás,
                       // nincs új szál és nincs folyamatos többletterhelés; a puffer csak egyszer,
                       // az első igazolt TYPE_BUILTIN_MIC útvonalnál kerül feldolgozásra.
                       final int startupRouteAudioMaxBytes = CAPTURE_SAMPLE_RATE * 2 * 1200 / 1000;
@@ -3059,7 +3207,7 @@ jobs:
                   }
               }
           
-              void handleTranscriptCompleted(String transcript, boolean finalFlush) {
+              void handleTranscriptCompleted(String transcript, String sttSourceLang, boolean finalFlush) {
                   if(transcript == null || transcript.trim().length() == 0) {
                       speechIdleFlushToken++;
                       return;
@@ -3084,13 +3232,13 @@ jobs:
                   }
           
                   if(!finalFlush) {
-                      // V343: egy teljes 7 másodperces audioablak STT-válasza pontosan egy kész blokk.
+                      // A 20 másodperces kizárólagos vészplafonnál kiadott STT-válasz pontosan egy kész blokk.
                       // Nem kerül vissza a második időalapú speechTranscriptBuffer-darabolásba,
                       // ezért ugyanaz az STT-válasz nem tud két-három blokkot egyszerre kiengedni.
                       String b = normalizeAndDeduplicateSpeechBlock(transcript);
                       if(b.length() > 0) {
                           boolean sourceGuessTop = sourceIsTopBySelectedPair(b, topActive);
-                          int id = addSourceOnlyBlock(sourceGuessTop, b);
+                          int id = addSourceOnlyBlock(sourceGuessTop, b, sttSourceLang);
                           if(id >= 0) {
                               firstSpeechBlockReleased = true;
                               speechTranslateQueue.add(id);
@@ -3103,14 +3251,14 @@ jobs:
                       return;
                   }
           
-                  // A beszéd végi, 7 másodpercnél rövidebb maradék továbbra is a meglévő
-                  // biztonságos lezárási úton kerül kiadásra.
+                  // A normál blokkot a Silero-csend zárta le; a kiválasztott STT-nyelvet
+                  // ugyanahhoz a teljes átirathoz továbbítjuk.
                   speechTranscriptBuffer = transcript;
-                  int released = flushReadyTranscriptBlocks(true);
+                  int released = flushReadyTranscriptBlocks(true, sttSourceLang);
                   speechIdleFlushToken++;
               }
           
-              int flushReadyTranscriptBlocks(boolean flushAll) {
+              int flushReadyTranscriptBlocks(boolean flushAll, String sttSourceLang) {
                   int releasedCount = 0;
                   // V318: az első élő blokkot nem engedjük ki azonnal 1-2 bizonytalan szóból.
                   // Ez szűri a kezdő "Microfoonprobe / Kazakhstan / UFO" jellegű félrehallást,
@@ -3132,7 +3280,7 @@ jobs:
                       // A helyi oldalbecslés csak ideiglenes kijelzési hely, az AI válasz után
                       // a blokk a tényleges SOURCE_LANG szerinti oldalra kerül.
                       boolean sourceGuessTop = sourceIsTopBySelectedPair(b, topActive);
-                      int id = addSourceOnlyBlock(sourceGuessTop, b);
+                      int id = addSourceOnlyBlock(sourceGuessTop, b, sttSourceLang);
                       if(id < 0) continue;
                       firstSpeechBlockReleased = true;
                       speechTranslateQueue.add(id);
@@ -3313,10 +3461,7 @@ jobs:
               String selectedPairLanguageCode(String text) {
                   String exactShort = exactShortReplyLanguageCode(text);
                   if(exactShort.length() > 0) return exactShort;
-                  String detected = strongLanguageCode(text);
-                  if(detected.length() == 0) return "";
-                  if(detected.equalsIgnoreCase(code(topLang)) || detected.equalsIgnoreCase(code(bottomLang))) return detected;
-                  return "";
+                  return pairEvidenceLanguageCode(text);
               }
 
               String exactShortReplyLanguageCode(String text) {
@@ -3328,9 +3473,9 @@ jobs:
                   if(x.length() == 0 || x.split("\\s+").length > 3) return "";
 
                   String[][] exact = {
-                      {"hu","igen","nem","köszönöm","kérem","szia","rendben","persze","mehet"},
+                      {"hu","igen","nem","köszönöm","kérem","szia","szervusz","rendben","persze","mehet","jó","oké","értem","hallom","várj","kész","megvan"},
                       {"en","yes","no","thank you","thanks","please","hello","okay","ok","sure"},
-                      {"fr","oui","non","merci","bonjour","d accord","bien sûr"},
+                      {"fr","oui","non","merci","bonjour","salut","d accord","bien sûr","ça va","ca va","je comprends","j entends","attends","prêt","prete"},
                       {"de","ja","nein","danke","bitte","hallo","in ordnung","klar"},
                       {"it","sì","si","no","grazie","prego","ciao","va bene"},
                       {"es","sí","si","no","gracias","por favor","hola","vale"},
@@ -3355,6 +3500,36 @@ jobs:
                   return match;
               }
           
+              String exactKnownShortReplyLanguageCode(String text) {
+                  if(text == null) return "";
+                  String x = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFC)
+                      .toLowerCase(Locale.ROOT)
+                      .replaceAll("[^\\p{L}]+", " ")
+                      .trim().replaceAll("\\s+", " ");
+                  if(x.length() == 0 || x.split("\\s+").length > 3) return "";
+                  String[][] exact = {
+                      {"hu","igen","nem","köszönöm","kérem","szia","szervusz","rendben","persze","mehet","jó","oké","értem","hallom","várj","kész","megvan"},
+                      {"en","yes","no","thank you","thanks","please","hello","okay","ok","sure"},
+                      {"fr","oui","non","merci","bonjour","salut","d accord","bien sûr","ça va","ca va","je comprends","j entends","attends","prêt","prete"},
+                      {"de","ja","nein","danke","bitte","hallo","in ordnung","klar"},
+                      {"it","sì","si","no","grazie","prego","ciao","va bene"},
+                      {"es","sí","si","no","gracias","por favor","hola","vale"},
+                      {"ro","da","nu","mulțumesc","multumesc","vă rog","va rog","bună","buna"},
+                      {"hr","da","ne","hvala","molim","bok","u redu"},
+                      {"sk","áno","ano","nie","ďakujem","dakujem","prosím","prosim","dobre"},
+                      {"sl","da","ne","hvala","prosim","živjo","zivjo","v redu"}
+                  };
+                  String match = "";
+                  for(String[] row : exact) {
+                      for(int i=1; i<row.length; i++) {
+                          if(!x.equals(row[i])) continue;
+                          if(match.length() > 0 && !match.equals(row[0])) return "";
+                          match = row[0];
+                      }
+                  }
+                  return match;
+              }
+
               int scoreTextForLanguage(String text, String lang) {
                   if(text == null || lang == null) return 0;
                   String x = text.toLowerCase(Locale.ROOT);
@@ -3362,9 +3537,9 @@ jobs:
                   HashSet<String> tokens = new HashSet<>();
                   for(String w : words) if(w != null && !w.isEmpty()) tokens.add(w);
                   String[][] lex = {
-                      {"hu","hogy","nem","igen","és","vagy","van","volt","lesz","akkor","amikor","mennyi","hányan","ember","emberek","jó","napot","uram","tudjuk","lehet","kell","még","már","csak","egy","két","három","itt","ott","ezt","az","meg","köszönöm","kérem","szia","szeretnék","vagyok","vagyunk","voltak","emlékszem","ugye"},
-                      {"fr","le","la","les","un","une","des","de","du","dans","sur","avec","pour","pas","ne","est","sont","était","étaient","combien","quand","que","qui","je","tu","il","elle","nous","vous","ils","elles","bonjour","monsieur","merci","oui","non","peux","peut","appeler","officiellement","possible","contrat","club","personnes","présents","souviens"},
-                      {"en","the","and","is","are","was","were","you","i","he","she","we","they","can","cannot","not","with","for","from","this","that","hello","thanks","thank","please"},
+                      {"hu","hogy","nem","igen","és","vagy","van","volt","lesz","akkor","amikor","mennyi","hányan","ember","emberek","jó","napot","uram","tudjuk","lehet","kell","még","már","csak","egy","két","három","itt","ott","ezt","az","meg","köszönöm","kérem","szia","szeretnék","vagyok","vagyunk","voltak","emlékszem","ugye","hallod","hallok","mondok","mondom","amit","érted","értem","hiba","hibák","benne","működik","rossz","jó","ennyi","megvan","megérkezett"},
+                      {"fr","le","la","les","un","une","des","de","du","dans","sur","avec","pour","pas","ne","est","sont","était","étaient","combien","quand","que","qui","je","tu","il","elle","nous","vous","ils","elles","bonjour","monsieur","merci","oui","non","peux","peut","appeler","officiellement","possible","contrat","club","personnes","présents","souviens","entends","entend","dis","dit","erreur","erreurs","dedans","marche","comprends","compris","encore","ça","ceci","voilà"},
+                      {"en","the","and","is","are","was","were","you","i","he","she","we","they","can","cannot","not","with","for","from","this","that","hello","thanks","thank","please","yes","no","go","well","what","hear","say","said","incredible","now","works","like","close","block","still","there","how","many","errors","inside","again","understand"},
                       {"de","der","die","das","ein","eine","und","ist","sind","war","waren","nicht","ich","du","er","sie","wir","ihr","mit","für","von","hallo","guten","tag","danke","bitte","können","kann"},
                       {"it","il","lo","la","gli","le","un","una","di","del","della","e","è","sono","non","io","tu","lui","lei","noi","voi","con","per","ciao","buongiorno","grazie","prego"},
                       {"es","el","la","los","las","un","una","de","del","y","es","son","no","yo","tú","usted","nosotros","vosotros","con","para","hola","buenos","días","gracias","por","qué"},
@@ -3443,7 +3618,9 @@ jobs:
                           bestThird = lang;
                       }
                   }
-                  if(bestThirdScore >= 8 && bestThirdScore >= bestSelectedScore + 4) return bestThird;
+                  int words = speechWordCount(cleaned);
+                  int required = 4;
+                  if(bestThirdScore >= required && bestThirdScore >= bestSelectedScore + 2) return bestThird;
                   return "";
               }
           
@@ -3538,7 +3715,7 @@ jobs:
           
                   // V318: egyszerű blokkhatár-döntés.
                   // Ha van kész mondatvég, azonnal zár.
-                  // Ha nincs, legfeljebb 7 mp folyamatos puffer után szóhatáron zár.
+                  // Ha nincs, a 20 másodperces kizárólagos vészplafonnál zár szóhatáron; normál esetben a Silero-csend már korábban lezárta az audio blokkot.
                   // Nincs karakter-, vessző-, szótár- vagy többágú monológlogika.
                   int cut = firstHardSentenceEnd(s);
                   if(cut >= 0) return cut;
@@ -3670,6 +3847,141 @@ jobs:
                   return x.replaceAll("\\s+", " ").trim();
               }
           
+              String stripLanguageNeutralGlossaryTerms(String text) {
+                  String x = text == null ? "" : text;
+                  for(GlossaryEntry e : glossaryEntries) {
+                      if(e == null || !e.enabled) continue;
+                      String type = normalizeGlossaryType(e.type);
+                      if(!GLOSSARY_TYPE_NAME.equals(type) && !GLOSSARY_TYPE_PROTECTED.equals(type)) continue;
+                      ArrayList<String> variants = new ArrayList<>();
+                      variants.add(sanitizeGlossaryTerm(e.text));
+                      for(String alias : e.aliases) variants.add(sanitizeGlossaryTerm(alias));
+                      for(String variant : variants) {
+                          if(variant == null || variant.length() == 0) continue;
+                          x = x.replaceAll("(?iu)(?<!\\p{L})" + java.util.regex.Pattern.quote(variant) + "(?!\\p{L})", " ");
+                      }
+                  }
+                  return cleanTranscriptForSelectedPair(x).replaceAll("\\s+", " ").trim();
+              }
+
+              boolean languageNeutralGlossaryOnly(String text) {
+                  if(text == null || text.trim().length() == 0) return false;
+                  return speechWordCount(stripLanguageNeutralGlossaryTerms(text)) == 0;
+              }
+
+              String allowedDiacriticsForLanguage(String lang) {
+                  String l = lang == null ? "" : lang.toLowerCase(Locale.ROOT);
+                  if(l.equals("hu")) return "áéíóöőúüűÁÉÍÓÖŐÚÜŰ";
+                  if(l.equals("fr")) return "àâæçéèêëîïôœùûüÿÀÂÆÇÉÈÊËÎÏÔŒÙÛÜŸ";
+                  if(l.equals("de")) return "äöüßÄÖÜẞ";
+                  if(l.equals("it")) return "àèéìíîòóùúÀÈÉÌÍÎÒÓÙÚ";
+                  if(l.equals("es")) return "áéíñóúüÁÉÍÑÓÚÜ";
+                  if(l.equals("ro")) return "ăâîșşțţĂÂÎȘŞȚŢ";
+                  if(l.equals("hr")) return "čćđšžČĆĐŠŽ";
+                  if(l.equals("sk")) return "áäčďéíĺľňóôŕšťúýžÁÄČĎÉÍĹĽŇÓÔŔŠŤÚÝŽ";
+                  if(l.equals("sl")) return "čšžČŠŽ";
+                  return "";
+              }
+
+              boolean containsUnsupportedSelectedPairDiacritic(String text) {
+                  if(text == null) return false;
+                  String allowed = allowedDiacriticsForLanguage(code(topLang).toLowerCase(Locale.ROOT)) +
+                      allowedDiacriticsForLanguage(code(bottomLang).toLowerCase(Locale.ROOT));
+                  for(int i=0; i<text.length(); i++) {
+                      char ch = text.charAt(i);
+                      if(!Character.isLetter(ch) || ch < 128) continue;
+                      if(allowed.indexOf(ch) >= 0) continue;
+                      String base = java.text.Normalizer.normalize(String.valueOf(ch), java.text.Normalizer.Form.NFD)
+                          .replaceAll("\\p{M}+", "");
+                      if(base.length() == 1 && base.charAt(0) < 128 && allowed.indexOf(ch) < 0) return true;
+                  }
+                  return false;
+              }
+
+              boolean hasUnsupportedPairDiacriticWithoutSelectedEvidence(String text) {
+                  if(!containsUnsupportedSelectedPairDiacritic(text)) return false;
+                  return pairEvidenceLanguageCode(text).length() == 0;
+              }
+
+              String pairEvidenceLanguageCode(String text) {
+                  String exact = exactShortReplyLanguageCode(text);
+                  if(exact.length() > 0) return exact;
+                  String cleaned = cleanTranscriptForSelectedPair(text);
+                  int words = speechWordCount(cleaned);
+                  if(words == 0) return "";
+                  String top = code(topLang).toLowerCase(Locale.ROOT);
+                  String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
+                  int topScore = scoreTextForLanguage(cleaned, top);
+                  int bottomScore = scoreTextForLanguage(cleaned, bottom);
+                  int need = words <= 3 ? 2 : 4;
+                  if(topScore >= need && topScore >= bottomScore + 1) return top;
+                  if(bottomScore >= need && bottomScore >= topScore + 1) return bottom;
+                  return "";
+              }
+
+              double normalizedTextSimilarity(String a, String b) {
+                  String x = normalizeSpeechBlockHash(a).replace(" ", "");
+                  String y = normalizeSpeechBlockHash(b).replace(" ", "");
+                  if(x.length() == 0 || y.length() == 0) return 0.0;
+                  int[] prev = new int[y.length() + 1];
+                  int[] cur = new int[y.length() + 1];
+                  for(int j=0; j<=y.length(); j++) prev[j] = j;
+                  for(int i=1; i<=x.length(); i++) {
+                      cur[0] = i;
+                      for(int j=1; j<=y.length(); j++) {
+                          int cost = x.charAt(i-1) == y.charAt(j-1) ? 0 : 1;
+                          cur[j] = Math.min(Math.min(cur[j-1] + 1, prev[j] + 1), prev[j-1] + cost);
+                      }
+                      int[] swap = prev; prev = cur; cur = swap;
+                  }
+                  int max = Math.max(x.length(), y.length());
+                  return 1.0 - (prev[y.length()] / (double)Math.max(1, max));
+              }
+
+              boolean validatedSelectedPairSource(String raw, String clean, String normalizedSource) {
+                  if(raw == null || clean == null || normalizedSource == null) return false;
+                  String rawLanguageText = stripLanguageNeutralGlossaryTerms(raw);
+                  String cleanLanguageText = stripLanguageNeutralGlossaryTerms(clean);
+                  if(cleanLanguageText.length() == 0 && languageNeutralGlossaryOnly(clean))
+                      return normalizedTextSimilarity(raw, clean) >= 0.45;
+                  if(hasUnsupportedPairDiacriticWithoutSelectedEvidence(rawLanguageText) ||
+                     hasUnsupportedPairDiacriticWithoutSelectedEvidence(cleanLanguageText)) return false;
+                  String source = normalizedSource.toLowerCase(Locale.ROOT);
+                  String evidence = pairEvidenceLanguageCode(cleanLanguageText);
+                  String exactKnown = exactKnownShortReplyLanguageCode(cleanLanguageText);
+                  int words = speechWordCount(cleanLanguageText);
+                  if(words <= 3) {
+                      if(evidence.length() > 0 && !evidence.equals(source)) return false;
+                      if(exactKnown.length() > 0 && !exactKnown.equals(source)) return false;
+                      String third = strongThirdLanguageCode(cleanLanguageText);
+                      if(third.length() > 0) return false;
+                      double similarity = normalizedTextSimilarity(raw, clean);
+                      if(evidence.equals(source) || exactKnown.equals(source)) return similarity >= 0.45;
+                      // Ismeretlen, de változatlan rövid szakmai szó vagy név csak akkor marad,
+                      // ha a párra korlátozott STT és a tisztító kör lényegében ugyanazt adta.
+                      return similarity >= 0.75;
+                  }
+                  String rawThird = strongThirdLanguageCode(rawLanguageText);
+                  if(rawThird.length() > 0) return false;
+                  if(evidence.length() > 0 && !evidence.equals(source)) return false;
+                  return normalizedTextSimilarity(raw, clean) >= 0.30;
+              }
+
+              boolean validatedSelectedPairTranslation(String translation, String targetCode) {
+                  if(translation == null || targetCode == null || translation.trim().length() == 0) return false;
+                  String languageText = stripLanguageNeutralGlossaryTerms(translation);
+                  if(languageText.length() == 0 && languageNeutralGlossaryOnly(translation)) return true;
+                  if(hasUnsupportedPairDiacriticWithoutSelectedEvidence(languageText)) return false;
+                  String target = targetCode.toLowerCase(Locale.ROOT);
+                  String evidence = pairEvidenceLanguageCode(languageText);
+                  String exactKnown = exactKnownShortReplyLanguageCode(languageText);
+                  if(evidence.length() > 0 && !evidence.equals(target)) return false;
+                  if(exactKnown.length() > 0 && !exactKnown.equals(target)) return false;
+                  String third = strongThirdLanguageCode(languageText);
+                  if(third.length() > 0) return false;
+                  return true;
+              }
+
               String normalizeAiSourceLangCode(String sourceLang) {
                   if(sourceLang == null) return "";
                   String s = java.text.Normalizer.normalize(sourceLang, java.text.Normalizer.Form.NFD)
@@ -3690,13 +4002,14 @@ jobs:
                   return "";
               }
           
-              int addSourceOnlyBlock(boolean sourceIsTop, String original) {
+              int addSourceOnlyBlock(boolean sourceIsTop, String original, String sttSourceLang) {
                   // V40.32: a nyers STT csak akkor jelenik meg azonnal, ha a kiválasztott
                   // nyelvpáron belül a helyi nyelvdöntés biztos. Bizonytalan rövid blokknál
                   // a blokk rejtve várja meg az egyetlen AI nyelvdöntést, így nem villan fel
                   // előbb a rossz ablakban, majd nem ugrik át utólag a másik oldalra.
                   String raw = original == null ? "" : original.trim();
-                  String localLanguage = selectedPairLanguageCode(raw);
+                  String normalizedSttLanguage = normalizeAiSourceLangCode(sttSourceLang);
+                  String localLanguage = normalizedSttLanguage.length() > 0 ? normalizedSttLanguage : selectedPairLanguageCode(raw);
                   boolean localSideCertain = localLanguage.length() > 0;
                   if(localSideCertain) sourceIsTop = localLanguage.equalsIgnoreCase(code(topLang));
                   if(isRecentlyDisplayedSourceDuplicate(sourceIsTop, raw)) return -1;
@@ -3706,11 +4019,13 @@ jobs:
                   b.sourceTop = sourceIsTop;
                   b.translatedOk = false;
                   b.pendingSourceText = raw;
-                  String visibleSource = localSideCertain ? userVisibleSpeechTextOrEmpty(raw) : "";
-                  b.topText = sourceIsTop ? visibleSource : "";
-                  b.bottomText = sourceIsTop ? "" : visibleSource;
+                  b.sttSourceLang = normalizedSttLanguage;
+                  // A nyers STT soha nem kerül közvetlenül egyik ablakba sem. Csak a validált
+                  // source_lang + clean_source + translation hármas válhat láthatóvá, ezért nincs
+                  // rossz ablakba villanás és harmadik nyelvű nyers szöveg sem maradhat a képernyőn.
+                  b.topText = "";
+                  b.bottomText = "";
                   textBlocks.add(b);
-                  if(localSideCertain) renderBlocksKeepView();
                   return textBlocks.size() - 1;
               }
           
@@ -3802,32 +4117,39 @@ jobs:
                       final int requestSession = sttSessionId;
                       JSONObject root = new JSONObject();
                       root.put("model", model);
-                      root.put("temperature", 0.1);
+                      root.put("temperature", 0);
                       JSONArray messages = new JSONArray();
                       messages.put(new JSONObject().put("role", "system").put("content", speechBlockInstructions()));
                       String topCode = code(topLang).toUpperCase(Locale.ROOT);
                       String bottomCode = code(bottomLang).toUpperCase(Locale.ROOT);
-                      String localLanguageHint = selectedPairLanguageCode(src);
+                      String localLanguageHint = b.sttSourceLang == null || b.sttSourceLang.length() == 0
+                          ? selectedPairLanguageCode(src)
+                          : b.sttSourceLang;
                       String localHintText = localLanguageHint.length() == 0 ? "" :
-                          "LOCAL_STRONG_LANGUAGE_EVIDENCE: " + localLanguageHint.toUpperCase(Locale.ROOT) +
-                          " (consistency hint only; verify it against RAW_SPEECH_TEXT).\n";
+                          "STT_SELECTED_LANGUAGE: " + localLanguageHint.toUpperCase(Locale.ROOT) +
+                          " (chosen from the two selected-language audio hypotheses; do not change it).\n";
+                      String previousContext = speechWordCount(src) <= 3 ? "" : speechPreviousContextHint();
                       messages.put(new JSONObject().put("role", "user").put("content",
-                          speechPreviousContextHint() + localHintText +
+                          previousContext + localHintText +
                           "RAW_SPEECH_TEXT (the only text to clean and translate):\n" + pendingSpeechGlossaryProtection.text));
                       root.put("messages", messages);
           
                       // V341: strict Structured Outputs. A forrásnyelv csak a kiválasztott két kód egyike lehet.
                       JSONObject properties = new JSONObject();
+                      properties.put("accepted", new JSONObject().put("type", "boolean")
+                          .put("description", "True only when RAW_SPEECH_TEXT is clearly meaningful speech in exactly one selected language. False for third-language text, mixed-language debris, noise or an uncertain fragment."));
                       properties.put("source_lang", new JSONObject().put("type", "string")
-                          .put("enum", new JSONArray().put(topCode).put(bottomCode))
-                          .put("description", "The detected source language. It must be exactly one of the two selected language codes."));
+                          .put("enum", localLanguageHint.length() > 0
+                              ? new JSONArray().put(localLanguageHint.toUpperCase(Locale.ROOT))
+                              : new JSONArray().put(topCode).put(bottomCode))
+                          .put("description", "The source language selected by the pair-constrained audio transcription. It must not be changed by this text step."));
                       properties.put("clean_source", new JSONObject().put("type", "string")
                           .put("description", "Corrected transcription entirely in source_lang. No ordinary words from a third language and no target-language mixture. Genuine proper names and protected glossary placeholders/terms may remain unchanged."));
                       properties.put("translation", new JSONObject().put("type", "string")
                           .put("description", "Translation entirely in the other selected language, without ordinary source-language or third-language mixture. Genuine proper names and protected glossary placeholders/terms may remain unchanged."));
                       JSONObject schema = new JSONObject()
                           .put("type", "object").put("properties", properties)
-                          .put("required", new JSONArray().put("source_lang").put("clean_source").put("translation"))
+                          .put("required", new JSONArray().put("accepted").put("source_lang").put("clean_source").put("translation"))
                           .put("additionalProperties", false);
                       JSONObject jsonSchema = new JSONObject()
                           .put("name", "speech_clean_and_translate").put("strict", true).put("schema", schema);
@@ -3904,16 +4226,13 @@ jobs:
                       TextBlock b = textBlocks.get(id);
                       b.translatedOk = false;
                       b.retryCount = 0;
-                      if((b.topText == null || b.topText.trim().length() == 0) &&
-                         (b.bottomText == null || b.bottomText.trim().length() == 0)) {
-                          String visibleSource = userVisibleSpeechTextOrEmpty(b.pendingSourceText);
-                          if(b.sourceTop) b.topText = visibleSource;
-                          else b.bottomText = visibleSource;
-                      }
+                      b.pendingSourceText = "";
+                      b.topText = "";
+                      b.bottomText = "";
                   }
           
                   renderBlocksKeepView();
-                  state.setText(streaming ? "mikrofon aktív – fordítási hiba" : "fordítási hiba – az átirat megmaradt");
+                  state.setText(streaming ? "mikrofon aktív – bizonytalan beszéd eldobva" : "bizonytalan beszéd eldobva");
                   if(!speechTranslateQueue.isEmpty()) processNextSpeechTranslation();
                   else maybeFinishStop();
               }
@@ -3942,6 +4261,10 @@ jobs:
           
                   try {
                       JSONObject structured = new JSONObject(out);
+                      if(!structured.optBoolean("accepted", false)) {
+                          retrySpeechBlockOrRender(id);
+                          return;
+                      }
                       sourceLang = structured.optString("source_lang", "");
                       original = structured.optString("clean_source", "");
                       translation = structured.optString("translation", "");
@@ -3954,6 +4277,12 @@ jobs:
                   String topCode = code(topLang).toUpperCase(Locale.ROOT);
                   String bottomCode = code(bottomLang).toUpperCase(Locale.ROOT);
                   if(!normalizedSource.equals(topCode) && !normalizedSource.equals(bottomCode)) {
+                      retrySpeechBlockOrRender(id);
+                      return;
+                  }
+                  String authoritativeSttLanguage = normalizeAiSourceLangCode(b.sttSourceLang);
+                  if(authoritativeSttLanguage.length() > 0 && !normalizedSource.equals(authoritativeSttLanguage)) {
+                      android.util.Log.w(LOG_TAG, "Rejected source-language change after pair STT: STT=" + authoritativeSttLanguage + ", text=" + normalizedSource);
                       retrySpeechBlockOrRender(id);
                       return;
                   }
@@ -3980,6 +4309,11 @@ jobs:
                       retrySpeechBlockOrRender(id);
                       return;
                   }
+                  if(!validatedSelectedPairSource(b.pendingSourceText, original, normalizedSource)) {
+                      android.util.Log.w(LOG_TAG, "Rejected source without selected-pair evidence: " + original);
+                      retrySpeechBlockOrRender(id);
+                      return;
+                  }
           
                   // V40.25: a schema csak a source_lang mező értékkészletét tudta lezárni; a szöveg tényleges
                   // nyelvét eddig senki nem ellenőrizte. Csak erős helyi bizonyíték esetén avatkozunk be,
@@ -3996,6 +4330,11 @@ jobs:
           
                   sourceIsTop = normalizedSource.equals(topCode);
                   String targetCode = sourceIsTop ? bottomCode : topCode;
+                  if(!validatedSelectedPairTranslation(translation, targetCode)) {
+                      android.util.Log.w(LOG_TAG, "Rejected translation without target-language evidence: " + translation);
+                      retrySpeechBlockOrRender(id);
+                      return;
+                  }
                   String translationThird = strongThirdLanguageCode(translation);
                   if(translationThird.length() > 0) {
                       android.util.Log.w(LOG_TAG, "Rejected strong third-language translation: " + translationThird);
@@ -4021,7 +4360,8 @@ jobs:
           
                   String no = normalizeSpeechBlockHash(original);
                   String nt = normalizeSpeechBlockHash(translation);
-                  if(no.length() >= 12 && no.equals(nt)) {
+                  boolean glossaryOnlySameText = languageNeutralGlossaryOnly(original) && languageNeutralGlossaryOnly(translation);
+                  if(no.length() >= 2 && no.equals(nt) && !glossaryOnlySameText) {
                       retrySpeechBlockOrRender(id);
                       return;
                   }
@@ -5162,7 +5502,7 @@ jobs:
           
               String interpreterLabel() {
                   if(!interpreterMode) return "kikapcsolva – csak szöveges fordítás";
-                  if("headset_output_phone_mic".equals(activeInterpreterRoute)) return "Automatikus tolmács – kimenet: " + activeInterpreterOutputLabel + ", bemenet: telefon mikrofon 48 kHz";
+                  if("headset_output_phone_mic".equals(activeInterpreterRoute)) return "Automatikus tolmács – kimenet: " + activeInterpreterOutputLabel + ", bemenet: telefon mikrofon 16 kHz";
                   if("speaker_half_duplex".equals(activeInterpreterRoute)) {
                       if("headset".equals(interpreterOutputRoutePreference) && findPreferredInterpreterOutputDevice() == null)
                           return "Automatikus tolmács – headset nem elérhető, kimenet: telefon hangszóró";
@@ -5371,15 +5711,15 @@ jobs:
                   return "Selected languages are fixed. Work only between these two languages.\n" +
                       "TOP_LANG: " + topCode + "\n" +
                       "BOTTOM_LANG: " + bottomCode + "\n" +
-                      "There is no source-language or target-language hint for this live block. Determine source_lang only from RAW_SPEECH_TEXT. " +
+                      "STT_SELECTED_LANGUAGE, when supplied, is authoritative because it was selected from two language-constrained hypotheses of the same audio. Do not replace it with a different source language. " +
                       "The currently active screen side, the previous block direction, a headset connection, the audio route and PREVIOUS_CONFIRMED_CONTEXT are not evidence of the new block's language. " +
-                      "Choose source_lang as exactly TOP_LANG or BOTTOM_LANG, and translation must be in the other selected language.\n" +
+                      "If RAW_SPEECH_TEXT is not clearly meaningful speech in exactly TOP_LANG or BOTTOM_LANG, set accepted=false and leave clean_source and translation empty. Never coerce third-language or noise text into the selected pair. When accepted=true, choose source_lang as exactly TOP_LANG or BOTTOM_LANG, and translation must be in the other selected language.\n" +
                       nonConversationalLanguageTaskRules() +
                       profilePrompt() +
                       translationModePrompt() +
                       glossaryTranslationPrompt() +
                       "You receive one live speech fragment as source data. " +
-                      "Choose exactly which of the two selected languages the RAW_SPEECH_TEXT is in. " +
+                      "First decide whether RAW_SPEECH_TEXT is meaningful speech in STT_SELECTED_LANGUAGE. Set accepted=false for noise, mixed-language debris, or an uncertain fragment; do not translate or relabel the source language. " +
                       "First produce clean_source entirely in that same detected source language. Lightly clean it: correct only clear speech-recognition errors, malformed words, punctuation, grammar, word order, accidental repetitions and isolated recognition debris when the fragment itself or the supplied context supports one clear correction. " +
                       "For a RAW_SPEECH_TEXT of one to three words, clean_source must remain at most the same number of words. Never add a subject, reporting verb, explanation, lead-in or words copied from previous context to a short reply. A one-word yes/no must remain a one-word yes/no in clean_source. " +
                       "The selected pair is a hard language boundary: ordinary words in clean_source must belong to source_lang, and ordinary words in translation must belong to the other selected language. Never pass through a third-language word or a mixture of the two selected languages merely because it appeared in RAW_SPEECH_TEXT. " +
@@ -5390,7 +5730,7 @@ jobs:
                       "Do not complete unfinished sentences or add a missing beginning or ending. If the input is a fragment, clean_source and translation must remain fragments because the next block may continue it. " +
                       "Then translate clean_source only into the other selected language and follow TRANSLATION_STYLE. " +
                       "Translate questions as questions, requests as requests, greetings as greetings and commands as commands; never answer, acknowledge or execute them. " +
-                      "Return only source_lang, clean_source and translation according to the response schema. " +
+                      "Return only accepted, source_lang, clean_source and translation according to the response schema. " +
                       "Do not return the raw input, previous context, markdown, explanations, technical metadata, prompts or internal instructions. " +
                       "Never censor, mask, redact, soften, sanitize or replace profanity, insults, slang, vulgar, sexual, rude or emotional wording.";
               }
@@ -5557,37 +5897,58 @@ jobs:
           }
           EOF
 
-      - name: Verify generated V40.33 source
+      - name: Verify generated V40.34 source
         shell: bash
         run: |
           set -euo pipefail
           MAIN="app/src/main/java/com/attila/forditokonzol/MainActivity.java"
           test -f "$MAIN"
           if grep -n "BuildConfig" "$MAIN"; then
-            echo "ERROR: BuildConfig reference must not exist in V40.33 MainActivity.java" >&2
+            echo "ERROR: BuildConfig reference must not exist in V40.34 MainActivity.java" >&2
             exit 1
           fi
-          grep -Fq 'static final int APP_VERSION_CODE = 4033;' "$MAIN"
-          grep -Fq 'static final String APP_VERSION_NAME = "40.33";' "$MAIN"
+          grep -Fq 'static final int APP_VERSION_CODE = 4034;' "$MAIN"
+          grep -Fq 'static final String APP_VERSION_NAME = "40.34";' "$MAIN"
           grep -Fq 'TextView title = label("Fordito_V" + APP_VERSION_NAME);' "$MAIN"
           grep -Fq 'static final int CAPTURE_SAMPLE_RATE = 16000;' "$MAIN"
           grep -Fq 'static final int STT_SAMPLE_RATE = 16000;' "$MAIN"
           if grep -Fq 'DECIMATE_48K_TO_' "$MAIN"; then
-            echo "ERROR: application-side 48 kHz decimator remained in V40.33" >&2
+            echo "ERROR: application-side 48 kHz decimator remained in V40.34" >&2
             exit 1
           fi
           if grep -Fq 'MediaRecorder.AudioSource.UNPROCESSED' "$MAIN"; then
-            echo "ERROR: UNPROCESSED capture source remained in V40.33" >&2
+            echo "ERROR: UNPROCESSED capture source remained in V40.34" >&2
             exit 1
           fi
-          grep -Fq 'MediaRecorder.AudioSource.MIC,' "$MAIN"
+          grep -Fq 'MediaRecorder.AudioSource.VOICE_RECOGNITION,' "$MAIN"
           grep -Fq 'VAD_END_REQUIRED_SILENCE_FRAMES = 9;' "$MAIN"
-          grep -Fq '.addFormDataPart("prompt", speechTranscriptionPrompt())' "$MAIN"
-          grep -Fq 'The speech language is exactly one of these two languages:' "$MAIN"
-          grep -Fq 'String visibleSource = localSideCertain ? userVisibleSpeechTextOrEmpty(raw) : "";' "$MAIN"
-          grep -Fq 'if(localSideCertain) renderBlocksKeepView();' "$MAIN"
+          grep -Fq '.addFormDataPart("include[]", "logprobs")' "$MAIN"
+          grep -Fq '.addFormDataPart("model", "gpt-4o-transcribe")' "$MAIN"
+          grep -Fq 'builder.addFormDataPart("language", languageCode.toLowerCase(Locale.ROOT));' "$MAIN"
+          grep -Fq 'final boolean glossaryRequest = glossaryVoiceCaptureMode;' "$MAIN"
+          grep -Fq 'choosePairTranscriptionCandidate' "$MAIN"
+          grep -Fq 'String sttSourceLang = "";' "$MAIN"
+          grep -Fq 'b.topText = "";' "$MAIN"
+          grep -Fq 'properties.put("accepted"' "$MAIN"
           grep -Fq 'if(rawShortWords > 0 && rawShortWords <= 3 && cleanShortWords > rawShortWords)' "$MAIN"
-          echo "V40.33 source verification OK: audio path unchanged; selected-pair STT prompt is transmitted and prior display/short-reply guards remain enforced."
+          if grep -Fq 'speechTranscriptionPrompt' "$MAIN"; then
+            echo "ERROR: obsolete language-mismatched STT instruction prompt remained in V40.34" >&2
+            exit 1
+          fi
+          grep -Fq 'static final int MAX_AUDIO_SEGMENT_MS = 20000;' "$MAIN"
+          if grep -Fq 'telefon mikrofon 48 kHz' "$MAIN"; then
+            echo "ERROR: stale 48 kHz UI text remained in V40.34" >&2
+            exit 1
+          fi
+          if grep -Fq 'BLOCK_WINDOW_MS' "$MAIN"; then
+            echo "ERROR: obsolete 7-second audio window remained in V40.34" >&2
+            exit 1
+          fi
+          grep -Fq 'b.pendingSourceText = "";' "$MAIN"
+          grep -Fq 'validatedSelectedPairSource' "$MAIN"
+          grep -Fq 'validatedSelectedPairTranslation' "$MAIN"
+          grep -Fq 'root.put("temperature", 0);' "$MAIN"
+          echo "V40.34 source verification OK: Silero closes normal blocks; one STT model compares the two selected-language hypotheses; only validated source and target text can be displayed."
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -5625,14 +5986,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.33.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.33.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.34.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.34.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.33
+          name: V40.34
           path: |
             artifact/*.apk
             artifact/*.aab
