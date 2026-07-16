@@ -1,5 +1,5 @@
-name: Build Android APK V40.31
-# DELIVERY_MARKER: V40.31-AUDIO-STABILITY
+name: Build Android APK V40.32
+# DELIVERY_MARKER: V40.32-AUDIO-STABILITY
 
 on:
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4031; versionName = "40.31" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4032; versionName = "40.32" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.31" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.32" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -264,78 +264,51 @@ jobs:
               // V40.25: a lebegő Bluetooth/hangszóró gomb valóban a TTS kimeneti útját váltja.
               // A felolvasást többé nem lehet véletlenül ezzel a route-gombbal lenémítani.
               volatile long ttsMuteUntilMs = 0L;
-              static final int APP_VERSION_CODE = 4031;
-              static final String APP_VERSION_NAME = "40.31";
+              static final int APP_VERSION_CODE = 4032;
+              static final String APP_VERSION_NAME = "40.32";
               static final String LOG_TAG = "ForditoV" + APP_VERSION_CODE;
-              // V40.26: 480 ms = 15 darab 32 ms-os előpuffer.
-              // Továbbra is védi az első szó elejét, de a korábbi háttérzaj fele kerül az STT elé.
+              // 480 ms előpuffer védi az első szó elejét, de önmagában nem számít igazolt beszédnek.
               static final int PRE_ROLL_AUDIO_MS = 480;
-              // V40.31: a Silero pontosan 512 mintás / 32 ms-os kereteket kap.
-              // A könyvtárban nincs külön második beszédkezdet-késleltetés; a zajvillanást
-              // egyetlen, alkalmazásszintű 96 ms-os (3 keretes) megerősítés szűri.
-              // A lezárás továbbra is 350 ms folyamatos Silero-csend után történik.
+              // V40.32: egyetlen 16 kHz-es PCM út. Ugyanazt a 512 mintás / 32 ms-os keretet
+              // kapja a Silero és az STT; nincs alkalmazáson belüli 48->16 vagy 48->24 átalakítás.
               static final int SILERO_FRAME_SAMPLES = 512;
               static final int SILERO_FRAME_BYTES = SILERO_FRAME_SAMPLES * 2;
               static final int VAD_SPEECH_START_MS = 0;
-              static final int VAD_SPEECH_END_SILENCE_MS = 350;
-              static final int VAD_START_CONFIRM_AUDIO_MS = 96;
+              // Nyers Silero-keretdöntést kérünk; a lezárási hiszterézist az alkalmazás végzi.
+              static final int VAD_SPEECH_END_SILENCE_MS = 0;
+              static final int VAD_START_CONFIRM_FRAMES = 3;          // 96 ms
+              static final int VAD_END_WINDOW_FRAMES = 12;            // 384 ms
+              static final int VAD_END_REQUIRED_SILENCE_FRAMES = 9;   // legalább 75% csend
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 96;
               static final int POST_TTS_SPEAKER_GUARD_MS = 180;
-              // V40.19: az AudioRecord a telefon beépített mikrofonját használja; headset-bemeneti hanglánc nincs.
-              // Hangszórós tolmács módban TTS alatt a mikrofont továbbra is kapuzzuk a visszahallás ellen.
               static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 7000;
               volatile boolean voiceSendActive = false;
+              int vadStartPositiveFrames = 0;
+              final ArrayDeque<Boolean> vadEndDecisionWindow = new ArrayDeque<>();
+              int vadEndSilenceFrames = 0;
               final ArrayDeque<byte[]> preRollAudioChunks = new ArrayDeque<>();
               int preRollAudioBytes = 0;
               final ArrayDeque<byte[]> pendingSpeechAudioChunks = new ArrayDeque<>();
               int pendingSpeechAudioMs = 0;
-              // V40.19 rögzített hangarchitektúra:
-              // 48 kHz mono PCM telefonmikrofon -> közvetlen 16 kHz Silero VAD ág
-              //                                  -> közvetlen 24 kHz STT ág
-              // Tilos: 48 -> 16 -> 24 kHz.
-              static final int CAPTURE_SAMPLE_RATE = 48000;
-              static final int STT_SAMPLE_RATE = 24000;
-              static final int CAPTURE_FRAME_SAMPLES = 1536; // 32 ms @ 48 kHz
+              // A jelenlegi program fájlfeltöltéses STT-t használ, ezért a 16 kHz mono PCM
+              // közvetlenül alkalmas mind a Silero, mind a WAV-transzkripció számára.
+              static final int CAPTURE_SAMPLE_RATE = 16000;
+              static final int STT_SAMPLE_RATE = 16000;
+              static final int CAPTURE_FRAME_SAMPLES = 512; // 32 ms @ 16 kHz
               static final int CAPTURE_FRAME_BYTES = CAPTURE_FRAME_SAMPLES * 2;
-              static final int STT_FRAME_SAMPLES = 768; // 32 ms @ 24 kHz
+              static final int STT_FRAME_SAMPLES = 512;
               static final int STT_FRAME_BYTES = STT_FRAME_SAMPLES * 2;
-              // V40.31: Android beszédfelismeréshez először a kifejezetten erre hangolt
-              // VOICE_RECOGNITION forrást kérjük. A nyers UNPROCESSED csak utolsó tartalék,
-              // mert járműzajban feleslegesen nyitva tarthatja a VAD-ot és ronthatja az STT-t.
+              // Elsődleges a normál telefonmikrofon. A VOICE_RECOGNITION csak tartalék.
               static final int[] CAPTURE_AUDIO_SOURCES = new int[]{
-                  MediaRecorder.AudioSource.VOICE_RECOGNITION,
                   MediaRecorder.AudioSource.MIC,
-                  MediaRecorder.AudioSource.UNPROCESSED
+                  MediaRecorder.AudioSource.VOICE_RECOGNITION
               };
-              // 48 -> 24 és 48 -> 16 kHz közvetlen, állapottartó FIR decimátorok.
-              // Így megmarad a két külön ág, de az egyszerű átlagolás helyett valódi aluláteresztő
-              // szűrés történik a mintaritkítás előtt, tehát zajban és beszédéleknél is stabilabb.
-              static final float[] DECIMATE_48K_TO_24K_TAPS = new float[]{
-                  -0.0000000000f, 0.0002404961f, 0.0001804413f, -0.0030727830f, -0.0033017926f,
-                  0.0116802129f, 0.0186584411f, -0.0269159599f, -0.0695996138f, 0.0429869805f,
-                  0.3040955978f, 0.4500959594f, 0.3040955978f, 0.0429869805f, -0.0695996138f,
-                  -0.0269159599f, 0.0186584411f, 0.0116802129f, -0.0033017926f, -0.0030727830f,
-                  0.0001804413f, 0.0002404961f, -0.0000000000f
-              };
-              static final float[] DECIMATE_48K_TO_16K_TAPS = new float[]{
-                  -0.0000000000f, 0.0000535858f, -0.0001267905f, -0.0010144316f, -0.0018042498f,
-                  0.0000000000f, 0.0057444303f, 0.0109540205f, 0.0055363934f, -0.0158960424f,
-                  -0.0401054366f, -0.0349018465f, 0.0278431949f, 0.1408100127f, 0.2529131774f,
-                  0.2999879644f, 0.2529131774f, 0.1408100127f, 0.0278431949f, -0.0349018465f,
-                  -0.0401054366f, -0.0158960424f, 0.0055363934f, 0.0109540205f, 0.0057444303f,
-                  0.0000000000f, -0.0018042498f, -0.0010144316f, -0.0001267905f, 0.0000535858f,
-                  -0.0000000000f
-              };
-              short[] decimate48To24History = new short[DECIMATE_48K_TO_24K_TAPS.length - 1];
-              short[] decimate48To16History = new short[DECIMATE_48K_TO_16K_TAPS.length - 1];
               static final int BLOCK_WINDOW_MS = 7000;
-              // V40.26: csak 10 darab 32 ms-os kontextus marad át a következő ablakra.
-              static final int BLOCK_OVERLAP_MS = 320;
               final Object speechAudioWindowLock = new Object();
               ByteArrayOutputStream speechAudioWindow = new ByteArrayOutputStream();
-              // V40.26: csak a még soha el nem küldött hang számít friss audiónak.
-              int speechAudioWindowFreshBytes = 0;
-              String vadEngineMode = "silero_medium"; // V40.31 alap: AGGRESSIVE, zajos mobil/jármű környezetre
+              int speechAudioWindowConfirmedSpeechBytes = 0;
+              String vadEngineMode = "silero_medium"; // AGGRESSIVE nyers döntés, alkalmazásszintű lezárás
+
               Object speechVadInstance = null;
               String speechVadInstanceMode = "";
               final Object capturedFrameLock = new Object();
@@ -636,7 +609,7 @@ jobs:
                       save();
                   }
                   if(last < 431) {
-                      // V40.31: a korábbi NORMAL alapot egyszer AGGRESSIVE módra migráljuk.
+                      // V40.32: a korábbi NORMAL alapot egyszer AGGRESSIVE módra migráljuk.
                       // A felhasználó később továbbra is választhat NORMAL vagy VERY AGGRESSIVE módot.
                       if("silero".equals(vadEngineMode)) vadEngineMode = "silero_medium";
                       sp.edit().putInt("stableDefaultsVersion", 431).apply();
@@ -1925,14 +1898,15 @@ jobs:
                   speechVadInstanceMode = "";
               }
           
-              void resetDirectDecimatorState() {
-                  Arrays.fill(decimate48To24History, (short)0);
-                  Arrays.fill(decimate48To16History, (short)0);
+              void resetVadDecisionState() {
+                  vadStartPositiveFrames = 0;
+                  vadEndDecisionWindow.clear();
+                  vadEndSilenceFrames = 0;
               }
           
               void resetCapturedFrameState() {
                   synchronized(capturedFrameLock) { capturedFrameBuffer.reset(); }
-                  resetDirectDecimatorState();
+                  resetVadDecisionState();
               }
           
               Object enumConst(String cls, String name) throws Exception {
@@ -1991,154 +1965,113 @@ jobs:
                   return invokeVadOnExactFrame(exactFrame);
               }
           
-              void processVadFrame(byte[] vad16kFrame, byte[] stt24kFrame) throws Exception {
+              void pushVadEndDecision(boolean speechFrame) {
+                  vadEndDecisionWindow.addLast(speechFrame);
+                  if(!speechFrame) vadEndSilenceFrames++;
+                  while(vadEndDecisionWindow.size() > VAD_END_WINDOW_FRAMES) {
+                      Boolean old = vadEndDecisionWindow.removeFirst();
+                      if(Boolean.FALSE.equals(old)) vadEndSilenceFrames--;
+                  }
+              }
+          
+              boolean shouldCloseVadSegment() {
+                  return vadEndDecisionWindow.size() >= VAD_END_WINDOW_FRAMES &&
+                      vadEndSilenceFrames >= VAD_END_REQUIRED_SILENCE_FRAMES;
+              }
+          
+              void processVadFrame(byte[] vad16kFrame, byte[] sttFrame) throws Exception {
                   if(vad16kFrame == null || vad16kFrame.length != SILERO_FRAME_BYTES) return;
-                  if(stt24kFrame == null || stt24kFrame.length != STT_FRAME_BYTES) return;
+                  if(sttFrame == null || sttFrame.length != STT_FRAME_BYTES) return;
                   if(shouldMuteMicForSpeakerTts()) {
                       voiceSendActive = false;
                       clearPendingSpeechAudio();
                       clearPreRollAudio();
+                      clearSpeechAudioWindow();
+                      resetVadDecisionState();
                       return;
                   }
           
                   long now = System.currentTimeMillis();
-                  boolean overGate = externalVadOverGate(vad16kFrame);
-                  if(overGate) {
-                      if(!voiceSendActive) {
-                          // A Silero nyitása előtt/fel-felvillanásakor felvett 24 kHz-es hang
-                          // külön előpufferben marad. A pozitív kereteket csak a megerősítésig
-                          // tartjuk pendingben, majd az előpuffer UTÁN, eredeti sorrendben küldjük.
-                          rememberPendingSpeechAudio(stt24kFrame, stt24kFrame.length);
-                          if(pendingSpeechAudioDurationMs() < VAD_START_CONFIRM_AUDIO_MS) return;
+                  boolean speechFrame = externalVadOverGate(vad16kFrame);
+                  if(!voiceSendActive) {
+                      if(speechFrame) {
+                          vadStartPositiveFrames++;
+                          rememberPendingSpeechAudio(sttFrame, sttFrame.length);
+                          if(vadStartPositiveFrames < VAD_START_CONFIRM_FRAMES) return;
                           if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = now;
-                          for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr);
-                          for(byte[] ps : takePendingSpeechAudio()) sendAudioChunk(ps);
-                      } else {
-                          sendAudioChunk(stt24kFrame);
+                          for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr, false);
+                          for(byte[] ps : takePendingSpeechAudio()) sendAudioChunk(ps, true);
+                          voiceSendActive = true;
+                          vadEndDecisionWindow.clear();
+                          vadEndSilenceFrames = 0;
+                          return;
                       }
-                      voiceSendActive = true;
+                      if(pendingSpeechAudioDurationMs() > 0) {
+                          for(byte[] ps : takePendingSpeechAudio()) rememberPreRollAudio(ps, ps.length);
+                      }
+                      clearPendingSpeechAudio();
+                      vadStartPositiveFrames = 0;
+                      rememberPreRollAudio(sttFrame, sttFrame.length);
                       return;
                   }
           
-                  if(voiceSendActive) {
+                  sendAudioChunk(sttFrame, speechFrame);
+                  pushVadEndDecision(speechFrame);
+                  if(shouldCloseVadSegment()) {
                       voiceSendActive = false;
                       flushSpeechAudioWindow(true);
-                  } else if(pendingSpeechAudioDurationMs() > 0) {
-                      // V40.20 HIBAJAVÍTÁS: korábban egy rövid VAD-visszaesés az összes
-                      // addigi beszédkezdet-keretet törölte. Emiatt az első szó eleje vagy akár
-                      // az egész rövid első szó elveszhetett. Most a sikertelenül megerősített
-                      // keretek visszakerülnek a gördülő előpufferbe, tehát semmi nem vész el.
-                      for(byte[] ps : takePendingSpeechAudio()) rememberPreRollAudio(ps, ps.length);
+                      clearPendingSpeechAudio();
+                      clearPreRollAudio();
+                      resetVadDecisionState();
                   }
-                  clearPendingSpeechAudio();
-                  rememberPreRollAudio(stt24kFrame, stt24kFrame.length);
-              }
-          
-              short readPcm16Le(byte[] data, int byteOffset) {
-                  return (short)(((data[byteOffset + 1] & 0xff) << 8) | (data[byteOffset] & 0xff));
-              }
-          
-              void writePcm16Le(byte[] data, int byteOffset, short sample) {
-                  data[byteOffset] = (byte)(sample & 0xff);
-                  data[byteOffset + 1] = (byte)((sample >> 8) & 0xff);
-              }
-          
-              short clampToPcm16(int sample) {
-                  if(sample > Short.MAX_VALUE) return Short.MAX_VALUE;
-                  if(sample < Short.MIN_VALUE) return Short.MIN_VALUE;
-                  return (short)sample;
-              }
-          
-              byte[] decimate48kPcm16Le(byte[] pcm48k, int factor, float[] taps, short[] history) {
-                  if(pcm48k == null || pcm48k.length < 2) return new byte[0];
-                  int inputSamples = pcm48k.length / 2;
-                  int historyLen = history.length;
-                  short[] work = new short[historyLen + inputSamples];
-                  System.arraycopy(history, 0, work, 0, historyLen);
-                  for(int i=0; i<inputSamples; i++) work[historyLen + i] = readPcm16Le(pcm48k, i * 2);
-                  int outputSamples = inputSamples / factor;
-                  byte[] out = new byte[outputSamples * 2];
-                  for(int i=0; i<outputSamples; i++) {
-                      int n = historyLen + (i * factor);
-                      float acc = 0f;
-                      for(int k=0; k<taps.length; k++) acc += taps[k] * work[n - k];
-                      writePcm16Le(out, i * 2, clampToPcm16(Math.round(acc)));
-                  }
-                  System.arraycopy(work, work.length - historyLen, history, 0, historyLen);
-                  return out;
-              }
-          
-              byte[] downsample48kTo16kDirect(byte[] pcm48k) {
-                  return decimate48kPcm16Le(pcm48k, 3, DECIMATE_48K_TO_16K_TAPS, decimate48To16History);
-              }
-          
-              byte[] downsample48kTo24kDirect(byte[] pcm48k) {
-                  return decimate48kPcm16Le(pcm48k, 2, DECIMATE_48K_TO_24K_TAPS, decimate48To24History);
               }
           
               void processCapturedAudio(byte[] data, int len) throws Exception {
                   if(data == null || len <= 0) return;
-                  ArrayList<byte[]> captureFrames48k = new ArrayList<>();
+                  ArrayList<byte[]> frames16k = new ArrayList<>();
                   synchronized(capturedFrameLock) {
                       capturedFrameBuffer.write(data, 0, len);
                       byte[] all = capturedFrameBuffer.toByteArray();
                       int pos = 0;
                       while(pos + CAPTURE_FRAME_BYTES <= all.length) {
-                          captureFrames48k.add(Arrays.copyOfRange(all, pos, pos + CAPTURE_FRAME_BYTES));
+                          frames16k.add(Arrays.copyOfRange(all, pos, pos + CAPTURE_FRAME_BYTES));
                           pos += CAPTURE_FRAME_BYTES;
                       }
                       capturedFrameBuffer.reset();
                       if(pos < all.length) capturedFrameBuffer.write(all, pos, all.length - pos);
                   }
-                  for(byte[] frame48k : captureFrames48k) {
-                      // A két ág ugyanabból az eredeti 48 kHz-es 32 ms-os keretből, egymástól függetlenül készül.
-                      byte[] vad16k = downsample48kTo16kDirect(frame48k);
-                      byte[] stt24k = downsample48kTo24kDirect(frame48k);
-                      processVadFrame(vad16k, stt24k);
-                  }
+                  for(byte[] frame16k : frames16k) processVadFrame(frame16k, frame16k);
               }
           
-              byte[] takeCapturedSttRemainder24k() {
-                  byte[] raw48k;
+              byte[] takeCapturedSttRemainder() {
+                  byte[] raw16k;
                   synchronized(capturedFrameLock) {
-                      raw48k = capturedFrameBuffer.toByteArray();
+                      raw16k = capturedFrameBuffer.toByteArray();
                       capturedFrameBuffer.reset();
                   }
-                  return downsample48kTo24kDirect(raw48k);
+                  int evenLength = raw16k.length & ~1;
+                  return evenLength == raw16k.length ? raw16k : Arrays.copyOf(raw16k, evenLength);
               }
           
               void clearSpeechAudioWindow() {
                   synchronized(speechAudioWindowLock) {
                       speechAudioWindow.reset();
-                      speechAudioWindowFreshBytes = 0;
+                      speechAudioWindowConfirmedSpeechBytes = 0;
                   }
               }
           
-              void appendSpeechAudioChunk(byte[] chunk) {
+              void appendSpeechAudioChunk(byte[] chunk, boolean confirmedSpeech) {
                   if(chunk == null || chunk.length == 0 || client == null) return;
                   byte[] ready = null;
                   synchronized(speechAudioWindowLock) {
                       speechAudioWindow.write(chunk, 0, chunk.length);
-                      speechAudioWindowFreshBytes += chunk.length;
-          
+                      if(confirmedSpeech) speechAudioWindowConfirmedSpeechBytes += chunk.length;
                       int needBytes = STT_SAMPLE_RATE * 2 * BLOCK_WINDOW_MS / 1000;
+                      int minSpeechBytes = STT_SAMPLE_RATE * 2 * MIN_TRUE_SPEECH_AUDIO_MS / 1000;
                       if(speechAudioWindow.size() >= needBytes) {
-                          byte[] all = speechAudioWindow.toByteArray();
-                          ready = Arrays.copyOf(all, needBytes);
-          
-                          int keepBytes = STT_SAMPLE_RATE * 2 * BLOCK_OVERLAP_MS / 1000;
-                          int excessBytes = Math.max(0, all.length - needBytes);
-          
+                          if(speechAudioWindowConfirmedSpeechBytes >= minSpeechBytes) ready = speechAudioWindow.toByteArray();
                           speechAudioWindow.reset();
-                          int start = Math.max(0, needBytes - keepBytes);
-                          speechAudioWindow.write(all, start, needBytes - start);
-                          if(all.length > needBytes) {
-                              speechAudioWindow.write(all, needBytes, all.length - needBytes);
-                          }
-          
-                          // V40.26: a megtartott overlap már egyszer elküldött hang.
-                          // Csak a 7 másodperces határon túli valódi többlet marad friss.
-                          speechAudioWindowFreshBytes = excessBytes;
+                          speechAudioWindowConfirmedSpeechBytes = 0;
                       }
                   }
                   if(ready != null) transcribeAudioWindow(ready, false);
@@ -2147,25 +2080,20 @@ jobs:
               void flushSpeechAudioWindow(boolean force) {
                   byte[] ready = null;
                   synchronized(speechAudioWindowLock) {
-                      int minFreshBytes = STT_SAMPLE_RATE * 2 *
-                          (force ? MIN_TRUE_SPEECH_AUDIO_MS : 1200) / 1000;
-          
-                      if(speechAudioWindowFreshBytes >= minFreshBytes &&
-                         speechAudioWindow.size() > 0) {
+                      int minSpeechBytes = STT_SAMPLE_RATE * 2 * MIN_TRUE_SPEECH_AUDIO_MS / 1000;
+                      if(speechAudioWindowConfirmedSpeechBytes >= minSpeechBytes && speechAudioWindow.size() > 0) {
                           ready = speechAudioWindow.toByteArray();
+                      }
+                      if(force || ready != null) {
                           speechAudioWindow.reset();
-                          speechAudioWindowFreshBytes = 0;
-                      } else if(force) {
-                          // V40.26: overlap-only vagy 160 ms-nál rövidebb új hang
-                          // nem lehet külön STT-kérés.
-                          speechAudioWindow.reset();
-                          speechAudioWindowFreshBytes = 0;
+                          speechAudioWindowConfirmedSpeechBytes = 0;
                       }
                   }
                   if(ready != null) transcribeAudioWindow(ready, true);
               }
           
-              byte[] wavFromPcm24k(byte[] pcm) throws Exception {
+              byte[] wavFromPcmStt(byte[] pcm) throws Exception {
+
                   int dataLen = pcm == null ? 0 : pcm.length;
                   ByteArrayOutputStream out = new ByteArrayOutputStream(44 + dataLen);
                   writeAscii(out, "RIFF"); writeIntLE(out, 36 + dataLen); writeAscii(out, "WAVE");
@@ -2221,14 +2149,11 @@ jobs:
                   final int session = requestOrder[0];
                   final int seq = requestOrder[1];
                   try {
-                      byte[] wav = wavFromPcm24k(pcm);
+                      byte[] wav = wavFromPcmStt(pcm);
                       MultipartBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
                           .addFormDataPart("model", "gpt-4o-mini-transcribe")
                           .addFormDataPart("response_format", "json")
                           .addFormDataPart("temperature", "0")
-                          // V40.31: automatikus kétirányú nyelvfelismerésnél nem adunk language
-                          // vagy egynyelvű prompt paramétert; mindkettő az egyik kiválasztott
-                          // nyelv felé torzíthatná a következő, ellenkező irányú rövid blokkot.
                           .addFormDataPart("file", "speech.wav", RequestBody.create(MediaType.parse("audio/wav"), wav))
                           .build();
                       Request req = new Request.Builder().url("https://api.openai.com/v1/audio/transcriptions")
@@ -2259,8 +2184,8 @@ jobs:
                   }
               }
           
-              void sendAudioChunk(byte[] chunk) throws Exception {
-                  appendSpeechAudioChunk(chunk);
+              void sendAudioChunk(byte[] chunk, boolean confirmedSpeech) throws Exception {
+                  appendSpeechAudioChunk(chunk, confirmedSpeech);
               }
           
               AudioRecord createInitializedAudioRecord(int source, int sampleRate, int requestedBufferBytes) {
@@ -2310,7 +2235,6 @@ jobs:
               }
           
               String audioSourceLabel(int source) {
-                  if(source == MediaRecorder.AudioSource.UNPROCESSED) return "UNPROCESSED";
                   if(source == MediaRecorder.AudioSource.VOICE_RECOGNITION) return "VOICE_RECOGNITION";
                   if(source == MediaRecorder.AudioSource.MIC) return "MIC";
                   return "source " + source;
@@ -2568,7 +2492,8 @@ jobs:
                       voiceSendActive = false;
                       clearPendingSpeechAudio();
                       clearPreRollAudio();
-                      takeCapturedSttRemainder24k();
+                      takeCapturedSttRemainder();
+                      resetVadDecisionState();
                       closeExternalVad();
                   }
               }
@@ -2682,8 +2607,7 @@ jobs:
                   });
           
                   audioExec.submit(() -> {
-                      // Egyetlen 32 ms-os 48 kHz-es keretet olvasunk egyszerre. Ez csökkenti a
-                      // beszédkezdet feldolgozási és az útvonal-ellenőrzési késleltetését.
+                      // Egyetlen 32 ms-os, 16 kHz-es keretet olvasunk; nincs appon belüli újramintavételezés.
                       byte[] buf = new byte[CAPTURE_FRAME_BYTES];
                       // V40.20: az előző kód startRecording() után akár 1200 ms-ig NEM olvasott
                       // az AudioRecordból, miközben a kért belső puffer csak kb. 256 ms volt.
@@ -2704,6 +2628,7 @@ jobs:
                       clearPendingSpeechAudio();
                       clearSpeechAudioWindow();
                       voiceSendActive = false;
+                      resetVadDecisionState();
                       while((streaming || finalizingStop) && activeRec != null) {
                           int read;
                           try {
@@ -2766,9 +2691,7 @@ jobs:
                                       markMicrophoneUiReady(activeRec);
                                   }
                                   synchronized(audioProcessingLock) {
-                                      // A megőrzött induláskori hang pontosan egyszer, az első bizonyított
-                                      // telefonmikrofon-route után, az élő keret ELŐTT megy át ugyanazon a
-                                      // 48->16 kHz VAD és 48->24 kHz STT láncon.
+                                      // A megőrzött induláskori 16 kHz PCM pontosan egyszer, az élő keret előtt kerül feldolgozásra.
                                       if(firstBuiltInRouteConfirmation && startupRouteAudioBytes > 0) {
                                           processCapturedAudio(startupRouteAudioBuffer, startupRouteAudioBytes);
                                           startupRouteAudioBytes = 0;
@@ -2845,9 +2768,9 @@ jobs:
                   catch(Exception e) { android.util.Log.w(LOG_TAG, "AudioRecord delayed release failed", e); }
                   if(stopSession != sttSessionId || !finalizingStop) return;
                   synchronized(audioProcessingLock) {
-                      byte[] remainder = takeCapturedSttRemainder24k();
+                      byte[] remainder = takeCapturedSttRemainder();
                       if(voiceSendActive) {
-                          if(remainder.length > 0) appendSpeechAudioChunk(remainder);
+                          if(remainder.length > 0) appendSpeechAudioChunk(remainder, false);
                           flushSpeechAudioWindow(true);
                       } else {
                           // V40.26: a STOP nem küldhet meg nem erősített VAD-pendinget
@@ -3764,7 +3687,7 @@ jobs:
               }
           
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
-                  // V40.31: a nyers STT csak akkor jelenik meg azonnal, ha a kiválasztott
+                  // V40.32: a nyers STT csak akkor jelenik meg azonnal, ha a kiválasztott
                   // nyelvpáron belül a helyi nyelvdöntés biztos. Bizonytalan rövid blokknál
                   // a blokk rejtve várja meg az egyetlen AI nyelvdöntést, így nem villan fel
                   // előbb a rossz ablakban, majd nem ugrik át utólag a másik oldalra.
@@ -4036,7 +3959,7 @@ jobs:
                   original = cleanTranscriptForSelectedPair(original);
                   translation = cleanTranscriptForSelectedPair(cleanOneBlockTranslation(translation));
 
-                  // V40.31: rövid STT-forrásból a tisztító/fordító kör nem gyárthat hosszabb
+                  // V40.32: rövid STT-forrásból a tisztító/fordító kör nem gyárthat hosszabb
                   // forrásmondatot. Ez konkrétan megfogja az "igen" -> "mondom, igen" jellegű
                   // kontextusból kiegészített hallucinációt. Rövidebb clean_source továbbra is
                   // megengedett, mert egy bizonytalan zajszó elhagyható.
@@ -5630,20 +5553,32 @@ jobs:
           }
           EOF
 
-      - name: Verify generated V40.31 source
+      - name: Verify generated V40.32 source
         shell: bash
         run: |
           set -euo pipefail
           MAIN="app/src/main/java/com/attila/forditokonzol/MainActivity.java"
           test -f "$MAIN"
           if grep -n "BuildConfig" "$MAIN"; then
-            echo "ERROR: BuildConfig reference must not exist in V40.31 MainActivity.java" >&2
+            echo "ERROR: BuildConfig reference must not exist in V40.32 MainActivity.java" >&2
             exit 1
           fi
-          grep -Fq 'static final int APP_VERSION_CODE = 4031;' "$MAIN"
-          grep -Fq 'static final String APP_VERSION_NAME = "40.31";' "$MAIN"
+          grep -Fq 'static final int APP_VERSION_CODE = 4032;' "$MAIN"
+          grep -Fq 'static final String APP_VERSION_NAME = "40.32";' "$MAIN"
           grep -Fq 'TextView title = label("Fordito_V" + APP_VERSION_NAME);' "$MAIN"
-          echo "V40.31 source verification OK: no BuildConfig references."
+          grep -Fq 'static final int CAPTURE_SAMPLE_RATE = 16000;' "$MAIN"
+          grep -Fq 'static final int STT_SAMPLE_RATE = 16000;' "$MAIN"
+          if grep -Fq 'DECIMATE_48K_TO_' "$MAIN"; then
+            echo "ERROR: application-side 48 kHz decimator remained in V40.32" >&2
+            exit 1
+          fi
+          if grep -Fq 'MediaRecorder.AudioSource.UNPROCESSED' "$MAIN"; then
+            echo "ERROR: UNPROCESSED capture source remained in V40.32" >&2
+            exit 1
+          fi
+          grep -Fq 'MediaRecorder.AudioSource.MIC,' "$MAIN"
+          grep -Fq 'VAD_END_REQUIRED_SILENCE_FRAMES = 9;' "$MAIN"
+          echo "V40.32 source verification OK: single 16 kHz path and application-side VAD close."
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -5681,14 +5616,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.31.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.31.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.32.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.32.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.31
+          name: V40.32
           path: |
             artifact/*.apk
             artifact/*.aab
