@@ -1,5 +1,5 @@
-name: Build Android APK V40.30
-# DELIVERY_MARKER: V40.30-NO-BUILDCONFIG-VERIFIED
+name: Build Android APK V40.31
+# DELIVERY_MARKER: V40.31-AUDIO-STABILITY
 
 on:
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4030; versionName = "40.30" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4031; versionName = "40.31" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.30" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.31" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -264,23 +264,22 @@ jobs:
               // V40.25: a lebegő Bluetooth/hangszóró gomb valóban a TTS kimeneti útját váltja.
               // A felolvasást többé nem lehet véletlenül ezzel a route-gombbal lenémítani.
               volatile long ttsMuteUntilMs = 0L;
-              static final int APP_VERSION_CODE = 4030;
-              static final String APP_VERSION_NAME = "40.30";
+              static final int APP_VERSION_CODE = 4031;
+              static final String APP_VERSION_NAME = "40.31";
               static final String LOG_TAG = "ForditoV" + APP_VERSION_CODE;
               // V40.26: 480 ms = 15 darab 32 ms-os előpuffer.
               // Továbbra is védi az első szó elejét, de a korábbi háttérzaj fele kerül az STT elé.
               static final int PRE_ROLL_AUDIO_MS = 480;
-              // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
-              // időállapota 50 ms beszéd után nyit és 350 ms csend után zár.
+              // V40.31: a Silero pontosan 512 mintás / 32 ms-os kereteket kap.
+              // A könyvtárban nincs külön második beszédkezdet-késleltetés; a zajvillanást
+              // egyetlen, alkalmazásszintű 96 ms-os (3 keretes) megerősítés szűri.
+              // A lezárás továbbra is 350 ms folyamatos Silero-csend után történik.
               static final int SILERO_FRAME_SAMPLES = 512;
               static final int SILERO_FRAME_BYTES = SILERO_FRAME_SAMPLES * 2;
-              static final int VAD_SPEECH_START_MS = 50;
+              static final int VAD_SPEECH_START_MS = 0;
               static final int VAD_SPEECH_END_SILENCE_MS = 350;
-              // V40.26: a Silero nyitása után öt 32 ms-os pozitív keret (160 ms) kell.
-              // A küldési minimum is 160 ms, így a pre-roll többé nem tud önmagában
-              // egy 96 ms-os fals VAD-villanást STT-kéréssé tenni.
-              static final int VAD_START_CONFIRM_AUDIO_MS = 160;
-              static final int MIN_TRUE_SPEECH_AUDIO_MS = 160;
+              static final int VAD_START_CONFIRM_AUDIO_MS = 96;
+              static final int MIN_TRUE_SPEECH_AUDIO_MS = 96;
               static final int POST_TTS_SPEAKER_GUARD_MS = 180;
               // V40.19: az AudioRecord a telefon beépített mikrofonját használja; headset-bemeneti hanglánc nincs.
               // Hangszórós tolmács módban TTS alatt a mikrofont továbbra is kapuzzuk a visszahallás ellen.
@@ -300,10 +299,13 @@ jobs:
               static final int CAPTURE_FRAME_BYTES = CAPTURE_FRAME_SAMPLES * 2;
               static final int STT_FRAME_SAMPLES = 768; // 32 ms @ 24 kHz
               static final int STT_FRAME_BYTES = STT_FRAME_SAMPLES * 2;
+              // V40.31: Android beszédfelismeréshez először a kifejezetten erre hangolt
+              // VOICE_RECOGNITION forrást kérjük. A nyers UNPROCESSED csak utolsó tartalék,
+              // mert járműzajban feleslegesen nyitva tarthatja a VAD-ot és ronthatja az STT-t.
               static final int[] CAPTURE_AUDIO_SOURCES = new int[]{
-                  MediaRecorder.AudioSource.UNPROCESSED,
                   MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                  MediaRecorder.AudioSource.MIC
+                  MediaRecorder.AudioSource.MIC,
+                  MediaRecorder.AudioSource.UNPROCESSED
               };
               // 48 -> 24 és 48 -> 16 kHz közvetlen, állapottartó FIR decimátorok.
               // Így megmarad a két külön ág, de az egyszerű átlagolás helyett valódi aluláteresztő
@@ -333,7 +335,7 @@ jobs:
               ByteArrayOutputStream speechAudioWindow = new ByteArrayOutputStream();
               // V40.26: csak a még soha el nem küldött hang számít friss audiónak.
               int speechAudioWindowFreshBytes = 0;
-              String vadEngineMode = "silero"; // V40.0 alap: dokumentált Silero NORMAL
+              String vadEngineMode = "silero_medium"; // V40.31 alap: AGGRESSIVE, zajos mobil/jármű környezetre
               Object speechVadInstance = null;
               String speechVadInstanceMode = "";
               final Object capturedFrameLock = new Object();
@@ -545,8 +547,8 @@ jobs:
           
               final String[][] vadEngineModes = {
                   {"Silero VAD – OFF / extra érzékeny, csak csendben", "silero_off"},
-                  {"Silero VAD – NORMAL / ajánlott", "silero"},
-                  {"Silero VAD – AGGRESSIVE", "silero_medium"},
+                  {"Silero VAD – NORMAL / csendes környezet", "silero"},
+                  {"Silero VAD – AGGRESSIVE / ajánlott", "silero_medium"},
                   {"Silero VAD – VERY AGGRESSIVE", "silero_truck"}
               };
           
@@ -578,8 +580,8 @@ jobs:
                   if(!"gpt-4o-mini".equals(model) && !"gpt-4o".equals(model)) model = "gpt-4o-mini";
                   profile = sp.getString("profile", "general");
                   mode = sp.getString("mode", "natural");
-                  vadEngineMode = sp.getString("vadEngineMode", "silero");
-                  if(!"silero_off".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode)) vadEngineMode = "silero";
+                  vadEngineMode = sp.getString("vadEngineMode", "silero_medium");
+                  if(!"silero_off".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode)) vadEngineMode = "silero_medium";
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   interpreterOutputRoutePreference = sp.getString("interpreterOutputRoutePreference", "headset");
                   if(!"headset".equals(interpreterOutputRoutePreference) && !"speaker".equals(interpreterOutputRoutePreference))
@@ -631,6 +633,13 @@ jobs:
                       // A Bluetooth/headset bemenetet és minden kommunikációs bemeneti fallbacket felülírjuk.
                       vadEngineMode = "silero";
                       sp.edit().putInt("stableDefaultsVersion", 419).apply();
+                      save();
+                  }
+                  if(last < 431) {
+                      // V40.31: a korábbi NORMAL alapot egyszer AGGRESSIVE módra migráljuk.
+                      // A felhasználó később továbbra is választhat NORMAL vagy VERY AGGRESSIVE módot.
+                      if("silero".equals(vadEngineMode)) vadEngineMode = "silero_medium";
+                      sp.edit().putInt("stableDefaultsVersion", 431).apply();
                       save();
                   }
               }
@@ -1951,7 +1960,7 @@ jobs:
           
               void ensureExternalVadReady() throws Exception {
                   if(!"silero_off".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode)) {
-                      vadEngineMode = "silero";
+                      vadEngineMode = "silero_medium";
                   }
                   if(speechVadInstance != null && vadEngineMode.equals(speechVadInstanceMode)) return;
                   closeExternalVad();
@@ -2217,6 +2226,9 @@ jobs:
                           .addFormDataPart("model", "gpt-4o-mini-transcribe")
                           .addFormDataPart("response_format", "json")
                           .addFormDataPart("temperature", "0")
+                          // V40.31: automatikus kétirányú nyelvfelismerésnél nem adunk language
+                          // vagy egynyelvű prompt paramétert; mindkettő az egyik kiválasztott
+                          // nyelv felé torzíthatná a következő, ellenkező irányú rövid blokkot.
                           .addFormDataPart("file", "speech.wav", RequestBody.create(MediaType.parse("audio/wav"), wav))
                           .build();
                       Request req = new Request.Builder().url("https://api.openai.com/v1/audio/transcriptions")
@@ -3372,10 +3384,48 @@ jobs:
               }
           
               String selectedPairLanguageCode(String text) {
+                  String exactShort = exactShortReplyLanguageCode(text);
+                  if(exactShort.length() > 0) return exactShort;
                   String detected = strongLanguageCode(text);
                   if(detected.length() == 0) return "";
                   if(detected.equalsIgnoreCase(code(topLang)) || detected.equalsIgnoreCase(code(bottomLang))) return detected;
                   return "";
+              }
+
+              String exactShortReplyLanguageCode(String text) {
+                  if(text == null) return "";
+                  String x = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFC)
+                      .toLowerCase(Locale.ROOT)
+                      .replaceAll("[^\\p{L}]+", " ")
+                      .trim().replaceAll("\\s+", " ");
+                  if(x.length() == 0 || x.split("\\s+").length > 3) return "";
+
+                  String[][] exact = {
+                      {"hu","igen","nem","köszönöm","kérem","szia","rendben","persze","mehet"},
+                      {"en","yes","no","thank you","thanks","please","hello","okay","ok","sure"},
+                      {"fr","oui","non","merci","bonjour","d accord","bien sûr"},
+                      {"de","ja","nein","danke","bitte","hallo","in ordnung","klar"},
+                      {"it","sì","si","no","grazie","prego","ciao","va bene"},
+                      {"es","sí","si","no","gracias","por favor","hola","vale"},
+                      {"ro","da","nu","mulțumesc","multumesc","vă rog","va rog","bună","buna"},
+                      {"hr","da","ne","hvala","molim","bok","u redu"},
+                      {"sk","áno","ano","nie","ďakujem","dakujem","prosím","prosim","dobre"},
+                      {"sl","da","ne","hvala","prosim","živjo","zivjo","v redu"}
+                  };
+                  String top = code(topLang).toLowerCase(Locale.ROOT);
+                  String bottom = code(bottomLang).toLowerCase(Locale.ROOT);
+                  String match = "";
+                  for(String[] row : exact) {
+                      String lang = row[0];
+                      if(!lang.equals(top) && !lang.equals(bottom)) continue;
+                      for(int i=1; i<row.length; i++) {
+                          if(x.equals(row[i])) {
+                              if(match.length() > 0 && !match.equals(lang)) return ""; // pl. EN/ES: "no"
+                              match = lang;
+                          }
+                      }
+                  }
+                  return match;
               }
           
               int scoreTextForLanguage(String text, String lang) {
@@ -3528,6 +3578,12 @@ jobs:
                   return raw;
               }
           
+              int speechWordCount(String text) {
+                  if(text == null) return 0;
+                  String x = text.trim().replaceAll("[^\\p{L}\\p{N}]+", " ").trim();
+                  return x.length() == 0 ? 0 : x.split("\\s+").length;
+              }
+
               String normalizeSpeechBlockHash(String block) {
                   if(block == null) return "";
                   return block.toLowerCase(Locale.ROOT)
@@ -3708,25 +3764,26 @@ jobs:
               }
           
               int addSourceOnlyBlock(boolean sourceIsTop, String original) {
-                  // V318: gyors visszajelzés. A nyers STT azonnal látható az aktuális oldalon,
-                  // ugyanakkor pendingSourceText-ben is megmarad, hogy a valid AI-válasz után
-                  // a blokk átkerülhessen a valódi SOURCE_LANG szerinti oldalra.
-                  if(isRecentlyDisplayedSourceDuplicate(sourceIsTop, original)) return -1;
+                  // V40.31: a nyers STT csak akkor jelenik meg azonnal, ha a kiválasztott
+                  // nyelvpáron belül a helyi nyelvdöntés biztos. Bizonytalan rövid blokknál
+                  // a blokk rejtve várja meg az egyetlen AI nyelvdöntést, így nem villan fel
+                  // előbb a rossz ablakban, majd nem ugrik át utólag a másik oldalra.
+                  String raw = original == null ? "" : original.trim();
+                  String localLanguage = selectedPairLanguageCode(raw);
+                  boolean localSideCertain = localLanguage.length() > 0;
+                  if(localSideCertain) sourceIsTop = localLanguage.equalsIgnoreCase(code(topLang));
+                  if(isRecentlyDisplayedSourceDuplicate(sourceIsTop, raw)) return -1;
           
                   TextBlock b = new TextBlock();
                   b.speechSeq = ++speechSourceBlockSeq;
                   b.sourceTop = sourceIsTop;
                   b.translatedOk = false;
-                  b.pendingSourceText = original == null ? "" : original.trim();
-                  // V40.3: a nyers STT azonnal látható; az AI-válasz után ugyanennek a blokknak
-                  // a forrásoldalát a finoman javított clean_source váltja fel.
-                  // A pendingSourceText változatlanul megmarad; az AI nyelvdöntése után a blokk
-                  // szükség esetén átkerül a másik oldalra. Fordítási hiba esetén az átirat nem vész el.
-                  String visibleSource = userVisibleSpeechTextOrEmpty(b.pendingSourceText);
+                  b.pendingSourceText = raw;
+                  String visibleSource = localSideCertain ? userVisibleSpeechTextOrEmpty(raw) : "";
                   b.topText = sourceIsTop ? visibleSource : "";
                   b.bottomText = sourceIsTop ? "" : visibleSource;
                   textBlocks.add(b);
-                  renderBlocksKeepView();
+                  if(localSideCertain) renderBlocksKeepView();
                   return textBlocks.size() - 1;
               }
           
@@ -3920,6 +3977,12 @@ jobs:
                       TextBlock b = textBlocks.get(id);
                       b.translatedOk = false;
                       b.retryCount = 0;
+                      if((b.topText == null || b.topText.trim().length() == 0) &&
+                         (b.bottomText == null || b.bottomText.trim().length() == 0)) {
+                          String visibleSource = userVisibleSpeechTextOrEmpty(b.pendingSourceText);
+                          if(b.sourceTop) b.topText = visibleSource;
+                          else b.bottomText = visibleSource;
+                      }
                   }
           
                   renderBlocksKeepView();
@@ -3972,6 +4035,19 @@ jobs:
                   translation = restoreGlossaryTerms(translation, pendingSpeechGlossaryProtection);
                   original = cleanTranscriptForSelectedPair(original);
                   translation = cleanTranscriptForSelectedPair(cleanOneBlockTranslation(translation));
+
+                  // V40.31: rövid STT-forrásból a tisztító/fordító kör nem gyárthat hosszabb
+                  // forrásmondatot. Ez konkrétan megfogja az "igen" -> "mondom, igen" jellegű
+                  // kontextusból kiegészített hallucinációt. Rövidebb clean_source továbbra is
+                  // megengedett, mert egy bizonytalan zajszó elhagyható.
+                  String rawShortCheck = cleanTranscriptForSelectedPair(b.pendingSourceText);
+                  int rawShortWords = speechWordCount(rawShortCheck);
+                  int cleanShortWords = speechWordCount(original);
+                  if(rawShortWords > 0 && rawShortWords <= 3 && cleanShortWords > rawShortWords) {
+                      android.util.Log.w(LOG_TAG, "Rejected expanded short clean_source: raw=" + rawShortWords + ", clean=" + cleanShortWords);
+                      retrySpeechBlockOrRender(id);
+                      return;
+                  }
           
                   if(looksLikeInternalLeak(original) || looksLikeInternalLeak(translation) || original.length() == 0 || translation.length() == 0) {
                       retrySpeechBlockOrRender(id);
@@ -5378,6 +5454,7 @@ jobs:
                       "You receive one live speech fragment as source data. " +
                       "Choose exactly which of the two selected languages the RAW_SPEECH_TEXT is in. " +
                       "First produce clean_source entirely in that same detected source language. Lightly clean it: correct only clear speech-recognition errors, malformed words, punctuation, grammar, word order, accidental repetitions and isolated recognition debris when the fragment itself or the supplied context supports one clear correction. " +
+                      "For a RAW_SPEECH_TEXT of one to three words, clean_source must remain at most the same number of words. Never add a subject, reporting verb, explanation, lead-in or words copied from previous context to a short reply. A one-word yes/no must remain a one-word yes/no in clean_source. " +
                       "The selected pair is a hard language boundary: ordinary words in clean_source must belong to source_lang, and ordinary words in translation must belong to the other selected language. Never pass through a third-language word or a mixture of the two selected languages merely because it appeared in RAW_SPEECH_TEXT. " +
                       "A token that looks like a third language or the wrong selected language, but is not a clearly intended person, place, company or product name, is recognition debris. Correct it to the most probable wording in source_lang only when the current fragment or supplied context supports one clear correction; otherwise omit only that token. " +
                       "Use the conversation/domain profile and PREVIOUS_CONFIRMED_CONTEXT only to resolve terminology or an otherwise clear ambiguity. Never copy earlier context into clean_source or translation. " +
@@ -5553,20 +5630,20 @@ jobs:
           }
           EOF
 
-      - name: Verify generated V40.30 source
+      - name: Verify generated V40.31 source
         shell: bash
         run: |
           set -euo pipefail
           MAIN="app/src/main/java/com/attila/forditokonzol/MainActivity.java"
           test -f "$MAIN"
           if grep -n "BuildConfig" "$MAIN"; then
-            echo "ERROR: BuildConfig reference must not exist in V40.30 MainActivity.java" >&2
+            echo "ERROR: BuildConfig reference must not exist in V40.31 MainActivity.java" >&2
             exit 1
           fi
-          grep -Fq 'static final int APP_VERSION_CODE = 4030;' "$MAIN"
-          grep -Fq 'static final String APP_VERSION_NAME = "40.30";' "$MAIN"
+          grep -Fq 'static final int APP_VERSION_CODE = 4031;' "$MAIN"
+          grep -Fq 'static final String APP_VERSION_NAME = "40.31";' "$MAIN"
           grep -Fq 'TextView title = label("Fordito_V" + APP_VERSION_NAME);' "$MAIN"
-          echo "V40.30 source verification OK: no BuildConfig references."
+          echo "V40.31 source verification OK: no BuildConfig references."
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -5604,14 +5681,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.30.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.30.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.31.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.31.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.30
+          name: V40.31
           path: |
             artifact/*.apk
             artifact/*.aab
