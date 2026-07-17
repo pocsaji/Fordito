@@ -1,4 +1,4 @@
-name: Build Android APK V40.36
+name: Build Android APK V40.37
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4036; versionName = "40.36" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4037; versionName = "40.37" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.36" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.37" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -230,7 +230,7 @@ jobs:
               // Erre azért van szükség, hogy a lebegő gombon végzett hangmódváltás
               // azonnal visszafrissüljön a még nyitva lévő menüben is.
               Button openInterpreterMenuButton;
-              // V40.36: a nyitott főmenü profilgombja azonnal frissül a profilválasztóból visszatérve.
+              // V40.37: a nyitott főmenü profilgombja azonnal frissül a profilválasztóból visszatérve.
               Button openProfileMenuButton;
               SharedPreferences sp;
               OkHttpClient client;
@@ -275,7 +275,7 @@ jobs:
               boolean uiLockedForSpeech = false;
               boolean finalizingStop = false;
               volatile boolean stopAudioDrainPending = false;
-              // V40.36: a mikrofon gomb csak az első érvényes PCM beérkezése és legalább 800 ms után lesz zöld.
+              // V40.37: a mikrofon gomb csak az első érvényes PCM beérkezése és legalább 800 ms után lesz zöld.
               volatile boolean microphoneStarting = false;
               volatile boolean microphonePcmReady = false;
               volatile long microphoneStartUiEarliestMs = 0L;
@@ -292,13 +292,13 @@ jobs:
               static final String LOG_TAG = "ForditoV418";
               static final int PRE_ROLL_AUDIO_MS = 800;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
-              // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
+              // időállapota 50 ms beszéd után nyit és 350 ms csend után zár.
               static final int SILERO_FRAME_SAMPLES = 512;
               static final int SILERO_FRAME_BYTES = SILERO_FRAME_SAMPLES * 2;
               static final int WEBRTC_FRAME_SAMPLES = 320;
               static final int WEBRTC_FRAME_BYTES = WEBRTC_FRAME_SAMPLES * 2;
               static final int VAD_SPEECH_START_MS = 50;
-              static final int VAD_SPEECH_END_SILENCE_MS = 500;
+              static final int VAD_SPEECH_END_SILENCE_MS = 350;
               static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
               // V40.7: tolmács módban sem kerül külön Android hanghatás az AudioRecordra.
               // A headset saját hardveres feldolgozását nem szűrjük újra; hangszórónál TTS alatt kapuzzuk a mikrofont.
@@ -655,7 +655,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.36");
+                  TextView title = label("Fordito_V40.37");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -1632,11 +1632,16 @@ jobs:
                   boolean overGate = externalVadOverGate(frame);
                   if(overGate) {
                       if(!voiceSendActive) {
+                          // V40.37: a beszédindítás előtti és a még csak megerősítés alatt álló
+                          // keretek ugyanabba a gördülő előpufferbe kerülnek. Így egy rövid VAD-
+                          // visszaesés nem törli az első szó elejét, és az aktiváláskor pontosan
+                          // egyszer, folytonosan küldjük el a teljes kezdést.
+                          rememberPreRollAudio(frame, frame.length);
                           rememberPendingSpeechAudio(frame, frame.length);
                           if(pendingSpeechAudioDurationMs() < MIN_TRUE_SPEECH_AUDIO_MS) return;
                           if(firstSpeechHeardAt == 0L) firstSpeechHeardAt = now;
                           for(byte[] pr : takePreRollAudio()) sendAudioChunk(pr);
-                          for(byte[] ps : takePendingSpeechAudio()) sendAudioChunk(ps);
+                          clearPendingSpeechAudio();
                       } else {
                           sendAudioChunk(frame);
                       }
@@ -1648,6 +1653,8 @@ jobs:
                       voiceSendActive = false;
                       flushSpeechAudioWindow(true);
                   }
+                  // A megerősítés előtt esetleg már beszédnek jelölt kereteket nem dobjuk el:
+                  // azok az egységes előpufferben maradnak. Itt csak a megerősítési idő számlálója nullázódik.
                   clearPendingSpeechAudio();
                   rememberPreRollAudio(frame, frame.length);
               }
@@ -2747,8 +2754,9 @@ jobs:
                       byte[] remainder = takeCapturedRemainder();
                       if(voiceSendActive && remainder.length > 0) appendSpeechAudioChunk(remainder);
                       if(!voiceSendActive && pendingSpeechAudioDurationMs() > 0) {
+                          // V40.37: a megerősítés alatti keretek már az egységes előpuffer részei,
+                          // ezért STOP-nál csak ezt küldjük el; a külön pending sor duplázna.
                           for(byte[] pr : takePreRollAudio()) appendSpeechAudioChunk(pr);
-                          for(byte[] ps : takePendingSpeechAudio()) appendSpeechAudioChunk(ps);
                       }
                       voiceSendActive = false;
                       clearPendingSpeechAudio();
@@ -3311,18 +3319,101 @@ jobs:
               }
           
               boolean sourceIsTopBySelectedPair(String text, boolean fallback) {
-                  // V318: előzetes szótáras nyelvdöntés nincs.
-                  // A nyers blokk ideiglenesen az aktuális oldalra kerül, majd az AI SOURCE_LANG alapján átkerülhet.
+                  // V40.37: ez nem nyelvi kapu és nem dob el rövid választ. Csak akkor tér el
+                  // az aktuális oldaltól, ha a meglévő kiválasztott nyelvpár egyikére egyértelmű
+                  // helyi bizonyíték van (jellegzetes szó vagy ékezet).
+                  String detected = selectedPairLanguageCode(text);
+                  if(detected.equalsIgnoreCase(apiCode(topLang))) return true;
+                  if(detected.equalsIgnoreCase(apiCode(bottomLang))) return false;
                   return fallback;
               }
           
               String selectedPairLanguageCode(String text) {
+                  String topCode = apiCode(topLang);
+                  String bottomCode = apiCode(bottomLang);
+                  if(topCode.length() == 0 || bottomCode.length() == 0 || topCode.equalsIgnoreCase(bottomCode)) return "";
+                  int topScore = scoreTextForSelectedLang(text, topCode);
+                  int bottomScore = scoreTextForSelectedLang(text, bottomCode);
+                  if(topScore >= 6 && topScore >= bottomScore + 2) return topCode;
+                  if(bottomScore >= 6 && bottomScore >= topScore + 2) return bottomCode;
+                  String t = text == null ? "" : text.trim();
+                  int words = t.length() == 0 ? 0 : t.split("\\s+").length;
+                  if(words >= 3 && topScore >= 5 && topScore >= bottomScore + 3) return topCode;
+                  if(words >= 3 && bottomScore >= 5 && bottomScore >= topScore + 3) return bottomCode;
                   return "";
               }
           
-              int scoreShortReplyForSelectedLang(String text, String lang) { return 0; }
-              int scoreTextForSelectedLang(String text, String lang) { return 0; }
-              boolean looksLikeNonFrHuNoise(String text) { return false; }
+              int scoreShortReplyForSelectedLang(String text, String lang) {
+                  if(text == null || lang == null) return 0;
+                  String lc = apiCode(lang);
+                  String x = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFD)
+                      .replaceAll("\\p{M}+", "").toLowerCase(Locale.ROOT)
+                      .replaceAll("[^a-z0-9\\s]", " ").replaceAll("\\s+", " ").trim();
+                  if(x.length() == 0) return 0;
+                  String[] exact;
+                  if(lc.equals("hu")) exact = new String[]{"igen","nem","jo","oke","rendben","persze","koszonom","szia","hello","viszlat","jo lesz","nem tudom","most","ma","holnap"};
+                  else if(lc.equals("fr")) exact = new String[]{"oui","non","bon","d accord","merci","bonjour","salut","au revoir","a bientot","ca va","demain","maintenant"};
+                  else if(lc.equals("en")) exact = new String[]{"yes","no","okay","ok","thanks","thank you","hello","hi","goodbye","see you","see ya","tomorrow","now"};
+                  else if(lc.equals("de")) exact = new String[]{"ja","nein","okay","danke","hallo","tschuss","auf wiedersehen","morgen","jetzt"};
+                  else if(lc.equals("it")) exact = new String[]{"si","no","va bene","grazie","ciao","arrivederci","domani","adesso"};
+                  else if(lc.equals("es")) exact = new String[]{"si","no","vale","gracias","hola","adios","hasta luego","manana","ahora"};
+                  else if(lc.equals("ro")) exact = new String[]{"da","nu","bine","multumesc","salut","la revedere","maine","acum"};
+                  else if(lc.equals("hr")) exact = new String[]{"da","ne","dobro","hvala","bok","dovidenja","sutra","sada"};
+                  else if(lc.equals("sk")) exact = new String[]{"ano","nie","dobre","dakujem","ahoj","dovidenia","zajtra","teraz"};
+                  else if(lc.equals("sl")) exact = new String[]{"da","ne","dobro","hvala","zivjo","nasvidenje","jutri","zdaj"};
+                  else return 0;
+                  for(String v : exact) if(x.equals(v)) return 8;
+                  return 0;
+              }
+
+              int scoreTextForSelectedLang(String text, String lang) {
+                  if(text == null || lang == null) return 0;
+                  String lc = apiCode(lang);
+                  String raw = text.toLowerCase(Locale.ROOT);
+                  String x = java.text.Normalizer.normalize(raw, java.text.Normalizer.Form.NFD)
+                      .replaceAll("\\p{M}+", "").replaceAll("[^a-z0-9\\s]", " ")
+                      .replaceAll("\\s+", " ").trim();
+                  if(x.length() == 0) return 0;
+                  int score = scoreShortReplyForSelectedLang(text, lc);
+                  String[] common;
+                  if(lc.equals("hu")) {
+                      common = new String[]{"hogy","van","vagy","nem","igen","egy","az","es","mit","hall","hallod","korul","korulottem","ilyen","csend","komoly","viszlat","most","lesz","volt","kell","lehet","koszonom","szia"};
+                      if(raw.matches(".*[őű].*")) score += 5;
+                      if(raw.matches(".*[áéíóöúü].*")) score += 2;
+                  } else if(lc.equals("fr")) {
+                      common = new String[]{"je","tu","il","elle","nous","vous","ils","elles","le","la","les","un","une","des","de","du","et","est","suis","es","sommes","etes","sont","que","qui","quoi","pour","avec","sans","dans","sur","bonjour","merci","salut","revoir","entends","autour","silence"};
+                      if(raw.matches(".*[àâæçèéêëîïôœùûÿ].*")) score += 3;
+                  } else if(lc.equals("en")) {
+                      common = new String[]{"the","this","that","is","are","was","were","you","your","we","they","and","or","but","what","why","how","hear","around","silence","hello","thanks","goodbye","see","ya","now","tomorrow"};
+                  } else if(lc.equals("de")) {
+                      common = new String[]{"der","die","das","ein","eine","und","oder","aber","ist","sind","ich","du","wir","sie","was","wie","warum","hallo","danke","jetzt","morgen"};
+                      if(raw.matches(".*[äöüß].*")) score += 4;
+                  } else if(lc.equals("it")) {
+                      common = new String[]{"il","lo","la","gli","le","un","una","ma","che","sono","sei","siamo","io","tu","noi","voi","cosa","come","perche","grazie","ciao","adesso","domani"};
+                  } else if(lc.equals("es")) {
+                      common = new String[]{"el","la","los","las","un","una","pero","que","es","son","yo","tu","nosotros","vosotros","como","por","gracias","hola","ahora","manana"};
+                      if(raw.matches(".*[¿¡ñ].*")) score += 4;
+                  } else if(lc.equals("ro")) {
+                      common = new String[]{"si","sau","dar","este","sunt","eu","tu","noi","voi","ce","cum","de","la","cu","pentru","multumesc","salut","acum","maine"};
+                      if(raw.matches(".*[ăâîșşțţ].*")) score += 4;
+                  } else if(lc.equals("hr")) {
+                      common = new String[]{"ili","ali","je","su","ja","ti","mi","vi","sto","kako","zasto","hvala","bok","sada","sutra"};
+                      if(raw.matches(".*[čćđšž].*")) score += 4;
+                  } else if(lc.equals("sk")) {
+                      common = new String[]{"alebo","ale","je","su","som","si","sme","ste","co","ako","preco","dakujem","ahoj","teraz","zajtra"};
+                      if(raw.matches(".*[áäčďéíĺľňóôŕšťúýž].*")) score += 4;
+                  } else if(lc.equals("sl")) {
+                      common = new String[]{"in","ali","ampak","je","so","sem","si","smo","ste","kaj","kako","zakaj","hvala","zivjo","zdaj","jutri"};
+                      if(raw.matches(".*[čšž].*")) score += 3;
+                  } else return score;
+                  HashSet<String> tokens = new HashSet<>(Arrays.asList(x.split("\\s+")));
+                  for(String w : common) if(tokens.contains(w)) score += 2;
+                  return score;
+              }
+
+              boolean looksLikeNonFrHuNoise(String text) {
+                  return looksLikeObviousThirdLanguageNoise(text);
+              }
           
               boolean isLikelyNoisyTranscriptBlock(String block) {
                   if(block == null) return true;
@@ -3669,9 +3760,19 @@ jobs:
               }
           
               boolean looksLikeObviousThirdLanguageNoise(String text) {
-                  // V318: harmadik nyelv szótáras tiltólista kikapcsolva az élő fordításban.
-                  // A két nyelvre zárást a speechBlockInstructions/pairRules és a SOURCE_LANG feldolgozás végzi.
-                  return false;
+                  if(text == null || text.trim().length() == 0) return false;
+                  String topCode = apiCode(topLang);
+                  String bottomCode = apiCode(bottomLang);
+                  int selectedBest = Math.max(scoreTextForSelectedLang(text, topCode), scoreTextForSelectedLang(text, bottomCode));
+                  int thirdBest = 0;
+                  String[] supported = new String[]{"hu","fr","en","de","it","es","ro","hr","sk","sl"};
+                  for(String lc : supported) {
+                      if(lc.equalsIgnoreCase(topCode) || lc.equalsIgnoreCase(bottomCode)) continue;
+                      thirdBest = Math.max(thirdBest, scoreTextForSelectedLang(text, lc));
+                  }
+                  // Csak erős, egyértelmű bizonyítékra tiltunk. Nevek, számok és kölcsönszavak
+                  // önmagukban nem érik el ezt a küszöböt.
+                  return thirdBest >= 8 && thirdBest >= selectedBest + 2;
               }
 
               boolean isUsableSpeechTriple(String[] trp) {
@@ -3826,15 +3927,19 @@ jobs:
                       final int requestSession = sttSessionId;
                       JSONObject root = new JSONObject();
                       root.put("model", model);
-                      root.put("temperature", 0.1);
+                      root.put("temperature", 0.0);
                       JSONArray messages = new JSONArray();
                       messages.put(new JSONObject().put("role", "system").put("content", speechBlockInstructions()));
                       String topCode = code(topLang).toUpperCase(Locale.ROOT);
                       String bottomCode = code(bottomLang).toUpperCase(Locale.ROOT);
+                      String localSourceHint = selectedPairLanguageCode(src);
+                      String[] sourceWords = src.trim().split("\\s+");
+                      String previousContext = sourceWords.length <= 4 ? "" : speechPreviousContextHint();
                       messages.put(new JSONObject().put("role", "user").put("content",
                           "SELECTED_TOP_LANG: " + topCode + "\n" +
                           "SELECTED_BOTTOM_LANG: " + bottomCode + "\n" +
-                          speechPreviousContextHint() +
+                          "HIGH_CONFIDENCE_LOCAL_SOURCE_HINT: " + (localSourceHint.length() == 0 ? "NONE" : localSourceHint.toUpperCase(Locale.ROOT)) + "\n" +
+                          previousContext +
                           "RAW_SPEECH_TEXT (the only text to clean and translate):\n" + src.trim()));
                       root.put("messages", messages);
 
@@ -3913,6 +4018,18 @@ jobs:
                       TextBlock b = textBlocks.get(id);
                       b.translatedOk = false;
                       b.retryCount = 0;
+                      // Ha a modell válasza hibás, a nyers átirat akkor se maradjon a rossz
+                      // nyelvi oldalon: csak erős helyi nyelvjel esetén helyezzük át.
+                      String raw = b.pendingSourceText == null ? "" : b.pendingSourceText.trim();
+                      String local = selectedPairLanguageCode(raw);
+                      if(local.length() > 0) {
+                          boolean localTop = local.equalsIgnoreCase(apiCode(topLang));
+                          b.sourceTop = localTop;
+                          String visible = userVisibleSpeechTextOrEmpty(raw);
+                          b.topText = localTop ? visible : "";
+                          b.bottomText = localTop ? "" : visible;
+                          setDetectedSourceSide(localTop);
+                      }
                   }
 
                   renderBlocksKeepView();
@@ -3946,6 +4063,12 @@ jobs:
                       String normalizedSource = normalizeAiSourceLangCode(sourceLang);
                       String topCode = code(topLang).toUpperCase(Locale.ROOT);
                       String bottomCode = code(bottomLang).toUpperCase(Locale.ROOT);
+                      String localSourceHint = selectedPairLanguageCode(b.pendingSourceText);
+                      if(localSourceHint.length() > 0) {
+                          // Rövid, egyértelmű válasznál a helyi bizonyíték felülírja a modell
+                          // kontextus által elhúzott SOURCE_LANG címkéjét.
+                          normalizedSource = localSourceHint.toUpperCase(Locale.ROOT);
+                      }
                       if(!normalizedSource.equals(topCode) && !normalizedSource.equals(bottomCode)) {
                           retrySpeechBlockOrRender(id);
                           return;
@@ -3956,6 +4079,18 @@ jobs:
                       translation = cleanTranscriptForSelectedPair(cleanOneBlockTranslation(translation));
           
                       if(looksLikeInternalLeak(original) || looksLikeInternalLeak(translation)) {
+                          retrySpeechBlockOrRender(id);
+                          return;
+                      }
+
+                      String expectedTargetCode = sourceIsTop ? bottomCode : topCode;
+                      String originalDetected = selectedPairLanguageCode(original);
+                      String translationDetected = selectedPairLanguageCode(translation);
+                      if((originalDetected.length() > 0 && !originalDetected.equalsIgnoreCase(normalizedSource)) ||
+                         (translationDetected.length() > 0 && !translationDetected.equalsIgnoreCase(expectedTargetCode)) ||
+                         looksLikeObviousThirdLanguageNoise(original) || looksLikeObviousThirdLanguageNoise(translation)) {
+                          // Hibás nyelvű eredmény nem kerülhet ki az ablakba. Nem indítunk új
+                          // AI-kört; a nyers, helyesen oldalra tett átirat megmarad.
                           retrySpeechBlockOrRender(id);
                           return;
                       }
@@ -5431,7 +5566,7 @@ jobs:
 
               String sharedTextCleanupInstructions() {
                   // V40.17: a RENDEZ és a FORDÍT ugyanazt az egysoros mondattagolást használja.
-                  // V40.36: négy Silero fokozat, késleltetett mikrofon-kész jelzés és azonnali profilmenü-frissítés.
+                  // V40.37: egységes beszédkezdet-puffer, 350 ms mondatzárás és keményebb nyelvpár-ellenőrzés.
                   return nonConversationalLanguageTaskRules() +
                       profilePrompt() +
                       cleanupBehaviorRules() +
@@ -5476,9 +5611,9 @@ jobs:
                   return "Selected languages are fixed. Work only between these two languages.\n" +
                       "TOP_LANG: " + topCode + "\n" +
                       "BOTTOM_LANG: " + bottomCode + "\n" +
-                      "There is no source-language or target-language hint for this live block. Determine source_lang only from RAW_SPEECH_TEXT. " +
+                      "A HIGH_CONFIDENCE_LOCAL_SOURCE_HINT may be supplied when clear words or language-specific spelling identify one selected language. Follow that hint unless RAW_SPEECH_TEXT itself contains stronger, unmistakable evidence for the other selected language. NONE means no hint. " +
                       "The currently active screen side, the previous block direction, a headset connection, the audio route and PREVIOUS_CONFIRMED_CONTEXT are not evidence of the new block's language. " +
-                      "Choose source_lang as exactly TOP_LANG or BOTTOM_LANG, and translation must be in the other selected language.\n" +
+                      "Choose source_lang as exactly TOP_LANG or BOTTOM_LANG, and translation must be entirely in the other selected language. Never use a third language, including for short greetings or farewells.\n" +
                       nonConversationalLanguageTaskRules() +
                       profilePrompt() +
                       translationModePrompt() +
@@ -5802,14 +5937,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.36.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.36.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.37.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.37.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.36
+          name: V40.37
           path: |
             artifact/*.apk
             artifact/*.aab
