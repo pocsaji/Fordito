@@ -1,4 +1,4 @@
-name: Build Android APK V40.40
+name: Build Android APK V40.41
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4040; versionName = "40.40" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4041; versionName = "40.41" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.40" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.41" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -656,7 +656,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.40");
+                  TextView title = label("Fordito_V40.41");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -3303,6 +3303,12 @@ jobs:
                   x = x.replaceAll("(?iu)\\bs[íi]li\\s+csend\\b", "síri csend");
                   x = x.replaceAll("(?iu)\\bs[íi]r[íi]ts?en\\b", "síri csend");
                   x = x.replaceAll("(?iu)\\bs[íi]ri\\s+csendes\\b", "síri csendes");
+
+                  // V40.41: a rövid magyar „igen” gyakori STT-hibája ugyanebben a meglévő
+                  // normalizáló láncban javul, ezért a nyelvi oldalbecslés is már „igen”-t kap.
+                  if(apiCode(topLang).equals("hu") || apiCode(bottomLang).equals("hu")) {
+                      x = x.replaceAll("(?iu)\\bigan\\b", "igen");
+                  }
 
           
                   return x.trim().replaceAll("\\s+", " ");
@@ -5961,14 +5967,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.40.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.40.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.41.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.41.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.40
+          name: V40.41
           path: |
             artifact/*.apk
             artifact/*.aab
