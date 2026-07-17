@@ -1,4 +1,4 @@
-name: Build Android APK V40.37
+name: Build Android APK V40.39
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4037; versionName = "40.37" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4039; versionName = "40.39" }
 
               signingConfigs {
                   create("release") {
@@ -115,7 +115,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.37" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.39" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -230,7 +230,7 @@ jobs:
               // Erre azért van szükség, hogy a lebegő gombon végzett hangmódváltás
               // azonnal visszafrissüljön a még nyitva lévő menüben is.
               Button openInterpreterMenuButton;
-              // V40.37: a nyitott főmenü profilgombja azonnal frissül a profilválasztóból visszatérve.
+              // V40.39: a nyitott főmenü profilgombja azonnal frissül a profilválasztóból visszatérve.
               Button openProfileMenuButton;
               SharedPreferences sp;
               OkHttpClient client;
@@ -258,6 +258,7 @@ jobs:
               int activeCaptureChannelCount = 1;
               boolean directBleCaptureActive = false;
               final ByteArrayOutputStream captureRateRemainder = new ByteArrayOutputStream();
+              double captureLevelGain = 1.0;
               long directBleDigitalSilenceMs = 0L;
               boolean directBleFallbackRequested = false;
               int activeCommunicationDeviceId = -1;
@@ -275,7 +276,7 @@ jobs:
               boolean uiLockedForSpeech = false;
               boolean finalizingStop = false;
               volatile boolean stopAudioDrainPending = false;
-              // V40.37: a mikrofon gomb csak az első érvényes PCM beérkezése és legalább 800 ms után lesz zöld.
+              // V40.39: az első érvényes PCM után legfeljebb 200 ms stabilizálás; nincs egy másodperces indulási várakozás.
               volatile boolean microphoneStarting = false;
               volatile boolean microphonePcmReady = false;
               volatile long microphoneStartUiEarliestMs = 0L;
@@ -290,7 +291,7 @@ jobs:
               String lastInterpreterAudioMode = "auto";
               volatile long ttsMuteUntilMs = 0L;
               static final String LOG_TAG = "ForditoV418";
-              static final int PRE_ROLL_AUDIO_MS = 800;
+              static final int PRE_ROLL_AUDIO_MS = 320;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 350 ms csend után zár.
               static final int SILERO_FRAME_SAMPLES = 512;
@@ -299,7 +300,7 @@ jobs:
               static final int WEBRTC_FRAME_BYTES = WEBRTC_FRAME_SAMPLES * 2;
               static final int VAD_SPEECH_START_MS = 50;
               static final int VAD_SPEECH_END_SILENCE_MS = 350;
-              static final int MIN_TRUE_SPEECH_AUDIO_MS = 150;
+              static final int MIN_TRUE_SPEECH_AUDIO_MS = 96;
               // V40.7: tolmács módban sem kerül külön Android hanghatás az AudioRecordra.
               // A headset saját hardveres feldolgozását nem szűrjük újra; hangszórónál TTS alatt kapuzzuk a mikrofont.
               static final int MAX_CONTINUOUS_SPEECH_BLOCK_MS = 8000;
@@ -451,7 +452,7 @@ jobs:
               String mode = "natural";
               String vadMode = "low";
               String delayMode = "medium";
-              String audioSourceMode = "recognition";
+              String audioSourceMode = "mic";
               String topLang = "hu";
               String bottomLang = "fr";
           
@@ -528,10 +529,10 @@ jobs:
               };
           
               final String[][] audioSourceModes = {
-                  {"Beszédfelismerés / ajánlott","recognition"},
+                  {"Alap mikrofon / ajánlott","mic"},
+                  {"Beszédfelismerés / feldolgozott","recognition"},
                   {"Kommunikáció / régi","communication"},
-                  {"Nyers mikrofon / próba","unprocessed"},
-                  {"Alap mikrofon","mic"}
+                  {"Nyers mikrofon / próba","unprocessed"}
               };
           
 
@@ -566,7 +567,7 @@ jobs:
                   delayMode = sp.getString("delayMode", "xhigh");
                   vadEngineMode = sp.getString("vadEngineMode", "silero");
                   if(!"webrtc_quiet".equals(vadEngineMode) && !"webrtc_medium".equals(vadEngineMode) && !"webrtc".equals(vadEngineMode) && !"silero_off".equals(vadEngineMode) && !"silero".equals(vadEngineMode) && !"silero_medium".equals(vadEngineMode) && !"silero_truck".equals(vadEngineMode) && !"pass".equals(vadEngineMode)) vadEngineMode = "silero";
-                  audioSourceMode = sp.getString("audioSourceMode", "recognition");
+                  audioSourceMode = sp.getString("audioSourceMode", "mic");
                   interpreterMode = sp.getBoolean("interpreterMode", false);
                   String storedInterpreterMode = sp.getString("interpreterAudioMode", interpreterMode ? "auto" : "off");
                   interpreterMode = interpreterMode && !"off".equals(storedInterpreterMode);
@@ -594,7 +595,7 @@ jobs:
                       // Csak a hanglánc dokumentált alapját migráljuk; a felhasználó többi
                       // beállítását (nyelvek, profil, tolmács mód) nem írjuk felül.
                       vadEngineMode = "silero";
-                      audioSourceMode = "recognition";
+                      audioSourceMode = "mic";
                       sp.edit().putInt("stableDefaultsVersion", 400).apply();
                       save();
                   }
@@ -608,15 +609,16 @@ jobs:
                   if(last < 408) {
                       // V40.8: BLE headsetnél MODE_NORMAL + MIC 32 kHz az elsődleges út, belső 16 kHz átalakítással.
                       // A kommunikációs mód csak elutasított vagy digitálisan néma közvetlen bemenetnél maradhat.
-                      audioSourceMode = "recognition";
+                      audioSourceMode = "mic";
                       sp.edit().putInt("stableDefaultsVersion", 408).apply();
                       save();
                   }
-                  if(last < 412) {
-                      // V40.12: telepítés/frissítés után egyszer bekapcsoljuk a 2 perces mikrofon-életjelzést.
-                      // Ezután a felhasználó továbbra is szabadon átállíthatja vagy kikapcsolhatja.
-                      micLifeSignalMinutes = 2;
-                      sp.edit().putInt("stableDefaultsVersion", 412).apply();
+                  if(last < 438) {
+                      // V40.39: a korábbi VOICE_RECOGNITION alapértéket egyszer visszaállítjuk közvetlen MIC-re,
+                      // mert a Samsung feldolgozott forrásának induló állapota közvetlenül érinthette az első szavakat.
+                      if(last < 412) micLifeSignalMinutes = 2;
+                      audioSourceMode = "mic";
+                      sp.edit().putInt("stableDefaultsVersion", 438).apply();
                       save();
                   }
               }
@@ -655,7 +657,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.37");
+                  TextView title = label("Fordito_V40.39");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -1375,7 +1377,7 @@ jobs:
                       resetAudioModeState();
                       microphoneStarting = true;
                       microphonePcmReady = false;
-                      microphoneStartUiEarliestMs = android.os.SystemClock.elapsedRealtime() + 800L;
+                      microphoneStartUiEarliestMs = android.os.SystemClock.elapsedRealtime() + 200L;
                       state.setText("mikrofon előkészítés");
                       updateButtons();
                       audioLoop();
@@ -1396,6 +1398,8 @@ jobs:
                   return "Transcribe only the words that are clearly audible. " +
                       "The speech language is exactly one of these two languages: " + top + " or " + bottom + ". " +
                       "For ordinary speech, never output words from a third language and never create a mixed-language transcription. " +
+                      "The spelling must also belong to one of the two selected languages: never write a selected-language utterance as a similar-sounding word or phrase from an unselected language. " +
+                      "For very short greetings, farewells and one-word replies, prioritize the actual pronunciation within the selected pair over an accidental third-language spelling. " +
                       "If an unclear sound cannot be written confidently as a word in either selected language, omit only that unclear sound. " +
                       "Clearly spoken person, place, company and product names may keep their real spelling. " +
                       transcriptionProfilePrompt() +
@@ -1632,7 +1636,7 @@ jobs:
                   boolean overGate = externalVadOverGate(frame);
                   if(overGate) {
                       if(!voiceSendActive) {
-                          // V40.37: a beszédindítás előtti és a még csak megerősítés alatt álló
+                          // V40.39: a beszédindítás előtti és a még csak megerősítés alatt álló
                           // keretek ugyanabba a gördülő előpufferbe kerülnek. Így egy rövid VAD-
                           // visszaesés nem törli az első szó elejét, és az aktiváláskor pontosan
                           // egyszer, folytonosan küldjük el a teljes kezdést.
@@ -1853,8 +1857,8 @@ jobs:
               }
           
               int selectedAudioSource() {
-                  // V40.7: tolmács módban is ugyanazt a bevált AudioRecord forrást használjuk, mint normál módban.
-                  // Headsetnél nincs második szoftveres előszűrés; alapérték: VOICE_RECOGNITION.
+                  // V40.39: telefonmikrofonnál a közvetlen MIC az alap, így nincs első mondatos DSP/AGC felépülés.
+                  // A VOICE_RECOGNITION csak kézzel választható vagy tartalék forrás marad.
                   if("recognition".equals(audioSourceMode)) return MediaRecorder.AudioSource.VOICE_RECOGNITION;
                   if("communication".equals(audioSourceMode)) return MediaRecorder.AudioSource.VOICE_COMMUNICATION;
                   if("unprocessed".equals(audioSourceMode)) return MediaRecorder.AudioSource.UNPROCESSED;
@@ -1941,8 +1945,8 @@ jobs:
               AudioRecord tryAudioRecordCandidates(int sampleRate, int requestedBufferBytes, AudioDeviceInfo preferredDevice) {
                   LinkedHashSet<Integer> candidates = new LinkedHashSet<>();
                   candidates.add(selectedAudioSource());
-                  candidates.add(MediaRecorder.AudioSource.VOICE_RECOGNITION);
                   candidates.add(MediaRecorder.AudioSource.MIC);
+                  candidates.add(MediaRecorder.AudioSource.VOICE_RECOGNITION);
 
                   for(Integer source : candidates) {
                       if(source == null) continue;
@@ -2496,6 +2500,7 @@ jobs:
                   closeExternalVad();
                   resetCapturedFrameState();
                   synchronized(captureRateRemainder) { captureRateRemainder.reset(); }
+                  captureLevelGain = 1.0;
                   activeCaptureSampleRate = AUDIO_SAMPLE_RATE;
                   activeCaptureChannelCount = 1;
                   directBleCaptureActive = false;
@@ -2516,8 +2521,12 @@ jobs:
                       int inputGroupBytes = rateRatio * channels * 2;
                       int usable = all.length - (all.length % inputGroupBytes);
                       if(usable <= 0) return new byte[0];
-                      ByteArrayOutputStream out = new ByteArrayOutputStream(usable / (rateRatio * channels));
-                      for(int i=0;i<usable;i+=inputGroupBytes) {
+
+                      int outputSamples = usable / inputGroupBytes;
+                      short[] mono = new short[outputSamples];
+                      double squareSum = 0.0;
+                      int peak = 0;
+                      for(int i=0, outPos=0;i<usable;i+=inputGroupBytes,outPos++) {
                           long sum = 0L;
                           int sampleCount = rateRatio * channels;
                           int pos = i;
@@ -2527,8 +2536,30 @@ jobs:
                               pos += 2;
                           }
                           int avg = (int)(sum / Math.max(1, sampleCount));
-                          out.write(avg & 0xff);
-                          out.write((avg >> 8) & 0xff);
+                          mono[outPos] = (short)avg;
+                          squareSum += (double)avg * (double)avg;
+                          peak = Math.max(peak, Math.abs(avg));
+                      }
+
+                      // V40.39: nincs várakoztatás és nincs Android AGC. Ugyanebben a meglévő
+                      // konverziós lépésben csak a valóban hallható, halk PCM kap korlátozott erősítést.
+                      // A csendet/zajt nem emeljük fel, a csúcsértéket pedig vágás alatt tartjuk.
+                      double rms = Math.sqrt(squareSum / Math.max(1, outputSamples));
+                      double wantedGain = 1.0;
+                      if(rms >= 180.0 && peak >= 350 && rms < 2600.0) {
+                          wantedGain = Math.min(3.0, 2600.0 / Math.max(1.0, rms));
+                          wantedGain = Math.min(wantedGain, 28000.0 / Math.max(1.0, peak));
+                      }
+                      captureLevelGain = captureLevelGain * 0.35 + wantedGain * 0.65;
+                      if(rms < 120.0 || peak < 250) captureLevelGain = 1.0;
+
+                      ByteArrayOutputStream out = new ByteArrayOutputStream(outputSamples * 2);
+                      for(short sample : mono) {
+                          int adjusted = (int)Math.round(sample * captureLevelGain);
+                          if(adjusted > 30000) adjusted = 30000;
+                          else if(adjusted < -30000) adjusted = -30000;
+                          out.write(adjusted & 0xff);
+                          out.write((adjusted >> 8) & 0xff);
                       }
                       captureRateRemainder.reset();
                       if(usable < all.length) captureRateRemainder.write(all, usable, all.length - usable);
@@ -2754,7 +2785,7 @@ jobs:
                       byte[] remainder = takeCapturedRemainder();
                       if(voiceSendActive && remainder.length > 0) appendSpeechAudioChunk(remainder);
                       if(!voiceSendActive && pendingSpeechAudioDurationMs() > 0) {
-                          // V40.37: a megerősítés alatti keretek már az egységes előpuffer részei,
+                          // V40.39: a megerősítés alatti keretek már az egységes előpuffer részei,
                           // ezért STOP-nál csak ezt küldjük el; a külön pending sor duplázna.
                           for(byte[] pr : takePreRollAudio()) appendSpeechAudioChunk(pr);
                       }
@@ -3301,6 +3332,14 @@ jobs:
                   x = x.replaceAll("(?iu)\\bs[íi]li\\s+csend\\b", "síri csend");
                   x = x.replaceAll("(?iu)\\bs[íi]r[íi]ts?en\\b", "síri csend");
                   x = x.replaceAll("(?iu)\\bs[íi]ri\\s+csendes\\b", "síri csendes");
+
+                  // V40.39: a „szia” rövid magyar hangalakját a kétnyelvű STT néha angol
+                  // helyesírással „See ya”-ként adja vissza. Ez nem külön angol töredék,
+                  // hanem a kiválasztott nyelvpáron belüli fonetikus félrezárás. Csak akkor
+                  // javítjuk vissza, ha magyar benne van a párban, angol pedig nincs.
+                  if(selectedContains("hu") && !selectedContains("en")) {
+                      x = x.replaceAll("(?iu)\\bsee\\s+ya\\b", "szia");
+                  }
           
                   return x.trim().replaceAll("\\s+", " ");
               }
@@ -3319,7 +3358,7 @@ jobs:
               }
           
               boolean sourceIsTopBySelectedPair(String text, boolean fallback) {
-                  // V40.37: ez nem nyelvi kapu és nem dob el rövid választ. Csak akkor tér el
+                  // V40.39: ez nem nyelvi kapu és nem dob el rövid választ. Csak akkor tér el
                   // az aktuális oldaltól, ha a meglévő kiválasztott nyelvpár egyikére egyértelmű
                   // helyi bizonyíték van (jellegzetes szó vagy ékezet).
                   String detected = selectedPairLanguageCode(text);
@@ -3763,15 +3802,17 @@ jobs:
                   if(text == null || text.trim().length() == 0) return false;
                   String topCode = apiCode(topLang);
                   String bottomCode = apiCode(bottomLang);
+                  String[] supported = new String[]{"hu","fr","en","de","it","es","ro","hr","sk","sl"};
+
+                  // V40.39: kizárólag a teljes, már helyreállított kimenetet ellenőrizzük.
+                  // A „See ya” típusú eset nem külön harmadik nyelvű töredék, hanem a „szia”
+                  // fonetikus STT-félreírása; ezt még a forrásnyelv lezárása előtt javítjuk.
                   int selectedBest = Math.max(scoreTextForSelectedLang(text, topCode), scoreTextForSelectedLang(text, bottomCode));
                   int thirdBest = 0;
-                  String[] supported = new String[]{"hu","fr","en","de","it","es","ro","hr","sk","sl"};
                   for(String lc : supported) {
                       if(lc.equalsIgnoreCase(topCode) || lc.equalsIgnoreCase(bottomCode)) continue;
                       thirdBest = Math.max(thirdBest, scoreTextForSelectedLang(text, lc));
                   }
-                  // Csak erős, egyértelmű bizonyítékra tiltunk. Nevek, számok és kölcsönszavak
-                  // önmagukban nem érik el ezt a küszöböt.
                   return thirdBest >= 8 && thirdBest >= selectedBest + 2;
               }
 
@@ -4075,7 +4116,9 @@ jobs:
                       }
                       sourceIsTop = normalizedSource.equals(topCode);
 
-                      original = cleanTranscriptForSelectedPair(original);
+                      // V40.39: ugyanazt a meglévő, párfüggő fonetikus javítást az AI által
+                      // visszaadott clean_source-on is lefuttatjuk, mielőtt a nyelvi lezárást ellenőrizzük.
+                      original = applyTinyHungarianTermFixes(cleanTranscriptForSelectedPair(original));
                       translation = cleanTranscriptForSelectedPair(cleanOneBlockTranslation(translation));
           
                       if(looksLikeInternalLeak(original) || looksLikeInternalLeak(translation)) {
@@ -4086,10 +4129,29 @@ jobs:
                       String expectedTargetCode = sourceIsTop ? bottomCode : topCode;
                       String originalDetected = selectedPairLanguageCode(original);
                       String translationDetected = selectedPairLanguageCode(translation);
+                      boolean originalMixedPair = false;
+                      boolean translationMixedPair = false;
+                      String[] originalParts = original.split("[.!?;:\n]+");
+                      for(String part : originalParts) {
+                          String p = part == null ? "" : part.trim();
+                          if(p.length() == 0) continue;
+                          int expectedScore = scoreTextForSelectedLang(p, normalizedSource);
+                          int wrongScore = scoreTextForSelectedLang(p, expectedTargetCode);
+                          if(wrongScore >= 6 && wrongScore >= expectedScore + 2) { originalMixedPair = true; break; }
+                      }
+                      String[] translationParts = translation.split("[.!?;:\n]+");
+                      for(String part : translationParts) {
+                          String p = part == null ? "" : part.trim();
+                          if(p.length() == 0) continue;
+                          int expectedScore = scoreTextForSelectedLang(p, expectedTargetCode);
+                          int wrongScore = scoreTextForSelectedLang(p, normalizedSource);
+                          if(wrongScore >= 6 && wrongScore >= expectedScore + 2) { translationMixedPair = true; break; }
+                      }
                       if((originalDetected.length() > 0 && !originalDetected.equalsIgnoreCase(normalizedSource)) ||
                          (translationDetected.length() > 0 && !translationDetected.equalsIgnoreCase(expectedTargetCode)) ||
+                         originalMixedPair || translationMixedPair ||
                          looksLikeObviousThirdLanguageNoise(original) || looksLikeObviousThirdLanguageNoise(translation)) {
-                          // Hibás nyelvű eredmény nem kerülhet ki az ablakba. Nem indítunk új
+                          // Hibás vagy kevert nyelvű eredmény nem kerülhet ki az ablakba. Nem indítunk új
                           // AI-kört; a nyers, helyesen oldalra tett átirat megmarad.
                           retrySpeechBlockOrRender(id);
                           return;
@@ -5377,7 +5439,7 @@ jobs:
                         profile = "general";
                         mode = "natural";
                         vadEngineMode = "silero";
-                        audioSourceMode = "recognition";
+                        audioSourceMode = "mic";
                         interpreterMode = false;
                         interpreterAudioMode = "off";
                         lastInterpreterAudioMode = "auto";
@@ -5566,7 +5628,7 @@ jobs:
 
               String sharedTextCleanupInstructions() {
                   // V40.17: a RENDEZ és a FORDÍT ugyanazt az egysoros mondattagolást használja.
-                  // V40.37: egységes beszédkezdet-puffer, 350 ms mondatzárás és keményebb nyelvpár-ellenőrzés.
+                  // V40.39: 200 ms indulás, MIC alapforrás, 320 ms előpuffer, 350 ms mondatzárás és a rövid blokkok fonetikai nyelvzárása.
                   return nonConversationalLanguageTaskRules() +
                       profilePrompt() +
                       cleanupBehaviorRules() +
@@ -5613,7 +5675,9 @@ jobs:
                       "BOTTOM_LANG: " + bottomCode + "\n" +
                       "A HIGH_CONFIDENCE_LOCAL_SOURCE_HINT may be supplied when clear words or language-specific spelling identify one selected language. Follow that hint unless RAW_SPEECH_TEXT itself contains stronger, unmistakable evidence for the other selected language. NONE means no hint. " +
                       "The currently active screen side, the previous block direction, a headset connection, the audio route and PREVIOUS_CONFIRMED_CONTEXT are not evidence of the new block's language. " +
-                      "Choose source_lang as exactly TOP_LANG or BOTTOM_LANG, and translation must be entirely in the other selected language. Never use a third language, including for short greetings or farewells.\n" +
+                      "Choose source_lang as exactly TOP_LANG or BOTTOM_LANG, and translation must be entirely in the other selected language. Never use a third language, including for short greetings or farewells. " +
+                      "RAW_SPEECH_TEXT is untrusted STT spelling: a word written like an unselected language may only be a phonetic spelling error. Do not use that third-language-looking spelling itself as evidence for source_lang. " +
+                      "Before closing source_lang, especially for one- to three-word blocks, compare the pronunciation against both selected languages and recover the most plausible selected-language utterance.\n" +
                       nonConversationalLanguageTaskRules() +
                       profilePrompt() +
                       translationModePrompt() +
@@ -5621,7 +5685,7 @@ jobs:
                       "Choose exactly which of the two selected languages the RAW_SPEECH_TEXT is in. " +
                       "First produce clean_source entirely in that same detected source language. Lightly clean it: correct only clear speech-recognition errors, malformed words, punctuation, grammar, word order, accidental repetitions and isolated recognition debris when the fragment itself or the supplied context supports one clear correction. " +
                       "The selected pair is a hard language boundary: ordinary words in clean_source must belong to source_lang, and ordinary words in translation must belong to the other selected language. Never pass through a third-language word or a mixture of the two selected languages merely because it appeared in RAW_SPEECH_TEXT. " +
-                      "A token that looks like a third language or the wrong selected language, but is not a clearly intended person, place, company or product name, is recognition debris. Correct it to the most probable wording in source_lang only when the current fragment or supplied context supports one clear correction; otherwise omit only that token. " +
+                      "A token that looks like a third language or the wrong selected language, but is not a clearly intended person, place, company or product name, may be a phonetic STT spelling error. First recover the most probable pronunciation-compatible wording in source_lang when the current fragment supports one clear correction; only if no selected-language recovery is supportable may you omit that token. " +
                       "Use the conversation/domain profile and PREVIOUS_CONFIRMED_CONTEXT only to resolve terminology or an otherwise clear ambiguity. Never copy earlier context into clean_source or translation. " +
                       "Do not rewrite for style, summarize, beautify, add information, combine it with an earlier block, or replace a plausible source-language word merely because another word fits the profile better. When uncertainty remains between plausible words in source_lang, preserve the closer audible wording rather than inventing content. " +
                       "Preserve every substantive fact, name, number, time, negation, condition, grammatical person, politeness level, tone and intention. " +
@@ -5937,14 +6001,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.37.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.37.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.39.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.39.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.37
+          name: V40.39
           path: |
             artifact/*.apk
             artifact/*.aab
