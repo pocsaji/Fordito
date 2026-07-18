@@ -1,4 +1,4 @@
-name: Build Android APK V40.44
+name: Build Android APK V40.45
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4044; versionName = "40.44" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4045; versionName = "40.45" }
           
               signingConfigs {
                   create("release") {
@@ -114,8 +114,8 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.44" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
-                  <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
+              <application android:allowBackup="false" android:label="Fordito_V40.45" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+                  <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait" android:windowSoftInputMode="adjustResize">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
@@ -812,13 +812,13 @@ jobs:
                       .putInt("interpreterFloatingY", s.interpreterFloatingY)
                       .putString("topLang", safe(s.topLang))
                       .putString("bottomLang", safe(s.bottomLang))
-                      .putInt("settingsSchemaVersion", 4044)
+                      .putInt("settingsSchemaVersion", 4045)
                       .apply();
               }
           
               private void migrateAndRemoveDeadSettings() {
                   int schema = preferences.getInt("settingsSchemaVersion", 0);
-                  if(schema >= 4044) return;
+                  if(schema >= 4045) return;
                   preferences.edit()
                       .remove("vadMode")
                       .remove("delayMode")
@@ -826,7 +826,7 @@ jobs:
                       .remove("audioSourceMode")
                       .remove("lastInterpreterAudioMode")
                       .remove("stableDefaultsVersion")
-                      .putInt("settingsSchemaVersion", 4044)
+                      .putInt("settingsSchemaVersion", 4045)
                       .apply();
               }
           
@@ -1566,6 +1566,11 @@ jobs:
               TextView state, inputRouteState;
               EditText topBox, bottomBox;
               Button micBtn, arrangeBtn, translateBtn, menuBtn, topLangBtn, centerLangBtn, bottomLangBtn;
+              LinearLayout rootLayout, headerBar, languageBar, controlsBar;
+              View editorDivider;
+              boolean keyboardEditMode = false;
+              boolean keyboardEditTop = true;
+              android.view.ViewTreeObserver.OnGlobalLayoutListener keyboardLayoutListener;
               SharedPreferences sp;
               SettingsRepository settingsRepository;
               final ConversationSession conversation = new ConversationSession();
@@ -1615,7 +1620,7 @@ jobs:
               boolean interpreterSpeechOutputEnabled = true;
               // V40.4: egyetlen látható automatikus mód. A belső útvonal headset / AEC / fél-duplex.
               String interpreterAudioMode = "off";
-              static final String LOG_TAG = "ForditoV4044";
+              static final String LOG_TAG = "ForditoV4045";
               static final int PRE_ROLL_AUDIO_MS = AudioPipelineConfig.PRE_ROLL_MS;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
@@ -1752,6 +1757,7 @@ jobs:
                   interpreterAudioMode = "off";
                   save();
                   audioManager = (AudioManager)getSystemService(AUDIO_SERVICE);
+                  getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
                   registerInterpreterAudioDeviceCallback();
                   ui();
                   reqMic();
@@ -1802,14 +1808,14 @@ jobs:
               }
           
               void ui() {
-                  LinearLayout root = new LinearLayout(this);
-                  root.setOrientation(LinearLayout.VERTICAL);
-                  root.setPadding(8,62,8,190);
-                  root.setBackgroundColor(Color.rgb(16,19,24));
-                  setContentView(root);
+                  rootLayout = new LinearLayout(this);
+                  rootLayout.setOrientation(LinearLayout.VERTICAL);
+                  rootLayout.setPadding(8,62,8,190);
+                  rootLayout.setBackgroundColor(Color.rgb(16,19,24));
+                  setContentView(rootLayout);
           
-                  LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.44");
+                  headerBar = row();
+                  TextView title = label("Fordito_V40.45");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -1817,12 +1823,12 @@ jobs:
                   inputRouteState.setEllipsize(TextUtils.TruncateAt.END);
                   state = label("készenlét");
                   state.setGravity(Gravity.RIGHT);
-                  bar.addView(title, new LinearLayout.LayoutParams(0,42,0.9f));
-                  bar.addView(inputRouteState, new LinearLayout.LayoutParams(0,42,1.35f));
-                  bar.addView(state, new LinearLayout.LayoutParams(0,42,0.9f));
-                  root.addView(bar);
+                  headerBar.addView(title, new LinearLayout.LayoutParams(0,42,0.9f));
+                  headerBar.addView(inputRouteState, new LinearLayout.LayoutParams(0,42,1.35f));
+                  headerBar.addView(state, new LinearLayout.LayoutParams(0,42,0.9f));
+                  rootLayout.addView(headerBar);
           
-                  LinearLayout langRow = row();
+                  languageBar = row();
                   topLangBtn = btn("FELSŐ");
                   centerLangBtn = btn("VÁGÓLAP");
                   centerLangBtn.setSingleLine(true);
@@ -1832,29 +1838,29 @@ jobs:
                   centerLangBtn.setPadding(2,0,2,0);
                   centerLangBtn.setContentDescription("Vágólap beillesztése az aktív ablakba");
                   bottomLangBtn = btn("ALSÓ");
-                  langRow.addView(topLangBtn, new LinearLayout.LayoutParams(0,85,1));
-                  langRow.addView(centerLangBtn, new LinearLayout.LayoutParams(0,85,1));
-                  langRow.addView(bottomLangBtn, new LinearLayout.LayoutParams(0,85,1));
-                  root.addView(langRow);
+                  languageBar.addView(topLangBtn, new LinearLayout.LayoutParams(0,85,1));
+                  languageBar.addView(centerLangBtn, new LinearLayout.LayoutParams(0,85,1));
+                  languageBar.addView(bottomLangBtn, new LinearLayout.LayoutParams(0,85,1));
+                  rootLayout.addView(languageBar);
           
                   topBox = box("FELSŐ ABLAK — átirat / fordítás");
                   bottomBox = box("ALSÓ ABLAK — átirat / fordítás");
-                  root.addView(topBox, new LinearLayout.LayoutParams(-1,0,1));
-                  android.view.View divider = new android.view.View(this);
-                  divider.setBackgroundColor(Color.rgb(95,100,108));
-                  root.addView(divider, new LinearLayout.LayoutParams(-1,8));
-                  root.addView(bottomBox, new LinearLayout.LayoutParams(-1,0,1));
+                  rootLayout.addView(topBox, editorBoxLayoutParams());
+                  editorDivider = new android.view.View(this);
+                  editorDivider.setBackgroundColor(Color.rgb(95,100,108));
+                  rootLayout.addView(editorDivider, new LinearLayout.LayoutParams(-1,8));
+                  rootLayout.addView(bottomBox, editorBoxLayoutParams());
           
-                  LinearLayout controls = row();
+                  controlsBar = row();
                   micBtn = btn("MIKROFON");
                   arrangeBtn = btn("RENDEZ");
                   translateBtn = btn("FORDÍT");
                   menuBtn = btn("MENÜ");
-                  controls.addView(micBtn, new LinearLayout.LayoutParams(0,94,1));
-                  controls.addView(arrangeBtn, new LinearLayout.LayoutParams(0,94,1));
-                  controls.addView(translateBtn, new LinearLayout.LayoutParams(0,94,1));
-                  controls.addView(menuBtn, new LinearLayout.LayoutParams(0,94,1));
-                  root.addView(controls);
+                  controlsBar.addView(micBtn, new LinearLayout.LayoutParams(0,94,1));
+                  controlsBar.addView(arrangeBtn, new LinearLayout.LayoutParams(0,94,1));
+                  controlsBar.addView(translateBtn, new LinearLayout.LayoutParams(0,94,1));
+                  controlsBar.addView(menuBtn, new LinearLayout.LayoutParams(0,94,1));
+                  rootLayout.addView(controlsBar);
           
                   // V318: sima kattintás / fókuszváltás ne állítsa le a mikrofont.
                   // Az aktív oldalt továbbra is átállítjuk, de speech munkát nem törlünk.
@@ -1882,8 +1888,81 @@ jobs:
                   translateBtn.setOnClickListener(v -> { hapticTap(v); manualTranslate(); });
                   menuBtn.setOnClickListener(v -> { hapticTap(v); menu(); });
                   menuBtn.setOnLongClickListener(v -> { hapticTap(v); clearBothBoxes(); return true; });
+                  installKeyboardEditMode();
           
                   updateButtons();
+              }
+          
+              LinearLayout.LayoutParams editorBoxLayoutParams() {
+                  return new LinearLayout.LayoutParams(-1, 0, 1f);
+              }
+          
+              int dp(int value) {
+                  return Math.round(value * getResources().getDisplayMetrics().density);
+              }
+          
+              void installKeyboardEditMode() {
+                  if(rootLayout == null || keyboardLayoutListener != null) return;
+                  keyboardLayoutListener = () -> {
+                      if(rootLayout == null) return;
+                      android.graphics.Rect visible = new android.graphics.Rect();
+                      rootLayout.getWindowVisibleDisplayFrame(visible);
+                      int fullHeight = rootLayout.getRootView().getHeight();
+                      int obscuredHeight = Math.max(0, fullHeight - visible.bottom);
+                      boolean keyboardVisible = obscuredHeight > Math.max(dp(160), fullHeight / 5);
+                      EditText focusedEditor = topBox != null && topBox.hasFocus() ? topBox
+                          : (bottomBox != null && bottomBox.hasFocus() ? bottomBox : null);
+                      if(keyboardVisible && focusedEditor != null) {
+                          enterKeyboardEditMode(focusedEditor == topBox);
+                      } else if(!keyboardVisible) {
+                          exitKeyboardEditMode();
+                      }
+                  };
+                  rootLayout.getViewTreeObserver().addOnGlobalLayoutListener(keyboardLayoutListener);
+              }
+          
+              void enterKeyboardEditMode(boolean top) {
+                  if(rootLayout == null || topBox == null || bottomBox == null) return;
+                  if(keyboardEditMode && keyboardEditTop == top) return;
+                  keyboardEditMode = true;
+                  keyboardEditTop = top;
+                  rootLayout.setPadding(8, 62, 8, 8);
+                  if(headerBar != null) headerBar.setVisibility(View.GONE);
+                  if(controlsBar != null) controlsBar.setVisibility(View.GONE);
+                  if(editorDivider != null) editorDivider.setVisibility(View.GONE);
+                  EditText active = top ? topBox : bottomBox;
+                  EditText inactive = top ? bottomBox : topBox;
+                  inactive.setVisibility(View.GONE);
+                  active.setVisibility(View.VISIBLE);
+                  active.setLayoutParams(editorBoxLayoutParams());
+                  active.post(() -> {
+                      int cursor = Math.max(0, active.getSelectionStart());
+                      try { active.bringPointIntoView(cursor); } catch(Exception ignored) {}
+                  });
+              }
+          
+              void exitKeyboardEditMode() {
+                  if(!keyboardEditMode || rootLayout == null) return;
+                  keyboardEditMode = false;
+                  rootLayout.setPadding(8, 62, 8, 190);
+                  if(headerBar != null) headerBar.setVisibility(View.VISIBLE);
+                  if(controlsBar != null) controlsBar.setVisibility(View.VISIBLE);
+                  if(editorDivider != null) editorDivider.setVisibility(View.VISIBLE);
+                  topBox.setVisibility(View.VISIBLE);
+                  bottomBox.setVisibility(View.VISIBLE);
+                  topBox.setLayoutParams(editorBoxLayoutParams());
+                  bottomBox.setLayoutParams(editorBoxLayoutParams());
+                  rootLayout.requestLayout();
+              }
+          
+              void hideKeyboardEditor() {
+                  View focused = getCurrentFocus();
+                  if(focused != null) {
+                      InputMethodManager imm = (InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
+                      if(imm != null) imm.hideSoftInputFromWindow(focused.getWindowToken(), 0);
+                      focused.clearFocus();
+                  }
+                  exitKeyboardEditMode();
               }
           
               LinearLayout row() {
@@ -4906,6 +4985,10 @@ jobs:
               }
           
               @Override public void onBackPressed() {
+                  if(keyboardEditMode) {
+                      hideKeyboardEditor();
+                      return;
+                  }
                   if(floatingTranslatorEnabled) {
                       moveTaskToBack(true);
                       new Handler().postDelayed(() -> ensureFloatingTranslator(), 250);
@@ -4932,6 +5015,10 @@ jobs:
               }
           
               @Override public void onDestroy() {
+                  if(rootLayout != null && keyboardLayoutListener != null) {
+                      try { rootLayout.getViewTreeObserver().removeOnGlobalLayoutListener(keyboardLayoutListener); } catch(Exception ignored) {}
+                      keyboardLayoutListener = null;
+                  }
                   cancelMicLifeSignal();
                   unregisterInterpreterAudioDeviceCallback();
                   hideFloatingTranslator();
@@ -4985,14 +5072,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.44.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.44.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.45.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.45.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.44
+          name: V40.45
           path: |
             artifact/*.apk
             artifact/*.aab
