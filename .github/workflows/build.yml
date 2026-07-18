@@ -1,4 +1,4 @@
-name: Build Android APK V40.43
+name: Build Android APK V40.44
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4043; versionName = "40.43" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4044; versionName = "40.44" }
           
               signingConfigs {
                   create("release") {
@@ -114,7 +114,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.43" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.44" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -812,13 +812,13 @@ jobs:
                       .putInt("interpreterFloatingY", s.interpreterFloatingY)
                       .putString("topLang", safe(s.topLang))
                       .putString("bottomLang", safe(s.bottomLang))
-                      .putInt("settingsSchemaVersion", 4043)
+                      .putInt("settingsSchemaVersion", 4044)
                       .apply();
               }
           
               private void migrateAndRemoveDeadSettings() {
                   int schema = preferences.getInt("settingsSchemaVersion", 0);
-                  if(schema >= 4043) return;
+                  if(schema >= 4044) return;
                   preferences.edit()
                       .remove("vadMode")
                       .remove("delayMode")
@@ -826,7 +826,7 @@ jobs:
                       .remove("audioSourceMode")
                       .remove("lastInterpreterAudioMode")
                       .remove("stableDefaultsVersion")
-                      .putInt("settingsSchemaVersion", 4043)
+                      .putInt("settingsSchemaVersion", 4044)
                       .apply();
               }
           
@@ -1553,6 +1553,7 @@ jobs:
           import android.util.Base64;
           import android.view.Gravity;
           import android.view.View;
+          import android.view.inputmethod.InputMethodManager;
           import android.text.Layout;
           import android.widget.*;
           import org.json.*;
@@ -1614,7 +1615,7 @@ jobs:
               boolean interpreterSpeechOutputEnabled = true;
               // V40.4: egyetlen látható automatikus mód. A belső útvonal headset / AEC / fél-duplex.
               String interpreterAudioMode = "off";
-              static final String LOG_TAG = "ForditoV4043";
+              static final String LOG_TAG = "ForditoV4044";
               static final int PRE_ROLL_AUDIO_MS = AudioPipelineConfig.PRE_ROLL_MS;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
@@ -1808,7 +1809,7 @@ jobs:
                   setContentView(root);
           
                   LinearLayout bar = row();
-                  TextView title = label("Fordito_V40.43");
+                  TextView title = label("Fordito_V40.44");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -3429,7 +3430,7 @@ jobs:
                       stopAudioDrainPending = true;
                       state.setText("utolsó mondat feldolgozása");
                       updateButtons();
-                      final int stopSession = sttCoordinator.sessionId();
+                      final long stopSession = sttCoordinator.sessionId();
                       final AudioRecord recorderToRelease = stoppingRec;
                       try {
                           // Ugyanazon az egyszálú executoron fut: csak az audioLoop teljes
@@ -3451,7 +3452,7 @@ jobs:
                   finishStopCleanup();
               }
           
-              void finalizeGracefulStopAfterAudioLoop(int stopSession, AudioRecord recorderToRelease) {
+              void finalizeGracefulStopAfterAudioLoop(long stopSession, AudioRecord recorderToRelease) {
                   try { if(recorderToRelease != null) recorderToRelease.release(); }
                   catch(Exception e) { android.util.Log.w(LOG_TAG, "AudioRecord delayed release failed", e); }
                   if(stopSession != sttCoordinator.sessionId() || !finalizingStop) return;
@@ -4984,14 +4985,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.43.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.43.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.44.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.44.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.43
+          name: V40.44
           path: |
             artifact/*.apk
             artifact/*.aab
