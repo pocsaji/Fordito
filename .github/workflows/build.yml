@@ -1,4 +1,4 @@
-name: Build Android APK V40.45
+name: Build Android APK V40.46
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4045; versionName = "40.45" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4046; versionName = "40.46" }
           
               signingConfigs {
                   create("release") {
@@ -114,7 +114,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.45" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.46" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait" android:windowSoftInputMode="adjustResize">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -330,6 +330,37 @@ jobs:
                   if(block == null) return null;
                   block.id = nextBlockId++;
                   block.sessionId = sessionId;
+                  blocks.add(block);
+                  return block;
+              }
+          
+              TextBlock replaceVisibleContent(String topText, String bottomText, boolean sourceTop) {
+                  TextBlock block = blocks.isEmpty() || blocks.get(0) == null ? new TextBlock() : blocks.get(0);
+                  if(block.id < 0L || block.sessionId != sessionId) {
+                      block.id = nextBlockId++;
+                      block.sessionId = sessionId;
+                  }
+          
+                  blocks.clear();
+                  translationQueue.clear();
+                  activeTranslationBlockId = -1L;
+          
+                  block.topText = topText == null ? "" : topText;
+                  block.bottomText = bottomText == null ? "" : bottomText;
+                  block.pendingSourceText = "";
+                  block.sourceTop = sourceTop;
+                  block.translatedOk = true;
+                  block.retryCount = 0;
+                  block.ttsSpoken = false;
+                  block.speechSeq = 0;
+                  block.finalReady = false;
+                  block.finalRevision++;
+                  block.finalTranslation = "";
+                  block.finalTargetLang = "";
+                  block.finalTranslationHash = "";
+                  block.ttsQueuedRevision = 0;
+                  block.ttsStartedRevision = 0;
+                  block.ttsCompletedRevision = 0;
                   blocks.add(block);
                   return block;
               }
@@ -812,13 +843,13 @@ jobs:
                       .putInt("interpreterFloatingY", s.interpreterFloatingY)
                       .putString("topLang", safe(s.topLang))
                       .putString("bottomLang", safe(s.bottomLang))
-                      .putInt("settingsSchemaVersion", 4045)
+                      .putInt("settingsSchemaVersion", 4046)
                       .apply();
               }
           
               private void migrateAndRemoveDeadSettings() {
                   int schema = preferences.getInt("settingsSchemaVersion", 0);
-                  if(schema >= 4045) return;
+                  if(schema >= 4046) return;
                   preferences.edit()
                       .remove("vadMode")
                       .remove("delayMode")
@@ -826,7 +857,7 @@ jobs:
                       .remove("audioSourceMode")
                       .remove("lastInterpreterAudioMode")
                       .remove("stableDefaultsVersion")
-                      .putInt("settingsSchemaVersion", 4045)
+                      .putInt("settingsSchemaVersion", 4046)
                       .apply();
               }
           
@@ -1620,7 +1651,7 @@ jobs:
               boolean interpreterSpeechOutputEnabled = true;
               // V40.4: egyetlen látható automatikus mód. A belső útvonal headset / AEC / fél-duplex.
               String interpreterAudioMode = "off";
-              static final String LOG_TAG = "ForditoV4045";
+              static final String LOG_TAG = "ForditoV4046";
               static final int PRE_ROLL_AUDIO_MS = AudioPipelineConfig.PRE_ROLL_MS;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
@@ -1815,7 +1846,7 @@ jobs:
                   setContentView(rootLayout);
           
                   headerBar = row();
-                  TextView title = label("Fordito_V40.45");
+                  TextView title = label("Fordito_V40.46");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -4190,20 +4221,15 @@ jobs:
                       String tr = PromptFactory.normalizeSentenceLineLayout(structured.optString("translation", ""));
                       if(cleanSource.length() == 0 || tr.length() == 0) throw new Exception("empty manual result");
           
-                      programmaticChange = true;
-                      try {
-                          if(manualTopSource) {
-                              topBox.setText(cleanSource);
-                              bottomBox.setText(tr);
-                          } else {
-                              bottomBox.setText(cleanSource);
-                              topBox.setText(tr);
-                          }
-                          topBox.setSelection(topBox.getText().length());
-                          bottomBox.setSelection(bottomBox.getText().length());
-                      } finally {
-                          programmaticChange = false;
-                      }
+                      String topText = manualTopSource ? cleanSource : tr;
+                      String bottomText = manualTopSource ? tr : cleanSource;
+          
+                      // A kézi fordítás eredménye ugyanabba a beszélgetési modellbe kerül,
+                      // amelyből a következő mikrofonos blokk újrarajzolja a két ablakot.
+                      // Így a kézzel bevitt rész nem csak az EditText mezőkben marad meg.
+                      conversation.replaceVisibleContent(topText, bottomText, manualTopSource);
+                      renderBlocks(false);
+          
                       ttsController.speakManualOnce(tr, manualTopSource ? bottomLang : topLang);
                   } catch(Exception e) {
                       Toast.makeText(this, "Kézi fordítás válasz hiba.", Toast.LENGTH_LONG).show();
@@ -5072,14 +5098,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.45.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.45.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.46.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.46.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.45
+          name: V40.46
           path: |
             artifact/*.apk
             artifact/*.aab
