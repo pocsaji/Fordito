@@ -1,4 +1,4 @@
-name: Build Android APK V40.46
+name: Build Android APK V40.47
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
           EOF
 
           cat > build.gradle.kts <<'EOF'
-          plugins { id("com.android.application") version "8.6.1" apply false }
+          plugins { id("com.android.application") version "8.11.1" apply false }
           EOF
 
           cat > app/build.gradle.kts <<'EOF'
@@ -37,8 +37,8 @@ jobs:
           
           android {
               namespace = "com.attila.forditokonzol"
-              compileSdk = 35
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 35; versionCode = 4046; versionName = "40.46" }
+              compileSdk = 36
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 36; versionCode = 4047; versionName = "40.47" }
           
               signingConfigs {
                   create("release") {
@@ -114,7 +114,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.46" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.47" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait" android:windowSoftInputMode="adjustResize">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -843,13 +843,13 @@ jobs:
                       .putInt("interpreterFloatingY", s.interpreterFloatingY)
                       .putString("topLang", safe(s.topLang))
                       .putString("bottomLang", safe(s.bottomLang))
-                      .putInt("settingsSchemaVersion", 4046)
+                      .putInt("settingsSchemaVersion", 4047)
                       .apply();
               }
           
               private void migrateAndRemoveDeadSettings() {
                   int schema = preferences.getInt("settingsSchemaVersion", 0);
-                  if(schema >= 4046) return;
+                  if(schema >= 4047) return;
                   preferences.edit()
                       .remove("vadMode")
                       .remove("delayMode")
@@ -857,7 +857,7 @@ jobs:
                       .remove("audioSourceMode")
                       .remove("lastInterpreterAudioMode")
                       .remove("stableDefaultsVersion")
-                      .putInt("settingsSchemaVersion", 4046)
+                      .putInt("settingsSchemaVersion", 4047)
                       .apply();
               }
           
@@ -1651,7 +1651,7 @@ jobs:
               boolean interpreterSpeechOutputEnabled = true;
               // V40.4: egyetlen látható automatikus mód. A belső útvonal headset / AEC / fél-duplex.
               String interpreterAudioMode = "off";
-              static final String LOG_TAG = "ForditoV4046";
+              static final String LOG_TAG = "ForditoV4047";
               static final int PRE_ROLL_AUDIO_MS = AudioPipelineConfig.PRE_ROLL_MS;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
@@ -1846,7 +1846,7 @@ jobs:
                   setContentView(rootLayout);
           
                   headerBar = row();
-                  TextView title = label("Fordito_V40.46");
+                  TextView title = label("Fordito_V40.47");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -5071,7 +5071,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.7
+          gradle-version: 8.13
 
       - name: Prepare release signing key
         env:
@@ -5098,14 +5098,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.46.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.46.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.47.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.47.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.46
+          name: V40.47
           path: |
             artifact/*.apk
             artifact/*.aab
