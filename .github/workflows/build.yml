@@ -1,4 +1,4 @@
-name: Build Android APK V40.47
+name: Build Android APK V40.48
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           android {
               namespace = "com.attila.forditokonzol"
               compileSdk = 36
-              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 36; versionCode = 4047; versionName = "40.47" }
+              defaultConfig { applicationId = "hu.pocsaji.fordito"; minSdk = 26; targetSdk = 36; versionCode = 4048; versionName = "40.48" }
           
               signingConfigs {
                   create("release") {
@@ -114,7 +114,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <application android:allowBackup="false" android:label="Fordito_V40.47" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
+              <application android:allowBackup="false" android:label="Fordito_V40.48" android:icon="@drawable/ic_launcher_mic" android:roundIcon="@drawable/ic_launcher_mic" android:supportsRtl="true" android:theme="@style/AppTheme">
                   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait" android:windowSoftInputMode="adjustResize">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -150,8 +150,8 @@ jobs:
               };
           
               static final String[][] MODELS = {
-                  {"GPT-4o mini / ajánlott","gpt-4o-mini"},
-                  {"GPT-4o / erősebb","gpt-4o"}
+                  {"GPT-4o / alapértelmezett","gpt-4o"},
+                  {"GPT-4o mini","gpt-4o-mini"}
               };
           
               static final String[][] PROFILES = {
@@ -779,7 +779,7 @@ jobs:
           final class SettingsRepository {
               static final class Snapshot {
                   String apiKey = "";
-                  String model = "gpt-4o-mini";
+                  String model = "gpt-4o";
                   String profile = "general";
                   String translationMode = "natural";
                   boolean interpreterMode = false;
@@ -805,8 +805,8 @@ jobs:
                   migrateAndRemoveDeadSettings();
                   Snapshot s = new Snapshot();
                   s.apiKey = preferences.getString("apiKey", "");
-                  s.model = preferences.getString("model", "gpt-4o-mini");
-                  if(!"gpt-4o-mini".equals(s.model) && !"gpt-4o".equals(s.model)) s.model = "gpt-4o-mini";
+                  s.model = preferences.getString("model", "gpt-4o");
+                  if(!"gpt-4o-mini".equals(s.model) && !"gpt-4o".equals(s.model)) s.model = "gpt-4o";
                   s.profile = preferences.getString("profile", "general");
                   s.translationMode = preferences.getString("mode", "natural");
                   s.interpreterMode = preferences.getBoolean("interpreterMode", false)
@@ -843,13 +843,13 @@ jobs:
                       .putInt("interpreterFloatingY", s.interpreterFloatingY)
                       .putString("topLang", safe(s.topLang))
                       .putString("bottomLang", safe(s.bottomLang))
-                      .putInt("settingsSchemaVersion", 4047)
+                      .putInt("settingsSchemaVersion", 4048)
                       .apply();
               }
           
               private void migrateAndRemoveDeadSettings() {
                   int schema = preferences.getInt("settingsSchemaVersion", 0);
-                  if(schema >= 4047) return;
+                  if(schema >= 4048) return;
                   preferences.edit()
                       .remove("vadMode")
                       .remove("delayMode")
@@ -857,7 +857,7 @@ jobs:
                       .remove("audioSourceMode")
                       .remove("lastInterpreterAudioMode")
                       .remove("stableDefaultsVersion")
-                      .putInt("settingsSchemaVersion", 4047)
+                      .putInt("settingsSchemaVersion", 4048)
                       .apply();
               }
           
@@ -1651,7 +1651,7 @@ jobs:
               boolean interpreterSpeechOutputEnabled = true;
               // V40.4: egyetlen látható automatikus mód. A belső útvonal headset / AEC / fél-duplex.
               String interpreterAudioMode = "off";
-              static final String LOG_TAG = "ForditoV4047";
+              static final String LOG_TAG = "ForditoV4048";
               static final int PRE_ROLL_AUDIO_MS = AudioPipelineConfig.PRE_ROLL_MS;
               // A Silero pontosan 512 mintás / 32 ms-os kereteket kap. A könyvtár saját
               // időállapota 50 ms beszéd után nyit és 500 ms csend után zár.
@@ -1723,7 +1723,7 @@ jobs:
               final ArrayList<int[]> bottomRanges = new ArrayList<>();
           
               String apiKey = "";
-              String model = "gpt-4o-mini";
+              String model = "gpt-4o";
               String profile = "general";
               String mode = "natural";
               String topLang = "hu";
@@ -1846,7 +1846,7 @@ jobs:
                   setContentView(rootLayout);
           
                   headerBar = row();
-                  TextView title = label("Fordito_V40.47");
+                  TextView title = label("Fordito_V40.48");
                   inputRouteState = label("BEMENET: —");
                   inputRouteState.setGravity(Gravity.CENTER);
                   inputRouteState.setSingleLine(true);
@@ -2050,7 +2050,7 @@ jobs:
                   e.setHint(hint);
                   e.setHintTextColor(Color.GRAY);
                   e.setTextColor(Color.WHITE);
-                  e.setTextSize(14);
+                  e.setTextSize(15);
                   e.setGravity(Gravity.TOP|Gravity.START);
                   e.setSingleLine(false);
                   e.setMinLines(5);
@@ -5098,14 +5098,14 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p artifact
-          cp app/build/outputs/apk/release/app-release.apk artifact/V40.47.apk
-          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.47.aab
+          cp app/build/outputs/apk/release/app-release.apk artifact/V40.48.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/V40.48.aab
           ls -lah artifact
 
       - name: Upload signed APK and AAB
         uses: actions/upload-artifact@v4
         with:
-          name: V40.47
+          name: V40.48
           path: |
             artifact/*.apk
             artifact/*.aab
