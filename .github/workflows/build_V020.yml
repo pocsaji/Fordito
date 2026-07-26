@@ -1,0 +1,2678 @@
+name: Build TomTom Kiszolgalo V020
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create TomTom Kiszolgalo V020 one-tap project
+        run: |
+          mkdir -p app/src/main/java/hu/pocsaji/tomtomkiszolgalo
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/xml
+
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "TomTomKiszolgaloV020"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.11.1" apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          android.useAndroidX=true
+          EOF
+
+          cat > app/build.gradle.kts <<'EOF'
+          import java.util.Properties
+          
+          plugins {
+              id("com.android.application")
+          }
+          
+          val keystoreProperties = Properties()
+          val keystorePropertiesFile = rootProject.file("keystore.properties")
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(keystorePropertiesFile.inputStream())
+          }
+          
+          dependencies {
+              implementation("com.google.mlkit:text-recognition:16.0.1")
+          }
+          
+          android {
+              namespace = "hu.pocsaji.tomtomkiszolgalo"
+              compileSdk = 36
+          
+              defaultConfig {
+                  applicationId = "hu.pocsaji.tomtomkiszolgalo"
+                  minSdk = 29
+                  targetSdk = 36
+                  versionCode = 20
+                  versionName = "020"
+              }
+          
+              signingConfigs {
+                  create("release") {
+                      storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
+                      storePassword = keystoreProperties["storePassword"] as String
+                      keyAlias = keystoreProperties["keyAlias"] as String
+                      keyPassword = keystoreProperties["keyPassword"] as String
+                  }
+              }
+          
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                      isShrinkResources = false
+                      isDebuggable = false
+                      signingConfig = signingConfigs.getByName("release")
+                  }
+              }
+          
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+          }
+          EOF
+
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:colorAccent">#2C74D6</item>
+                  <item name="android:navigationBarColor">#101318</item>
+                  <item name="android:statusBarColor">#101318</item>
+                  <item name="android:windowBackground">#101318</item>
+                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:windowNoTitle">true</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="app_name">TomTom Kiszolgáló V020</string>
+              <string name="accessibility_service_description">Címek és koordináták sorrendhelyes feldolgozása, a címek automatikus koordinátává alakítása, majd az útvonal megnyitása a Plan.TomTom.com oldalon.</string>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_launcher_map.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:fillColor="#17365F"
+                  android:pathData="M54,4A50,50 0,1 0,54 104A50,50 0,1 0,54 4" />
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M24,29L43,21L65,29L84,21L84,78L65,86L43,78L24,86ZM43,29L31,34L31,75L43,70ZM50,30L50,70L62,76L62,36ZM69,35L69,76L77,73L77,32Z" />
+              <path
+                  android:fillColor="#E53935"
+                  android:pathData="M63,22C52,22 44,30 44,41C44,55 63,74 63,74C63,74 82,55 82,41C82,30 74,22 63,22ZM63,48A7,7 0,1 1,63 34A7,7 0,1 1,63 48Z" />
+          </vector>
+          EOF
+
+          cat > app/src/main/res/xml/accessibility_service_config.xml <<'EOF'
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+              android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeWindowsChanged"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
+              android:canPerformGestures="true"
+              android:canRetrieveWindowContent="true"
+              android:canTakeScreenshot="true"
+              android:description="@string/accessibility_service_description"
+              android:notificationTimeout="100" />
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <queries>
+                  <package android:name="com.tomtom.gplay.navapp" />
+                  <package android:name="com.google.android.apps.maps" />
+                  <package android:name="com.android.chrome" />
+                  <package android:name="com.sec.android.app.sbrowser" />
+              </queries>
+          
+              <application
+                  android:allowBackup="false"
+                  android:hardwareAccelerated="true"
+                  android:label="TomTom Kiszolgáló V020"
+                  android:icon="@drawable/ic_launcher_map"
+                  android:roundIcon="@drawable/ic_launcher_map"
+                  android:supportsRtl="true"
+                  android:theme="@style/AppTheme">
+          
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:screenOrientation="portrait"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                      <intent-filter>
+                          <action android:name="android.intent.action.SEND" />
+                          <category android:name="android.intent.category.DEFAULT" />
+                          <data android:mimeType="text/plain" />
+                      </intent-filter>
+                  </activity>
+          
+                  <activity
+                      android:name=".PlanTomTomActivity"
+                      android:exported="false"
+                      android:screenOrientation="portrait"
+                      android:windowSoftInputMode="adjustResize" />
+          
+                  <service
+                      android:name=".TomTomAccessibilityService"
+                      android:exported="false"
+                      android:label="TomTom Kiszolgáló V020"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+                      <intent-filter>
+                          <action android:name="android.accessibilityservice.AccessibilityService" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.accessibilityservice"
+                          android:resource="@xml/accessibility_service_config" />
+                  </service>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/hu/pocsaji/tomtomkiszolgalo/MainActivity.java <<'EOF'
+          package hu.pocsaji.tomtomkiszolgalo;
+          
+          import android.app.Activity;
+          import android.content.ComponentName;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.graphics.Color;
+          import android.os.Bundle;
+          import android.provider.Settings;
+          import android.text.InputType;
+          import android.text.TextUtils;
+          import android.view.Gravity;
+          import android.view.ViewGroup;
+          import android.widget.Button;
+          import android.widget.EditText;
+          import android.widget.LinearLayout;
+          import android.widget.ScrollView;
+          import android.widget.TextView;
+          import android.widget.Toast;
+          
+          import java.util.ArrayList;
+          import java.util.LinkedHashSet;
+          import java.util.List;
+          import java.util.Set;
+          
+          public final class MainActivity extends Activity {
+              private static final String VERSION = "V020";
+              private static final String GOOGLE_MAPS_PACKAGE = "com.google.android.apps.maps";
+              private static final String PREFS = "route_editor";
+              private static final String KEY_ROUTE_POINTS = "route_points";
+              private static final String KEY_PENDING_MAP_QUERY = "pending_map_query";
+              private static final String KEY_PENDING_MAP_INDEX = "pending_map_index";
+              private static final String ACTION_START_ROUTE =
+                      "hu.pocsaji.tomtomkiszolgalo.action.START_ROUTE";
+          
+              private TextView statusText;
+              private EditText routeEditor;
+          
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+          
+                  ScrollView scroll = new ScrollView(this);
+                  scroll.setFillViewport(true);
+                  scroll.setBackgroundColor(Color.rgb(16, 19, 24));
+          
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setGravity(Gravity.CENTER_HORIZONTAL);
+                  root.setPadding(dp(20), dp(28), dp(20), dp(28));
+                  scroll.addView(root, new ScrollView.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.WRAP_CONTENT));
+          
+                  TextView title = new TextView(this);
+                  title.setText("TomTom Kiszolgáló " + VERSION);
+                  title.setTextColor(Color.WHITE);
+                  title.setTextSize(27);
+                  title.setGravity(Gravity.CENTER);
+                  title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
+                  root.addView(title, matchWrap());
+          
+                  TextView description = new TextView(this);
+                  description.setText(
+                          "Útvonalpontok sorrendben. Minden sor egy külön cím.\n\n" +
+                          "A fuvarfeladat képernyőjén a lebegő TT gomb felismeri a felrakót és a lerakót. " +
+                          "A Google Mapsban a lebegő + gomb elsőként a koordinátát, ennek hiányában a normál címet adja hozzá. " +
+                          "A KÉSZ gomb a szöveges címeket is automatikusan koordinátává alakítja. " +
+                          "A mező kézzel is javítható vagy bővíthető.");
+                  description.setTextColor(Color.rgb(220, 225, 232));
+                  description.setTextSize(18);
+                  description.setLineSpacing(0f, 1.12f);
+                  description.setPadding(0, dp(22), 0, dp(18));
+                  root.addView(description, matchWrap());
+          
+                  TextView fieldLabel = new TextView(this);
+                  fieldLabel.setText("SZERKESZTETT ÚTVONALPONTOK");
+                  fieldLabel.setTextColor(Color.rgb(150, 190, 245));
+                  fieldLabel.setTextSize(16);
+                  fieldLabel.setTypeface(fieldLabel.getTypeface(), android.graphics.Typeface.BOLD);
+                  root.addView(fieldLabel, matchWrap());
+          
+                  routeEditor = new EditText(this);
+                  routeEditor.setHint("1. felrakócím\n2. köztes cím vagy koordináta\n3. lerakócím");
+                  routeEditor.setHintTextColor(Color.rgb(125, 133, 145));
+                  routeEditor.setTextColor(Color.WHITE);
+                  routeEditor.setTextSize(19);
+                  routeEditor.setGravity(Gravity.TOP | Gravity.START);
+                  routeEditor.setInputType(InputType.TYPE_CLASS_TEXT |
+                          InputType.TYPE_TEXT_FLAG_MULTI_LINE |
+                          InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+                  routeEditor.setSingleLine(false);
+                  routeEditor.setMinLines(7);
+                  routeEditor.setPadding(dp(14), dp(14), dp(14), dp(14));
+                  routeEditor.setBackgroundColor(Color.rgb(35, 41, 50));
+                  LinearLayout.LayoutParams editorParams = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          dp(250));
+                  editorParams.topMargin = dp(8);
+                  root.addView(routeEditor, editorParams);
+          
+                  TextView editorNote = new TextView(this);
+                  editorNote.setText("A sorrend felülről lefelé érvényes. Egy cím mindig egy sor legyen.");
+                  editorNote.setTextColor(Color.rgb(175, 182, 193));
+                  editorNote.setTextSize(15);
+                  editorNote.setPadding(0, dp(8), 0, dp(8));
+                  root.addView(editorNote, matchWrap());
+          
+                  Button mapsButton = createPrimaryButton("GOOGLE MAPS – ÚJ PONT");
+                  mapsButton.setOnClickListener(v -> openGoogleMaps());
+                  root.addView(mapsButton, buttonParams());
+          
+                  Button finishButton = createPrimaryButton("KÉSZ – ÚTVONAL MEGNYITÁSA");
+                  finishButton.setBackgroundColor(Color.rgb(0, 145, 75));
+                  finishButton.setOnClickListener(v -> sendRouteToService());
+                  root.addView(finishButton, buttonParams());
+          
+                  Button clearButton = createPrimaryButton("LISTA TÖRLÉSE");
+                  clearButton.setBackgroundColor(Color.rgb(120, 45, 45));
+                  clearButton.setOnClickListener(v -> {
+                      routeEditor.setText("");
+                      saveEditor();
+                  });
+                  root.addView(clearButton, buttonParams());
+          
+                  statusText = new TextView(this);
+                  statusText.setTextSize(17);
+                  statusText.setGravity(Gravity.CENTER);
+                  statusText.setPadding(dp(12), dp(18), dp(12), dp(10));
+                  root.addView(statusText, matchWrap());
+          
+                  Button settingsButton = createPrimaryButton("EGYSZERI BEÁLLÍTÁS");
+                  settingsButton.setBackgroundColor(Color.rgb(70, 80, 95));
+                  settingsButton.setOnClickListener(v ->
+                          startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+                  root.addView(settingsButton, buttonParams());
+          
+                  TextView note = new TextView(this);
+                  note.setText(
+                          "Fuvarfeladatnál: TT = felrakó és lerakó felismerése.\n" +
+                          "Google Mapsnál: + = koordináta, ennek hiányában normál cím hozzáadása.\n" +
+                          "A Kész gomb a teljes listát adja át a TomTomnak.");
+                  note.setTextColor(Color.rgb(170, 178, 190));
+                  note.setTextSize(15);
+                  note.setPadding(0, dp(20), 0, 0);
+                  root.addView(note, matchWrap());
+          
+                  setContentView(scroll);
+                  handleIncomingShare(getIntent());
+              }
+          
+              @Override
+              protected void onNewIntent(Intent intent) {
+                  super.onNewIntent(intent);
+                  setIntent(intent);
+                  handleIncomingShare(intent);
+              }
+          
+              @Override
+              protected void onResume() {
+                  super.onResume();
+                  loadEditor();
+                  updateStatus();
+              }
+          
+              @Override
+              protected void onPause() {
+                  saveEditor();
+                  super.onPause();
+              }
+          
+              private Button createPrimaryButton(String text) {
+                  Button button = new Button(this);
+                  button.setText(text);
+                  button.setTextSize(18);
+                  button.setTextColor(Color.WHITE);
+                  button.setBackgroundColor(Color.rgb(44, 116, 214));
+                  button.setMinHeight(dp(68));
+                  return button;
+              }
+          
+              private void openGoogleMaps() {
+                  getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                          .remove(KEY_PENDING_MAP_QUERY)
+                          .remove(KEY_PENDING_MAP_INDEX)
+                          .apply();
+                  saveEditor();
+                  Intent launchIntent = getPackageManager().getLaunchIntentForPackage(GOOGLE_MAPS_PACKAGE);
+                  if (launchIntent == null) {
+                      Toast.makeText(this, "A Google Maps nincs telepítve.", Toast.LENGTH_LONG).show();
+                      return;
+                  }
+                  launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
+                          Intent.FLAG_ACTIVITY_CLEAR_TOP |
+                          Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                  startActivity(launchIntent);
+                  Toast.makeText(this,
+                          "Válassz ki egy helyet, majd nyomd meg a lebegő + gombot.",
+                          Toast.LENGTH_LONG).show();
+              }
+          
+              private void sendRouteToService() {
+                  List<String> points = parseLines(routeEditor.getText().toString());
+                  if (points.size() < 2) {
+                      Toast.makeText(this,
+                              "Az útvonalhoz legalább indulási pont és cél szükséges.",
+                              Toast.LENGTH_LONG).show();
+                      return;
+                  }
+                  routeEditor.setText(String.join("\n", points));
+                  saveEditor();
+
+                  Intent intent = new Intent(this, PlanTomTomActivity.class);
+                  intent.putStringArrayListExtra(
+                          PlanTomTomActivity.EXTRA_ROUTE_POINTS,
+                          new ArrayList<>(points));
+                  startActivity(intent);
+              }
+          
+              private void handleIncomingShare(Intent intent) {
+                  if (intent == null || !Intent.ACTION_SEND.equals(intent.getAction())) return;
+                  if (!"text/plain".equals(intent.getType())) return;
+                  String shared = intent.getStringExtra(Intent.EXTRA_TEXT);
+                  if (shared == null || shared.isBlank()) return;
+          
+                  String candidate = extractReadableShare(shared);
+                  if (candidate.isBlank()) return;
+          
+                  SharedPreferences preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
+                  List<String> points = parseLines(preferences.getString(KEY_ROUTE_POINTS, ""));
+                  points.add(candidate);
+                  points = unique(points);
+                  preferences.edit().putString(KEY_ROUTE_POINTS, String.join("\n", points)).apply();
+                  if (routeEditor != null) routeEditor.setText(String.join("\n", points));
+              }
+          
+              private String extractReadableShare(String shared) {
+                  List<String> readable = new ArrayList<>();
+                  for (String line : shared.split("\\r?\\n")) {
+                      String clean = line.trim();
+                      if (clean.isEmpty()) continue;
+                      if (clean.startsWith("http://") || clean.startsWith("https://")) continue;
+                      readable.add(clean);
+                  }
+                  return String.join(", ", readable).replaceAll("\\s+", " ").trim();
+              }
+          
+              private void loadEditor() {
+                  String stored = getSharedPreferences(PREFS, MODE_PRIVATE)
+                          .getString(KEY_ROUTE_POINTS, "");
+                  if (!stored.equals(routeEditor.getText().toString())) {
+                      routeEditor.setText(stored);
+                      routeEditor.setSelection(routeEditor.length());
+                  }
+              }
+          
+              private void saveEditor() {
+                  if (routeEditor == null) return;
+                  List<String> points = parseLines(routeEditor.getText().toString());
+                  String stored = String.join("\n", points);
+                  getSharedPreferences(PREFS, MODE_PRIVATE)
+                          .edit()
+                          .putString(KEY_ROUTE_POINTS, stored)
+                          .apply();
+              }
+          
+              private List<String> parseLines(String source) {
+                  List<String> result = new ArrayList<>();
+                  if (source == null) return result;
+                  for (String line : source.split("\\r?\\n")) {
+                      String clean = line.replaceFirst("^\\s*\\d{1,3}[.)-]\\s+", "")
+                              .replaceAll("\\s+", " ")
+                              .trim();
+                      if (!clean.isEmpty()) result.add(clean);
+                  }
+                  return unique(result);
+              }
+          
+              private List<String> unique(List<String> source) {
+                  Set<String> values = new LinkedHashSet<>();
+                  for (String value : source) {
+                      if (value != null && !value.isBlank()) values.add(value.trim());
+                  }
+                  return new ArrayList<>(values);
+              }
+          
+              private void updateStatus() {
+                  boolean enabled = isAccessibilityServiceEnabled();
+                  statusText.setText(enabled
+                          ? "AKTÍV – a lebegő TT / + gomb használható"
+                          : "NINCS BEKAPCSOLVA – egyszeri beállítás szükséges");
+                  statusText.setTextColor(enabled
+                          ? Color.rgb(85, 210, 120)
+                          : Color.rgb(255, 170, 70));
+              }
+          
+              private boolean isAccessibilityServiceEnabled() {
+                  ComponentName expected = new ComponentName(this, TomTomAccessibilityService.class);
+                  String enabledServices = Settings.Secure.getString(
+                          getContentResolver(),
+                          Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                  if (TextUtils.isEmpty(enabledServices)) return false;
+          
+                  TextUtils.SimpleStringSplitter splitter = new TextUtils.SimpleStringSplitter(':');
+                  splitter.setString(enabledServices);
+                  while (splitter.hasNext()) {
+                      ComponentName enabled = ComponentName.unflattenFromString(splitter.next());
+                      if (expected.equals(enabled)) return true;
+                  }
+                  return false;
+              }
+          
+              private LinearLayout.LayoutParams matchWrap() {
+                  return new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.WRAP_CONTENT);
+              }
+          
+              private LinearLayout.LayoutParams buttonParams() {
+                  LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          dp(68));
+                  params.topMargin = dp(12);
+                  return params;
+              }
+          
+              private int dp(int value) {
+                  return Math.round(value * getResources().getDisplayMetrics().density);
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/hu/pocsaji/tomtomkiszolgalo/PlanTomTomActivity.java <<'EOF'
+          package hu.pocsaji.tomtomkiszolgalo;
+
+          import android.app.Activity;
+          import android.content.ActivityNotFoundException;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.graphics.Color;
+          import android.location.Address;
+          import android.location.Geocoder;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.view.Gravity;
+          import android.view.ViewGroup;
+          import android.widget.LinearLayout;
+          import android.widget.ProgressBar;
+          import android.widget.TextView;
+          import android.widget.Toast;
+
+          import java.io.IOException;
+          import java.math.BigDecimal;
+          import java.util.ArrayList;
+          import java.util.List;
+          import java.util.Locale;
+          import java.util.concurrent.ExecutorService;
+          import java.util.concurrent.Executors;
+          import java.util.regex.Matcher;
+          import java.util.regex.Pattern;
+
+          public final class PlanTomTomActivity extends Activity {
+              public static final String EXTRA_ROUTE_POINTS =
+                      "hu.pocsaji.tomtomkiszolgalo.extra.ROUTE_POINTS";
+
+              private static final String VERSION = "V020";
+              private static final String PREFS = "route_editor";
+              private static final String KEY_ROUTE_POINTS = "route_points";
+              private static final int MAX_ROUTE_POINTS = 30;
+              private static final Pattern COORDINATE_PATTERN = Pattern.compile(
+                      "^\\s*([+-]?(?:90(?:\\.0+)?|(?:[0-8]?\\d)(?:\\.\\d+)?))" +
+                      "[\\s,;]+" +
+                      "([+-]?(?:180(?:\\.0+)?|(?:1[0-7]\\d|\\d?\\d)(?:\\.\\d+)?))\\s*$");
+
+              private final ExecutorService executor = Executors.newSingleThreadExecutor();
+              private TextView statusText;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  showProgressScreen();
+
+                  ArrayList<String> incoming =
+                          getIntent().getStringArrayListExtra(EXTRA_ROUTE_POINTS);
+                  if (incoming == null || incoming.size() < 2) {
+                      fail("Az útvonalhoz legalább két pont szükséges.");
+                      return;
+                  }
+
+                  executor.execute(() -> resolveAndOpen(incoming));
+              }
+
+              private void showProgressScreen() {
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setGravity(Gravity.CENTER);
+                  root.setPadding(dp(28), dp(28), dp(28), dp(28));
+                  root.setBackgroundColor(Color.rgb(16, 19, 24));
+
+                  ProgressBar progress = new ProgressBar(this);
+                  root.addView(progress, new LinearLayout.LayoutParams(
+                          dp(64), dp(64)));
+
+                  statusText = new TextView(this);
+                  statusText.setText("Címek és koordináták ellenőrzése…");
+                  statusText.setTextColor(Color.WHITE);
+                  statusText.setTextSize(19);
+                  statusText.setGravity(Gravity.CENTER);
+                  LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.WRAP_CONTENT);
+                  statusParams.topMargin = dp(22);
+                  root.addView(statusText, statusParams);
+                  setContentView(root);
+              }
+
+              private void resolveAndOpen(List<String> incoming) {
+                  ArrayList<Coordinate> resolved = new ArrayList<>();
+                  ArrayList<String> unresolved = new ArrayList<>();
+                  Geocoder geocoder = new Geocoder(this, Locale.getDefault());
+
+                  for (int index = 0; index < incoming.size(); index++) {
+                      String raw = incoming.get(index) == null
+                              ? ""
+                              : incoming.get(index).replaceAll("\\s+", " ").trim();
+                      if (raw.isEmpty()) continue;
+
+                      final int shownIndex = index + 1;
+                      runOnUiThread(() -> statusText.setText(
+                              "Pont " + shownIndex + "/" + incoming.size() +
+                              " feldolgozása…\n" + raw));
+
+                      Coordinate coordinate = coordinateFromLine(raw);
+                      if (coordinate == null) {
+                          coordinate = geocodeAddress(geocoder, raw);
+                      }
+
+                      if (coordinate == null) {
+                          unresolved.add(raw);
+                      } else if (resolved.isEmpty() ||
+                              !resolved.get(resolved.size() - 1).sameAs(coordinate)) {
+                          resolved.add(coordinate);
+                      }
+                  }
+
+                  if (!unresolved.isEmpty()) {
+                      String first = unresolved.get(0);
+                      runOnUiThread(() -> {
+                          Toast.makeText(this,
+                                  unresolved.size() +
+                                  " címhez nem találtam biztos koordinátát. " +
+                                  "Az első megnyílik a Google Mapsban: " + first,
+                                  Toast.LENGTH_LONG).show();
+                          openGoogleMapsSearch(first);
+                          finish();
+                      });
+                      return;
+                  }
+
+                  if (resolved.size() < 2) {
+                      runOnUiThread(() -> fail(
+                              "Legalább két különálló koordinátapont szükséges."));
+                      return;
+                  }
+
+                  if (resolved.size() > MAX_ROUTE_POINTS) {
+                      resolved = new ArrayList<>(resolved.subList(0, MAX_ROUTE_POINTS));
+                  }
+
+                  ArrayList<String> normalized = new ArrayList<>();
+                  for (Coordinate coordinate : resolved) {
+                      normalized.add(plain(coordinate.latitude) + " " +
+                              plain(coordinate.longitude));
+                  }
+
+                  getSharedPreferences(PREFS, MODE_PRIVATE)
+                          .edit()
+                          .putString(KEY_ROUTE_POINTS, String.join("\n", normalized))
+                          .apply();
+
+                  Uri routeUri = buildRouteUri(resolved);
+                  int pointCount = resolved.size();
+                  runOnUiThread(() -> {
+                      openInRealBrowser(routeUri, pointCount);
+                      Toast.makeText(this,
+                              pointCount +
+                              " pontból elkészült az útvonal. " +
+                              "Szinkronhiba esetén: Export → megállók küldése a készülékre.",
+                              Toast.LENGTH_LONG).show();
+                      finish();
+                  });
+              }
+
+              private Coordinate coordinateFromLine(String line) {
+                  Matcher matcher = COORDINATE_PATTERN.matcher(line);
+                  if (!matcher.matches()) return null;
+                  try {
+                      double latitude = Double.parseDouble(matcher.group(1));
+                      double longitude = Double.parseDouble(matcher.group(2));
+                      if (latitude < -90.0 || latitude > 90.0 ||
+                              longitude < -180.0 || longitude > 180.0) {
+                          return null;
+                      }
+                      return new Coordinate(latitude, longitude);
+                  } catch (NumberFormatException ignored) {
+                      return null;
+                  }
+              }
+
+              @SuppressWarnings("deprecation")
+              private Coordinate geocodeAddress(Geocoder geocoder, String query) {
+                  if (!Geocoder.isPresent()) return null;
+                  try {
+                      List<Address> matches = geocoder.getFromLocationName(query, 1);
+                      if (matches == null || matches.isEmpty()) return null;
+                      Address best = matches.get(0);
+                      if (!best.hasLatitude() || !best.hasLongitude()) return null;
+                      double latitude = best.getLatitude();
+                      double longitude = best.getLongitude();
+                      if (latitude < -90.0 || latitude > 90.0 ||
+                              longitude < -180.0 || longitude > 180.0) {
+                          return null;
+                      }
+                      return new Coordinate(latitude, longitude);
+                  } catch (IOException | IllegalArgumentException ignored) {
+                      return null;
+                  }
+              }
+
+              private void openGoogleMapsSearch(String query) {
+                  Intent intent = new Intent(
+                          Intent.ACTION_VIEW,
+                          Uri.parse("geo:0,0?q=" + Uri.encode(query)));
+                  intent.setPackage("com.google.android.apps.maps");
+                  try {
+                      startActivity(intent);
+                  } catch (ActivityNotFoundException ignored) {
+                      Intent browser = new Intent(
+                              Intent.ACTION_VIEW,
+                              Uri.parse("https://www.google.com/maps/search/?api=1&query=" +
+                                      Uri.encode(query)));
+                      startActivity(browser);
+                  }
+              }
+
+              private Uri buildRouteUri(List<Coordinate> coordinates) {
+                  StringBuilder sorted = new StringBuilder();
+                  double latitudeSum = 0.0;
+                  double longitudeSum = 0.0;
+
+                  for (int index = 0; index < coordinates.size(); index++) {
+                      Coordinate coordinate = coordinates.get(index);
+                      if (index > 0) sorted.append(',');
+                      sorted.append('h')
+                              .append(encodeSignedNumber(coordinate.latitude))
+                              .append("~J")
+                              .append(encodeSignedNumber(coordinate.longitude))
+                              .append("~Vaddr~JPont_")
+                              .append(index + 1);
+                      latitudeSum += coordinate.latitude;
+                      longitudeSum += coordinate.longitude;
+                  }
+
+                  String routeState =
+                          "(costModel:FASTEST," +
+                          "routingProvider:GLOBAL," +
+                          "sorted:(" + sorted + ")," +
+                          "travelMode:CAR," +
+                          "vehicleParameters:(" +
+                          "axleWeight:-+," +
+                          "height:-+," +
+                          "length:-+," +
+                          "maxSpeed:-+," +
+                          "vehicleModelId:-+," +
+                          "weight:-+," +
+                          "width:-+))";
+
+                  double centerLatitude = latitudeSum / coordinates.size();
+                  double centerLongitude = longitudeSum / coordinates.size();
+                  String mapPosition = plain(centerLatitude) + "," +
+                          plain(centerLongitude) + ",6.5z";
+
+                  return new Uri.Builder()
+                          .scheme("https")
+                          .authority("plan.tomtom.com")
+                          .appendPath("hu")
+                          .appendPath("route")
+                          .appendPath("plan")
+                          .appendQueryParameter("p", mapPosition)
+                          .appendQueryParameter("r", routeState)
+                          .build();
+              }
+
+              private String encodeSignedNumber(double value) {
+                  return (value < 0.0 ? "~F" : "~V") +
+                          plain(Math.abs(value));
+              }
+
+              private String plain(double value) {
+                  return BigDecimal.valueOf(value)
+                          .stripTrailingZeros()
+                          .toPlainString();
+              }
+
+              private void openInRealBrowser(Uri routeUri, int pointCount) {
+                  Intent browserIntent = new Intent(Intent.ACTION_VIEW, routeUri);
+                  browserIntent.addCategory(Intent.CATEGORY_BROWSABLE);
+                  browserIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+
+                  String[] preferredBrowsers = {
+                          "com.android.chrome",
+                          "com.sec.android.app.sbrowser"
+                  };
+
+                  for (String packageName : preferredBrowsers) {
+                      Intent preferred = new Intent(browserIntent);
+                      preferred.setPackage(packageName);
+                      try {
+                          startActivity(preferred);
+                          return;
+                      } catch (ActivityNotFoundException | SecurityException ignored) {
+                      }
+                  }
+
+                  try {
+                      startActivity(browserIntent);
+                  } catch (ActivityNotFoundException error) {
+                      Toast.makeText(this,
+                              "Nem található használható böngésző.",
+                              Toast.LENGTH_LONG).show();
+                  }
+              }
+
+              private void fail(String message) {
+                  Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+                  finish();
+              }
+
+              private int dp(int value) {
+                  return Math.round(value *
+                          getResources().getDisplayMetrics().density);
+              }
+
+              @Override
+              protected void onDestroy() {
+                  executor.shutdownNow();
+                  super.onDestroy();
+              }
+
+              private static final class Coordinate {
+                  final double latitude;
+                  final double longitude;
+
+                  Coordinate(double latitude, double longitude) {
+                      this.latitude = latitude;
+                      this.longitude = longitude;
+                  }
+
+                  boolean sameAs(Coordinate other) {
+                      return other != null &&
+                              Math.abs(latitude - other.latitude) < 0.0000001 &&
+                              Math.abs(longitude - other.longitude) < 0.0000001;
+                  }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/hu/pocsaji/tomtomkiszolgalo/TomTomAccessibilityService.java <<'EOF'
+          package hu.pocsaji.tomtomkiszolgalo;
+          
+          import android.accessibilityservice.AccessibilityService;
+          import android.accessibilityservice.GestureDescription;
+          import android.content.ActivityNotFoundException;
+          import android.content.BroadcastReceiver;
+          import android.content.ClipData;
+          import android.content.ClipboardManager;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.IntentFilter;
+          import android.content.SharedPreferences;
+          import android.graphics.Bitmap;
+          import android.graphics.Color;
+          import android.graphics.Path;
+          import android.graphics.PixelFormat;
+          import android.graphics.Rect;
+          import android.graphics.drawable.GradientDrawable;
+          import android.hardware.HardwareBuffer;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.os.SystemClock;
+          import android.view.Display;
+          import android.view.Gravity;
+          import android.view.MotionEvent;
+          import android.view.View;
+          import android.view.WindowManager;
+          import android.view.accessibility.AccessibilityEvent;
+          import android.view.accessibility.AccessibilityNodeInfo;
+          import android.view.accessibility.AccessibilityWindowInfo;
+          import android.widget.TextView;
+          import android.widget.Toast;
+          
+          import com.google.mlkit.vision.common.InputImage;
+          import com.google.mlkit.vision.text.Text;
+          import com.google.mlkit.vision.text.TextRecognition;
+          import com.google.mlkit.vision.text.TextRecognizer;
+          import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
+          
+          import java.text.Normalizer;
+          import java.util.ArrayList;
+          import java.util.Arrays;
+          import java.util.Collections;
+          import java.util.Comparator;
+          import java.util.HashSet;
+          import java.util.LinkedHashSet;
+          import java.util.List;
+          import java.util.Locale;
+          import java.util.Set;
+          import java.util.concurrent.atomic.AtomicBoolean;
+          import java.util.regex.Matcher;
+          import java.util.regex.Pattern;
+          
+          public final class TomTomAccessibilityService extends AccessibilityService {
+              private static final String VERSION = "V020";
+              private static final String TOMTOM_PACKAGE = "com.tomtom.gplay.navapp";
+              private static final String GOOGLE_MAPS_PACKAGE = "com.google.android.apps.maps";
+              private static final String PREFS = "route_editor";
+              private static final String KEY_ROUTE_POINTS = "route_points";
+              private static final String KEY_PENDING_MAP_QUERY = "pending_map_query";
+              private static final String KEY_PENDING_MAP_INDEX = "pending_map_index";
+              private static final String ACTION_START_ROUTE =
+                      "hu.pocsaji.tomtomkiszolgalo.action.START_ROUTE";
+          
+              private static final Pattern POSTAL_CODE = Pattern.compile("(?<!\\d)\\d{4,5}(?!\\d)");
+              private static final Pattern HOUSE_NUMBER = Pattern.compile("\\b\\d{1,5}[A-Za-z]?\\b");
+              private static final Pattern COORDINATE = Pattern.compile(
+                      "(?<![\\d.])([+-]?\\d{1,2}\\.\\d{4,8})(?:\\s*[,;]\\s*|\\s+)" +
+                              "([+-]?\\d{1,3}\\.\\d{4,8})(?![\\d.])");
+              private static final Pattern TIME_VALUE = Pattern.compile("(?<!\\d)\\d{1,2}:\\d{2}(?!\\d)");
+              private static final Pattern YEAR_VALUE = Pattern.compile("(?<!\\d)(?:19|20)\\d{2}(?!\\d)");
+              private static final Set<String> COUNTRY_CODES = new HashSet<>(Arrays.asList(
+                      "AT", "BE", "BG", "CH", "CZ", "DE", "DK", "EE", "ES", "FI", "FR",
+                      "GR", "HR", "HU", "IE", "IT", "LT", "LU", "LV", "NL", "NO", "PL",
+                      "PT", "RO", "RS", "SE", "SI", "SK", "UK"));
+          
+              private static final List<String> PICKUP_MARKERS = Arrays.asList(
+                      "BEGYUJTES", "FELRAKAS", "FELRAKO", "PICKUP", "PICK UP", "COLLECTION",
+                      "COLLECTE", "ENLEVEMENT", "CHARGEMENT", "LOADING", "BELADUNG",
+                      "ABHOLUNG", "RITIRO", "CARGA", "LADEN");
+              private static final List<String> DELIVERY_MARKERS = Arrays.asList(
+                      "SZALLITAS", "LERAKAS", "LERAKO", "DELIVERY", "LIVRAISON", "LIEFERUNG",
+                      "CONSEGNA", "LEVERING", "ENTREGA", "DOSTAWA", "UNLOADING", "DECHARGEMENT",
+                      "ENTLADUNG", "DESCARGA");
+          
+              private static final int CAPTURE_ROUTE = 1;
+              private static final int CAPTURE_MAP = 2;
+          
+              private static final int STAGE_NONE = 0;
+              private static final int STAGE_OPEN_SEARCH = 1;
+              private static final int STAGE_ENTER_ADDRESS = 2;
+              private static final int STAGE_SELECT_RESULT = 3;
+              private static final int STAGE_CONFIRM_DRIVE = 4;
+              private static final int STAGE_OPEN_MENU = 5;
+              private static final int STAGE_OPEN_CURRENT_ROUTE = 6;
+              private static final int STAGE_ADD_STOP = 7;
+              private static final int STAGE_CONFIRM_ADD_STOP = 8;
+          
+              private WindowManager windowManager;
+              private TextView floatingButton;
+              private WindowManager.LayoutParams floatingParams;
+              private TextRecognizer textRecognizer;
+              private final AtomicBoolean processing = new AtomicBoolean(false);
+              private final Handler handler = new Handler(Looper.getMainLooper());
+          
+              private int captureMode = CAPTURE_ROUTE;
+              private String foregroundPackage = "";
+              private boolean routeReceiverRegistered;
+          
+              private String pendingAddress;
+              private String pendingPostalCode;
+              private List<String> pendingAddressTokens = Collections.emptyList();
+              private final List<String> routePoints = new ArrayList<>();
+              private int nextStopIndex = -1;
+              private boolean addingStop;
+              private int automationStage = STAGE_NONE;
+              private int automationAttempts;
+              private long automationDeadline;
+              private boolean automationScheduled;
+              private boolean imeEnterSent;
+          
+              private final BroadcastReceiver routeReceiver = new BroadcastReceiver() {
+                  @Override
+                  public void onReceive(Context context, Intent intent) {
+                      if (intent != null && ACTION_START_ROUTE.equals(intent.getAction())) {
+                          startStoredRouteAutomation();
+                      }
+                  }
+              };
+          
+              @Override
+              public void onAccessibilityEvent(AccessibilityEvent event) {
+                  if (event != null && event.getPackageName() != null) {
+                      String packageName = event.getPackageName().toString();
+                      if (!getPackageName().equals(packageName) &&
+                              !"com.android.systemui".equals(packageName)) {
+                          foregroundPackage = packageName;
+                          updateFloatingMode();
+                      }
+                  }
+                  if (pendingAddress != null) scheduleAutomationStep(220);
+              }
+          
+              @Override
+              public void onInterrupt() {
+                  cancelAutomation(null);
+              }
+          
+              @Override
+              protected void onServiceConnected() {
+                  super.onServiceConnected();
+                  textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
+                  registerRouteReceiver();
+                  showFloatingButton();
+                  Toast.makeText(this,
+                          "TomTom Kiszolgáló " + VERSION + " aktív.",
+                          Toast.LENGTH_SHORT).show();
+              }
+          
+              @Override
+              public void onDestroy() {
+                  handler.removeCallbacksAndMessages(null);
+                  if (routeReceiverRegistered) {
+                      try {
+                          unregisterReceiver(routeReceiver);
+                      } catch (RuntimeException ignored) {
+                      }
+                      routeReceiverRegistered = false;
+                  }
+                  removeFloatingButton();
+                  if (textRecognizer != null) {
+                      textRecognizer.close();
+                      textRecognizer = null;
+                  }
+                  super.onDestroy();
+              }
+          
+              private void registerRouteReceiver() {
+                  if (routeReceiverRegistered) return;
+                  IntentFilter filter = new IntentFilter(ACTION_START_ROUTE);
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      registerReceiver(routeReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+                  } else {
+                      registerReceiver(routeReceiver, filter);
+                  }
+                  routeReceiverRegistered = true;
+              }
+          
+              private void showFloatingButton() {
+                  if (floatingButton != null) return;
+          
+                  windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+                  floatingButton = new TextView(this);
+                  floatingButton.setText("TT");
+                  floatingButton.setContentDescription("Útvonalpont felismerése");
+                  floatingButton.setTextColor(Color.WHITE);
+                  floatingButton.setTextSize(20);
+                  floatingButton.setGravity(Gravity.CENTER);
+                  floatingButton.setTypeface(
+                          floatingButton.getTypeface(),
+                          android.graphics.Typeface.BOLD);
+                  floatingButton.setElevation(dp(12));
+                  setButtonColor(Color.rgb(0, 150, 75));
+          
+                  floatingParams = new WindowManager.LayoutParams(
+                          dp(64),
+                          dp(64),
+                          WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+                                  WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL |
+                                  WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                          PixelFormat.TRANSLUCENT);
+                  floatingParams.gravity = Gravity.TOP | Gravity.END;
+                  floatingParams.x = dp(10);
+                  floatingParams.y = dp(180);
+          
+                  floatingButton.setOnTouchListener(new FloatingTouchListener());
+                  windowManager.addView(floatingButton, floatingParams);
+                  updateFloatingMode();
+              }
+          
+              private void updateFloatingMode() {
+                  if (floatingButton == null || processing.get() || pendingAddress != null) return;
+                  boolean maps = GOOGLE_MAPS_PACKAGE.equals(foregroundPackage);
+                  floatingButton.setText(maps ? "+" : "TT");
+                  floatingButton.setContentDescription(maps
+                          ? "Google Maps hely hozzáadása az útvonalhoz"
+                          : "Fuvarfeladat felrakó és lerakó címének felismerése");
+                  setButtonColor(maps ? Color.rgb(44, 116, 214) : Color.rgb(0, 150, 75));
+              }
+          
+              private void setButtonColor(int color) {
+                  if (floatingButton == null) return;
+                  GradientDrawable background = new GradientDrawable();
+                  background.setShape(GradientDrawable.OVAL);
+                  background.setColor(color);
+                  background.setStroke(dp(2), Color.WHITE);
+                  floatingButton.setBackground(background);
+              }
+          
+              private void removeFloatingButton() {
+                  if (windowManager != null && floatingButton != null) {
+                      try {
+                          windowManager.removeView(floatingButton);
+                      } catch (RuntimeException ignored) {
+                      }
+                  }
+                  floatingButton = null;
+                  floatingParams = null;
+              }
+          
+              private void handleFloatingClick() {
+                  if (GOOGLE_MAPS_PACKAGE.equals(foregroundPackage)) {
+                      processVisibleMapAddress();
+                  } else {
+                      processVisibleRouteAddresses();
+                  }
+              }
+          
+              private void processVisibleRouteAddresses() {
+                  captureMode = CAPTURE_ROUTE;
+                  startScreenRecognition("Felrakó és lerakó felismerése…");
+              }
+          
+              private void processVisibleMapAddress() {
+                  captureMode = CAPTURE_MAP;
+                  List<String> visibleLines = readVisibleLinesSafely(GOOGLE_MAPS_PACKAGE);
+                  String exactCoordinate = AddressExtractor.findCoordinate(visibleLines);
+                  if (exactCoordinate != null) {
+                      addResolvedMapPoint(exactCoordinate);
+                      Toast.makeText(this, "Hozzáadva: " + exactCoordinate, Toast.LENGTH_LONG).show();
+                      openEditor();
+                      return;
+                  }
+                  startScreenRecognition("Google Maps koordináta vagy cím felismerése…");
+              }
+          
+              private void startScreenRecognition(String message) {
+                  if (!processing.compareAndSet(false, true)) return;
+                  floatingButton.setText("…");
+                  setButtonColor(Color.rgb(230, 145, 35));
+                  Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+          
+                  if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                      processAccessibilityFallback(
+                              "A képernyőkép-felismeréshez Android 11 vagy újabb szükséges.");
+                      return;
+                  }
+          
+                  takeScreenshot(
+                          Display.DEFAULT_DISPLAY,
+                          getMainExecutor(),
+                          new TakeScreenshotCallback() {
+                              @Override
+                              public void onSuccess(ScreenshotResult screenshot) {
+                                  recognizeScreenshot(screenshot);
+                              }
+          
+                              @Override
+                              public void onFailure(int errorCode) {
+                                  processAccessibilityFallback(
+                                          "A képernyőkép nem olvasható (hiba: " + errorCode + ").");
+                              }
+                          });
+              }
+          
+              private void recognizeScreenshot(ScreenshotResult screenshot) {
+                  HardwareBuffer buffer = screenshot.getHardwareBuffer();
+                  Bitmap hardwareBitmap = null;
+                  Bitmap bitmap = null;
+                  try {
+                      hardwareBitmap = Bitmap.wrapHardwareBuffer(buffer, screenshot.getColorSpace());
+                      if (hardwareBitmap != null) {
+                          bitmap = hardwareBitmap.copy(Bitmap.Config.ARGB_8888, false);
+                      }
+                  } catch (RuntimeException ignored) {
+                  } finally {
+                      if (hardwareBitmap != null) hardwareBitmap.recycle();
+                      buffer.close();
+                  }
+          
+                  if (bitmap == null) {
+                      processAccessibilityFallback("A képernyő képe nem alakítható szöveggé.");
+                      return;
+                  }
+          
+                  final Bitmap finalBitmap = bitmap;
+                  InputImage image = InputImage.fromBitmap(finalBitmap, 0);
+                  textRecognizer.process(image)
+                          .addOnSuccessListener(this::handleRecognizedText)
+                          .addOnFailureListener(error ->
+                                  processAccessibilityFallback("A szövegfelismerés nem sikerült."))
+                          .addOnCompleteListener(task -> finalBitmap.recycle());
+              }
+          
+              private void handleRecognizedText(Text visionText) {
+                  List<OcrLine> positionedLines = new ArrayList<>();
+                  for (Text.TextBlock block : visionText.getTextBlocks()) {
+                      for (Text.Line line : block.getLines()) {
+                          String value = line.getText() == null ? "" : line.getText().trim();
+                          Rect box = line.getBoundingBox();
+                          if (!value.isEmpty() && box != null) {
+                              positionedLines.add(new OcrLine(value, box.top, box.left));
+                          }
+                      }
+                  }
+          
+                  positionedLines.sort((a, b) -> {
+                      int verticalTolerance = dp(12);
+                      if (Math.abs(a.top - b.top) <= verticalTolerance) {
+                          return Integer.compare(a.left, b.left);
+                      }
+                      return Integer.compare(a.top, b.top);
+                  });
+          
+                  List<String> lines = new ArrayList<>();
+                  for (OcrLine line : positionedLines) lines.add(line.text);
+                  handleCapturedLines(lines);
+              }
+          
+              private void processAccessibilityFallback(String failureMessage) {
+                  String packageFilter = captureMode == CAPTURE_MAP ? GOOGLE_MAPS_PACKAGE : null;
+                  List<String> visibleLines = readVisibleLinesSafely(packageFilter);
+                  if (!visibleLines.isEmpty()) {
+                      handleCapturedLines(visibleLines);
+                      return;
+                  }
+                  Toast.makeText(this, failureMessage, Toast.LENGTH_LONG).show();
+                  finishProcessing();
+              }
+          
+              private boolean handleCapturedLines(List<String> lines) {
+                  if (captureMode == CAPTURE_MAP) {
+                      String address = AddressExtractor.findMapAddress(lines);
+                      if (address == null || address.isBlank()) {
+                          Toast.makeText(this,
+                                  "Nem találtam használható címet. Nyisd meg a hely adatlapját, majd nyomd meg újra a + gombot.",
+                                  Toast.LENGTH_LONG).show();
+                          finishProcessing();
+                          return false;
+                      }
+                      addResolvedMapPoint(address);
+                      Toast.makeText(this, "Hozzáadva: " + address, Toast.LENGTH_LONG).show();
+                      openEditor();
+                      finishProcessing();
+                      return true;
+                  }
+          
+                  AddressExtractor.RouteCaptureResult capture =
+                          AddressExtractor.analyzeRoute(lines);
+                  if (capture.addresses.isEmpty() &&
+                          (capture.unresolvedQuery == null || capture.unresolvedQuery.isBlank())) {
+                      Toast.makeText(this,
+                              "Nem találtam használható felrakó- vagy lerakócímet ezen a képernyőn.",
+                              Toast.LENGTH_LONG).show();
+                      finishProcessing();
+                      return false;
+                  }
+          
+                  int insertionIndex = storedPointCount() +
+                          Math.max(0, capture.unresolvedIndex);
+                  if (!capture.addresses.isEmpty()) {
+                      appendRoutePoints(capture.addresses);
+                  }
+          
+                  if (capture.unresolvedQuery != null &&
+                          !capture.unresolvedQuery.isBlank()) {
+                      String query = capture.unresolvedQuery;
+                      storePendingMapResolution(query, insertionIndex);
+                      finishProcessing();
+          
+                      if (openGoogleMapsSearch(query)) {
+                          Toast.makeText(this,
+                                  "Hiányos cím. A Google Maps keresése megnyílt: " + query,
+                                  Toast.LENGTH_LONG).show();
+                          return true;
+                      }
+          
+                      clearPendingMapResolution();
+                      Toast.makeText(this,
+                              "A Google Maps nem nyitható meg. A hibás cím a vágólapra került: " + query,
+                              Toast.LENGTH_LONG).show();
+                      openEditor();
+                      return false;
+                  }
+          
+                  Toast.makeText(this,
+                          capture.addresses.size() + " fuvarcím bekerült az útvonallistába.",
+                          Toast.LENGTH_LONG).show();
+                  openEditor();
+                  finishProcessing();
+                  return true;
+              }
+          
+              private void appendRoutePoints(List<String> additions) {
+                  SharedPreferences preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
+                  List<String> combined = parseStoredPoints(
+                          preferences.getString(KEY_ROUTE_POINTS, ""));
+                  combined.addAll(additions);
+                  combined = uniquePoints(combined);
+                  preferences.edit()
+                          .putString(KEY_ROUTE_POINTS, String.join("\n", combined))
+                          .apply();
+              }
+          
+              private void addResolvedMapPoint(String point) {
+                  if (point == null || point.isBlank()) return;
+          
+                  SharedPreferences preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
+                  List<String> combined = parseStoredPoints(
+                          preferences.getString(KEY_ROUTE_POINTS, ""));
+                  int pendingIndex = preferences.getInt(KEY_PENDING_MAP_INDEX, -1);
+          
+                  if (pendingIndex >= 0 && pendingIndex <= combined.size()) {
+                      combined.add(pendingIndex, point.trim());
+                  } else {
+                      combined.add(point.trim());
+                  }
+          
+                  combined = uniquePoints(combined);
+                  preferences.edit()
+                          .putString(KEY_ROUTE_POINTS, String.join("\n", combined))
+                          .remove(KEY_PENDING_MAP_QUERY)
+                          .remove(KEY_PENDING_MAP_INDEX)
+                          .apply();
+              }
+          
+              private int storedPointCount() {
+                  return parseStoredPoints(
+                          getSharedPreferences(PREFS, MODE_PRIVATE)
+                                  .getString(KEY_ROUTE_POINTS, "")).size();
+              }
+          
+              private void storePendingMapResolution(String query, int insertionIndex) {
+                  getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                          .putString(KEY_PENDING_MAP_QUERY, query == null ? "" : query.trim())
+                          .putInt(KEY_PENDING_MAP_INDEX, Math.max(0, insertionIndex))
+                          .apply();
+              }
+          
+              private void clearPendingMapResolution() {
+                  getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                          .remove(KEY_PENDING_MAP_QUERY)
+                          .remove(KEY_PENDING_MAP_INDEX)
+                          .apply();
+              }
+          
+              private boolean openGoogleMapsSearch(String query) {
+                  String cleanQuery = query == null
+                          ? ""
+                          : query.replaceAll("\\s+", " ").trim();
+                  if (cleanQuery.isEmpty()) return false;
+          
+                  ClipboardManager clipboard =
+                          (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                  if (clipboard != null) {
+                      clipboard.setPrimaryClip(
+                              ClipData.newPlainText("Hiányos fuvarcím", cleanQuery));
+                  }
+          
+                  Intent searchIntent = new Intent(
+                          Intent.ACTION_VIEW,
+                          Uri.parse("geo:0,0?q=" + Uri.encode(cleanQuery)));
+                  searchIntent.setPackage(GOOGLE_MAPS_PACKAGE);
+                  searchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
+                          Intent.FLAG_ACTIVITY_CLEAR_TOP |
+                          Intent.FLAG_ACTIVITY_SINGLE_TOP);
+          
+                  try {
+                      startActivity(searchIntent);
+                      return true;
+                  } catch (ActivityNotFoundException | SecurityException ignored) {
+                  }
+          
+                  Intent launchIntent =
+                          getPackageManager().getLaunchIntentForPackage(GOOGLE_MAPS_PACKAGE);
+                  if (launchIntent == null) return false;
+                  launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
+                          Intent.FLAG_ACTIVITY_CLEAR_TOP |
+                          Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                  try {
+                      startActivity(launchIntent);
+                      return true;
+                  } catch (RuntimeException ignored) {
+                      return false;
+                  }
+              }
+          
+              private void openEditor() {
+                  Intent intent = new Intent(this, MainActivity.class);
+                  intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
+                          Intent.FLAG_ACTIVITY_CLEAR_TOP |
+                          Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                  startActivity(intent);
+              }
+          
+              private void startStoredRouteAutomation() {
+                  List<String> stored = parseStoredPoints(
+                          getSharedPreferences(PREFS, MODE_PRIVATE)
+                                  .getString(KEY_ROUTE_POINTS, ""));
+                  if (stored.isEmpty()) {
+                      Toast.makeText(this, "Nincs megadva útvonalpont.", Toast.LENGTH_LONG).show();
+                      return;
+                  }
+                  startRouteAutomation(stored);
+              }
+          
+              private void startRouteAutomation(List<String> points) {
+                  cancelAutomation(null);
+                  routePoints.clear();
+                  routePoints.addAll(uniquePoints(points));
+                  if (routePoints.isEmpty()) return;
+          
+                  nextStopIndex = routePoints.size() - 2;
+                  addingStop = false;
+                  setPendingAddress(routePoints.get(routePoints.size() - 1));
+                  automationStage = STAGE_OPEN_SEARCH;
+                  automationAttempts = 0;
+                  automationDeadline = SystemClock.uptimeMillis() +
+                          Math.max(90000L, routePoints.size() * 45000L);
+                  automationScheduled = false;
+                  imeEnterSent = false;
+                  processing.set(true);
+          
+                  floatingButton.setText("→");
+                  setButtonColor(Color.rgb(45, 105, 205));
+                  Toast.makeText(this,
+                          routePoints.size() + " pontból álló útvonal felépítése…",
+                          Toast.LENGTH_LONG).show();
+          
+                  Intent launchIntent = getPackageManager().getLaunchIntentForPackage(TOMTOM_PACKAGE);
+                  if (launchIntent == null) {
+                      cancelAutomation("A TomTom GO nincs telepítve vagy nem indítható.");
+                      return;
+                  }
+          
+                  launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
+                          Intent.FLAG_ACTIVITY_CLEAR_TOP |
+                          Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                  try {
+                      startActivity(launchIntent);
+                      scheduleAutomationStep(900);
+                  } catch (RuntimeException error) {
+                      cancelAutomation("A TomTom GO nem nyitható meg.");
+                  }
+              }
+          
+              private void setPendingAddress(String address) {
+                  pendingAddress = address;
+                  pendingPostalCode = extractPostalCode(address);
+                  pendingAddressTokens = buildAddressTokens(address);
+                  imeEnterSent = false;
+              }
+          
+              private void scheduleAutomationStep(long delayMs) {
+                  if (pendingAddress == null || automationScheduled) return;
+                  automationScheduled = true;
+                  handler.postDelayed(() -> {
+                      automationScheduled = false;
+                      runAutomationStep();
+                  }, delayMs);
+              }
+          
+              private void moveToStage(int stage, long delayMs) {
+                  automationStage = stage;
+                  automationAttempts = 0;
+                  imeEnterSent = false;
+                  scheduleAutomationStep(delayMs);
+              }
+          
+              private void runAutomationStep() {
+                  if (pendingAddress == null) return;
+                  if (SystemClock.uptimeMillis() > automationDeadline) {
+                      cancelAutomation("A TomTom útvonal felépítése nem fejeződött be.");
+                      return;
+                  }
+          
+                  AccessibilityNodeInfo root = findTomTomRoot();
+                  if (root == null) {
+                      scheduleAutomationStep(450);
+                      return;
+                  }
+          
+                  automationAttempts++;
+                  try {
+                      if (automationStage == STAGE_OPEN_SEARCH) {
+                          AccessibilityNodeInfo editable = findBestEditable(root);
+                          if (editable != null) {
+                              moveToStage(STAGE_ENTER_ADDRESS, 80);
+                              return;
+                          }
+          
+                          AccessibilityNodeInfo searchControl = findSearchControl(root);
+                          if (searchControl != null && clickNodeOrAncestor(searchControl)) {
+                              moveToStage(STAGE_ENTER_ADDRESS, 650);
+                              return;
+                          }
+          
+                          if (automationAttempts >= 4) {
+                              tapTomTomSearchArea();
+                              moveToStage(STAGE_ENTER_ADDRESS, 700);
+                              return;
+                          }
+                      } else if (automationStage == STAGE_ENTER_ADDRESS) {
+                          AccessibilityNodeInfo editable = findBestEditable(root);
+                          if (editable != null && setNodeText(editable, pendingAddress)) {
+                              moveToStage(STAGE_SELECT_RESULT, 900);
+                              Toast.makeText(this,
+                                      "Cím beírva: " + pendingAddress,
+                                      Toast.LENGTH_SHORT).show();
+                              return;
+                          }
+          
+                          AccessibilityNodeInfo searchControl = findSearchControl(root);
+                          if (searchControl != null) clickNodeOrAncestor(searchControl);
+                          if (automationAttempts >= 4) tapTomTomSearchArea();
+                      } else if (automationStage == STAGE_SELECT_RESULT) {
+                          AccessibilityNodeInfo result = findBestAddressResult(root);
+                          if (result != null && clickNodeOrAncestor(result)) {
+                              moveToStage(addingStop ? STAGE_CONFIRM_ADD_STOP : STAGE_CONFIRM_DRIVE, 850);
+                              return;
+                          }
+          
+                          AccessibilityNodeInfo editable = findBestEditable(root);
+                          if (!imeEnterSent && automationAttempts >= 3 && editable != null) {
+                              imeEnterSent = performImeEnter(editable);
+                              if (imeEnterSent) {
+                                  scheduleAutomationStep(900);
+                                  return;
+                              }
+                          }
+                      } else if (automationStage == STAGE_CONFIRM_DRIVE) {
+                          AccessibilityNodeInfo drive = findControlByKeywords(root,
+                                  "DRIVE", "UTVONAL", "MENJ", "INDITAS", "NAVIGATE",
+                                  "ROUTE", "LET'S GO", "LOS", "ALLER", "GUIDAGE");
+                          if (drive != null && clickNodeOrAncestor(drive)) {
+                              afterFinalDestinationReady(1500);
+                              return;
+                          }
+                          if (automationAttempts >= 5) {
+                              afterFinalDestinationReady(700);
+                              return;
+                          }
+                      } else if (automationStage == STAGE_OPEN_MENU) {
+                          AccessibilityNodeInfo menu = findMenuControl(root);
+                          if (menu != null && clickNodeOrAncestor(menu)) {
+                              moveToStage(STAGE_OPEN_CURRENT_ROUTE, 650);
+                              return;
+                          }
+                          if (automationAttempts >= 4) {
+                              tapTomTomMenuArea();
+                              moveToStage(STAGE_OPEN_CURRENT_ROUTE, 650);
+                              return;
+                          }
+                      } else if (automationStage == STAGE_OPEN_CURRENT_ROUTE) {
+                          AccessibilityNodeInfo currentRoute = findControlByKeywords(root,
+                                  "CURRENT ROUTE", "JELENLEGI UTVONAL", "AKTIV UTVONAL",
+                                  "ITINERAIRE ACTUEL", "PARCOURS ACTUEL", "AKTUELLE ROUTE",
+                                  "ROUTE ACTUELLE", "HUIDIGE ROUTE");
+                          if (currentRoute != null && clickNodeOrAncestor(currentRoute)) {
+                              moveToStage(STAGE_ADD_STOP, 650);
+                              return;
+                          }
+                      } else if (automationStage == STAGE_ADD_STOP) {
+                          AccessibilityNodeInfo editable = findBestEditable(root);
+                          if (editable != null) {
+                              prepareNextStop();
+                              moveToStage(STAGE_ENTER_ADDRESS, 80);
+                              return;
+                          }
+          
+                          AccessibilityNodeInfo addStop = findControlByKeywords(root,
+                                  "ADD STOP", "ADD A STOP", "MEGALLO HOZZAADASA",
+                                  "STOP HOZZAADASA", "UJ MEGALLO", "AJOUTER UN ARRET",
+                                  "AJOUTER UNE ETAPE", "HALT HINZUFUGEN", "ZWISCHENZIEL",
+                                  "VOEG STOP TOE", "AGGIUNGI FERMATA", "ANADIR PARADA");
+                          if (addStop != null && clickNodeOrAncestor(addStop)) {
+                              prepareNextStop();
+                              moveToStage(STAGE_ENTER_ADDRESS, 650);
+                              return;
+                          }
+                      } else if (automationStage == STAGE_CONFIRM_ADD_STOP) {
+                          AccessibilityNodeInfo add = findControlByKeywords(root,
+                                  "ADD STOP", "ADD TO ROUTE", "HOZZAADAS MEGALLOKENT",
+                                  "HOZZAADAS AZ UTVONALHOZ", "AJOUTER AU PARCOURS",
+                                  "AJOUTER COMME ETAPE", "ZUR ROUTE HINZUFUGEN",
+                                  "ALS STOP TOEVOEGEN", "AGGIUNGI AL PERCORSO");
+                          if (add != null && clickNodeOrAncestor(add)) {
+                              afterStopAdded(1200);
+                              return;
+                          }
+                          if (automationAttempts >= 5) {
+                              afterStopAdded(800);
+                              return;
+                          }
+                      }
+                  } finally {
+                      root.recycle();
+                  }
+          
+                  scheduleAutomationStep(450);
+              }
+          
+              private void afterFinalDestinationReady(long delayMs) {
+                  if (nextStopIndex >= 0) {
+                      moveToStage(STAGE_OPEN_MENU, delayMs);
+                  } else {
+                      completeRouteAutomation();
+                  }
+              }
+          
+              private void prepareNextStop() {
+                  if (nextStopIndex < 0) return;
+                  addingStop = true;
+                  setPendingAddress(routePoints.get(nextStopIndex));
+              }
+          
+              private void afterStopAdded(long delayMs) {
+                  nextStopIndex--;
+                  addingStop = false;
+                  if (nextStopIndex >= 0) {
+                      moveToStage(STAGE_OPEN_MENU, delayMs);
+                  } else {
+                      completeRouteAutomation();
+                  }
+              }
+          
+              private AccessibilityNodeInfo findTomTomRoot() {
+                  try {
+                      List<AccessibilityWindowInfo> windows = new ArrayList<>(getWindows());
+                      windows.sort(Comparator.comparingInt(AccessibilityWindowInfo::getLayer).reversed());
+                      for (AccessibilityWindowInfo window : windows) {
+                          AccessibilityNodeInfo root = window.getRoot();
+                          if (root == null) continue;
+                          CharSequence packageName = root.getPackageName();
+                          if (packageName != null && TOMTOM_PACKAGE.contentEquals(packageName)) {
+                              return root;
+                          }
+                          root.recycle();
+                      }
+                  } catch (RuntimeException ignored) {
+                  }
+                  return null;
+              }
+          
+              private AccessibilityNodeInfo findBestEditable(AccessibilityNodeInfo root) {
+                  List<AccessibilityNodeInfo> nodes = new ArrayList<>();
+                  collectNodes(root, nodes, 0);
+                  AccessibilityNodeInfo best = null;
+                  int bestScore = Integer.MIN_VALUE;
+                  for (AccessibilityNodeInfo node : nodes) {
+                      if (!node.isVisibleToUser()) continue;
+                      String className = textOf(node.getClassName());
+                      boolean editable = node.isEditable() || className.contains("EditText") ||
+                              node.getActionList().contains(
+                                      AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_TEXT);
+                      if (!editable) continue;
+          
+                      String descriptor = normalize(nodeDescriptor(node));
+                      int score = 10;
+                      if (containsAny(descriptor,
+                              "SEARCH", "KERES", "DESTINATION", "PLACE", "WHERE", "HOVA", "CIM",
+                              "RECHERCH", "SUCH", "CERCA", "BUSCAR")) score += 12;
+                      if (node.isFocused()) score += 6;
+                      if (node.isClickable()) score += 2;
+                      if (score > bestScore) {
+                          bestScore = score;
+                          best = node;
+                      }
+                  }
+                  return best;
+              }
+          
+              private AccessibilityNodeInfo findSearchControl(AccessibilityNodeInfo root) {
+                  return findControlByKeywords(root,
+                          "SEARCH", "KERES", "HELY KERESE", "HOVA", "DESTINATION", "WHERE TO",
+                          "PLACE", "ZOEK", "RECHERCH", "SUCH", "CERCA", "BUSCAR");
+              }
+          
+              private AccessibilityNodeInfo findMenuControl(AccessibilityNodeInfo root) {
+                  List<AccessibilityNodeInfo> nodes = new ArrayList<>();
+                  collectNodes(root, nodes, 0);
+                  AccessibilityNodeInfo best = null;
+                  int bestScore = Integer.MIN_VALUE;
+                  for (AccessibilityNodeInfo node : nodes) {
+                      if (!node.isVisibleToUser()) continue;
+                      String descriptor = normalize(nodeDescriptor(node));
+                      String viewId = textOf(node.getViewIdResourceName()).toLowerCase(Locale.ROOT);
+                      int score = 0;
+                      if (containsAny(descriptor, "MENU", "FOMENU", "MAIN MENU")) score += 20;
+                      if (viewId.contains("menu")) score += 16;
+                      if (node.isClickable()) score += 5;
+                      if (hasClickableAncestor(node)) score += 2;
+                      if (score > bestScore) {
+                          bestScore = score;
+                          best = node;
+                      }
+                  }
+                  return bestScore >= 15 ? best : null;
+              }
+          
+              private AccessibilityNodeInfo findControlByKeywords(
+                      AccessibilityNodeInfo root,
+                      String... keywords) {
+                  List<AccessibilityNodeInfo> nodes = new ArrayList<>();
+                  collectNodes(root, nodes, 0);
+                  AccessibilityNodeInfo best = null;
+                  int bestScore = Integer.MIN_VALUE;
+                  for (AccessibilityNodeInfo node : nodes) {
+                      if (!node.isVisibleToUser()) continue;
+                      String descriptor = normalize(nodeDescriptor(node));
+                      if (descriptor.isEmpty()) continue;
+          
+                      int score = 0;
+                      for (String keyword : keywords) {
+                          String normalizedKeyword = normalize(keyword);
+                          if (descriptor.equals(normalizedKeyword)) score += 30;
+                          else if (descriptor.contains(normalizedKeyword)) score += 18;
+                      }
+                      if (node.isClickable()) score += 5;
+                      if (hasClickableAncestor(node)) score += 2;
+                      if (score > bestScore) {
+                          bestScore = score;
+                          best = node;
+                      }
+                  }
+                  return bestScore >= 18 ? best : null;
+              }
+          
+              private AccessibilityNodeInfo findBestAddressResult(AccessibilityNodeInfo root) {
+                  List<AccessibilityNodeInfo> nodes = new ArrayList<>();
+                  collectNodes(root, nodes, 0);
+                  AccessibilityNodeInfo best = null;
+                  int bestScore = Integer.MIN_VALUE;
+                  for (AccessibilityNodeInfo node : nodes) {
+                      if (!node.isVisibleToUser() || node.isEditable()) continue;
+                      String descriptor = normalize(nodeDescriptor(node));
+                      if (descriptor.length() < 3) continue;
+          
+                      int score = 0;
+                      if (pendingPostalCode != null && descriptor.contains(pendingPostalCode)) score += 30;
+                      for (String token : pendingAddressTokens) {
+                          if (descriptor.contains(token)) score += token.matches("\\d{4,5}") ? 12 : 4;
+                      }
+                      if (node.isClickable()) score += 6;
+                      if (hasClickableAncestor(node)) score += 3;
+                      if (containsAny(descriptor,
+                              "RECENT", "LEGUTOBBI", "CURRENT LOCATION", "AKTUALIS HELY")) score -= 20;
+          
+                      if (score > bestScore) {
+                          bestScore = score;
+                          best = node;
+                      }
+                  }
+                  return bestScore >= 12 ? best : null;
+              }
+          
+              private void collectNodes(
+                      AccessibilityNodeInfo node,
+                      List<AccessibilityNodeInfo> output,
+                      int depth) {
+                  if (node == null || depth > 70) return;
+                  output.add(node);
+                  for (int i = 0; i < node.getChildCount(); i++) {
+                      AccessibilityNodeInfo child = node.getChild(i);
+                      if (child != null) collectNodes(child, output, depth + 1);
+                  }
+              }
+          
+              private boolean setNodeText(AccessibilityNodeInfo node, String value) {
+                  try {
+                      node.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                      node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                      Bundle arguments = new Bundle();
+                      arguments.putCharSequence(
+                              AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                              value);
+                      return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments);
+                  } catch (RuntimeException ignored) {
+                      return false;
+                  }
+              }
+          
+              private boolean performImeEnter(AccessibilityNodeInfo editable) {
+                  if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false;
+                  try {
+                      return editable.performAction(
+                              AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.getId());
+                  } catch (RuntimeException ignored) {
+                      return false;
+                  }
+              }
+          
+              private boolean clickNodeOrAncestor(AccessibilityNodeInfo node) {
+                  AccessibilityNodeInfo current = node;
+                  for (int level = 0; current != null && level < 8; level++) {
+                      try {
+                          if (current.isVisibleToUser() && current.isClickable() &&
+                                  current.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                              return true;
+                          }
+                          AccessibilityNodeInfo parent = current.getParent();
+                          if (current != node) current.recycle();
+                          current = parent;
+                      } catch (RuntimeException ignored) {
+                          break;
+                      }
+                  }
+                  if (current != null && current != node) current.recycle();
+                  return false;
+              }
+          
+              private boolean hasClickableAncestor(AccessibilityNodeInfo node) {
+                  AccessibilityNodeInfo current = node.getParent();
+                  for (int level = 0; current != null && level < 6; level++) {
+                      if (current.isClickable()) {
+                          current.recycle();
+                          return true;
+                      }
+                      AccessibilityNodeInfo parent = current.getParent();
+                      current.recycle();
+                      current = parent;
+                  }
+                  return false;
+              }
+          
+              private void tapTomTomSearchArea() {
+                  if (windowManager == null) return;
+                  android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
+                  windowManager.getDefaultDisplay().getRealMetrics(metrics);
+                  float x = metrics.widthPixels * 0.50f;
+                  float y = Math.max(dp(76), metrics.heightPixels * 0.085f);
+                  dispatchTap(x, y);
+              }
+          
+              private void tapTomTomMenuArea() {
+                  if (windowManager == null) return;
+                  android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
+                  windowManager.getDefaultDisplay().getRealMetrics(metrics);
+                  dispatchTap(metrics.widthPixels * 0.08f, metrics.heightPixels * 0.91f);
+              }
+          
+              private void dispatchTap(float x, float y) {
+                  Path path = new Path();
+                  path.moveTo(x, y);
+                  GestureDescription.StrokeDescription stroke =
+                          new GestureDescription.StrokeDescription(path, 0, 80);
+                  GestureDescription gesture = new GestureDescription.Builder()
+                          .addStroke(stroke)
+                          .build();
+                  dispatchGesture(gesture, null, null);
+              }
+          
+              private String nodeDescriptor(AccessibilityNodeInfo node) {
+                  StringBuilder builder = new StringBuilder();
+                  append(builder, node.getText());
+                  append(builder, node.getContentDescription());
+                  append(builder, node.getHintText());
+                  append(builder, node.getPaneTitle());
+                  append(builder, node.getViewIdResourceName());
+                  return builder.toString();
+              }
+          
+              private void append(StringBuilder builder, CharSequence value) {
+                  if (value == null || value.length() == 0) return;
+                  if (builder.length() > 0) builder.append(' ');
+                  builder.append(value);
+              }
+          
+              private String textOf(CharSequence value) {
+                  return value == null ? "" : value.toString();
+              }
+          
+              private boolean containsAny(String value, String... needles) {
+                  for (String needle : needles) {
+                      if (value.contains(normalize(needle))) return true;
+                  }
+                  return false;
+              }
+          
+              private String extractPostalCode(String address) {
+                  Matcher matcher = POSTAL_CODE.matcher(address);
+                  return matcher.find() ? matcher.group() : null;
+              }
+          
+              private List<String> buildAddressTokens(String address) {
+                  String normalized = normalize(address);
+                  List<String> tokens = new ArrayList<>();
+                  for (String token : normalized.split("[^A-Z0-9]+")) {
+                      if (token.length() >= 3 && !COUNTRY_CODES.contains(token)) tokens.add(token);
+                  }
+                  return tokens;
+              }
+          
+              private void completeRouteAutomation() {
+                  int count = routePoints.size();
+                  Toast.makeText(this,
+                          count + " útvonalpont feldolgozása befejeződött.",
+                          Toast.LENGTH_LONG).show();
+                  clearAutomationState();
+                  finishProcessing();
+              }
+          
+              private void cancelAutomation(String message) {
+                  clearAutomationState();
+                  if (message != null && !message.isBlank()) {
+                      Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+                  }
+                  finishProcessing();
+              }
+          
+              private void clearAutomationState() {
+                  pendingAddress = null;
+                  pendingPostalCode = null;
+                  pendingAddressTokens = Collections.emptyList();
+                  routePoints.clear();
+                  nextStopIndex = -1;
+                  addingStop = false;
+                  automationStage = STAGE_NONE;
+                  automationAttempts = 0;
+                  automationScheduled = false;
+                  imeEnterSent = false;
+              }
+          
+              private void finishProcessing() {
+                  processing.set(false);
+                  updateFloatingMode();
+              }
+          
+              private List<String> readVisibleLinesSafely(String requiredPackage) {
+                  try {
+                      List<AccessibilityWindowInfo> windows = new ArrayList<>(getWindows());
+                      windows.sort(Comparator.comparingInt(AccessibilityWindowInfo::getLayer).reversed());
+                      for (AccessibilityWindowInfo window : windows) {
+                          AccessibilityNodeInfo root = window.getRoot();
+                          if (root == null) continue;
+                          try {
+                              CharSequence packageName = root.getPackageName();
+                              String packageText = packageName == null ? "" : packageName.toString();
+                              if (requiredPackage != null && !requiredPackage.equals(packageText)) continue;
+                              if (getPackageName().equals(packageText) ||
+                                      "com.android.systemui".equals(packageText) ||
+                                      TOMTOM_PACKAGE.equals(packageText)) {
+                                  continue;
+                              }
+                              List<String> lines = new ArrayList<>();
+                              collectVisibleText(root, lines, 0);
+                              if (!lines.isEmpty()) return deduplicateAdjacent(lines);
+                          } finally {
+                              root.recycle();
+                          }
+                      }
+                  } catch (RuntimeException ignored) {
+                  }
+                  return Collections.emptyList();
+              }
+          
+              private void collectVisibleText(
+                      AccessibilityNodeInfo node,
+                      List<String> output,
+                      int depth) {
+                  if (node == null || depth > 80) return;
+                  if (node.isVisibleToUser()) {
+                      addText(node.getText(), output);
+                      if (node.getText() == null || node.getText().length() == 0) {
+                          addText(node.getContentDescription(), output);
+                      }
+                  }
+                  for (int i = 0; i < node.getChildCount(); i++) {
+                      AccessibilityNodeInfo child = node.getChild(i);
+                      if (child != null) {
+                          try {
+                              collectVisibleText(child, output, depth + 1);
+                          } finally {
+                              child.recycle();
+                          }
+                      }
+                  }
+              }
+          
+              private void addText(CharSequence value, List<String> output) {
+                  if (value == null) return;
+                  String text = value.toString().replace('\u00A0', ' ').trim();
+                  if (text.isEmpty()) return;
+                  for (String part : text.split("\\r?\\n")) {
+                      String clean = part.replaceAll("\\s+", " ").trim();
+                      if (!clean.isEmpty()) output.add(clean);
+                  }
+              }
+          
+              private List<String> deduplicateAdjacent(List<String> source) {
+                  List<String> result = new ArrayList<>();
+                  String previous = null;
+                  for (String value : source) {
+                      if (!value.equals(previous)) result.add(value);
+                      previous = value;
+                  }
+                  return result;
+              }
+          
+              private List<String> parseStoredPoints(String stored) {
+                  List<String> points = new ArrayList<>();
+                  if (stored == null) return points;
+                  for (String line : stored.split("\\r?\\n")) {
+                      String clean = line.replaceFirst("^\\s*\\d{1,3}[.)-]\\s+", "")
+                              .replaceAll("\\s+", " ")
+                              .trim();
+                      if (!clean.isEmpty()) points.add(clean);
+                  }
+                  return uniquePoints(points);
+              }
+          
+              private List<String> uniquePoints(List<String> source) {
+                  Set<String> values = new LinkedHashSet<>();
+                  for (String value : source) {
+                      if (value != null && !value.isBlank()) values.add(value.trim());
+                  }
+                  return new ArrayList<>(values);
+              }
+          
+              private int dp(int value) {
+                  return Math.round(value * getResources().getDisplayMetrics().density);
+              }
+          
+              private static String normalize(String value) {
+                  if (value == null) return "";
+                  String decomposed = Normalizer.normalize(
+                          value.toUpperCase(Locale.ROOT),
+                          Normalizer.Form.NFD);
+                  return decomposed.replaceAll("\\p{M}+", "")
+                          .replaceAll("\\s+", " ")
+                          .trim();
+              }
+          
+              private final class FloatingTouchListener implements View.OnTouchListener {
+                  private int startX;
+                  private int startY;
+                  private float startRawX;
+                  private float startRawY;
+                  private long downTime;
+                  private boolean dragging;
+          
+                  @Override
+                  public boolean onTouch(View view, MotionEvent event) {
+                      switch (event.getActionMasked()) {
+                          case MotionEvent.ACTION_DOWN:
+                              startX = floatingParams.x;
+                              startY = floatingParams.y;
+                              startRawX = event.getRawX();
+                              startRawY = event.getRawY();
+                              downTime = SystemClock.uptimeMillis();
+                              dragging = false;
+                              return true;
+          
+                          case MotionEvent.ACTION_MOVE:
+                              float dx = event.getRawX() - startRawX;
+                              float dy = event.getRawY() - startRawY;
+                              long held = SystemClock.uptimeMillis() - downTime;
+                              if (!dragging && held >= 450 &&
+                                      (Math.abs(dx) > dp(24) || Math.abs(dy) > dp(24))) {
+                                  dragging = true;
+                              }
+                              if (dragging) {
+                                  floatingParams.x = Math.max(0, startX - Math.round(dx));
+                                  floatingParams.y = Math.max(0, startY + Math.round(dy));
+                                  windowManager.updateViewLayout(floatingButton, floatingParams);
+                              }
+                              return true;
+          
+                          case MotionEvent.ACTION_UP:
+                              if (!dragging) handleFloatingClick();
+                              return true;
+          
+                          case MotionEvent.ACTION_CANCEL:
+                              dragging = false;
+                              return true;
+          
+                          default:
+                              return true;
+                      }
+                  }
+              }
+          
+              private static final class OcrLine {
+                  final String text;
+                  final int top;
+                  final int left;
+          
+                  OcrLine(String text, int top, int left) {
+                      this.text = text;
+                      this.top = top;
+                      this.left = left;
+                  }
+              }
+          
+              private static final class AddressExtractor {
+                  private static final String[] ROUTE_STOP_WORDS = {
+                          "AUTRE", "COMPTE", "TEL", "TELEPHONE", "DOUANE",
+                          "PULPE", "MARCHANDISE", "PRODUIT", "GOODS", "WARE",
+                          "REFERENCE", "REF ", "KULDET ESEIM", "UJ KULDETES",
+                          "BEALLITASOK", "TAMOGATAS"
+                  };
+          
+                  private static final String[] MAP_UI_WORDS = {
+                          "UTVONALTERV", "INDULAS", "MENTES", "MENTVE", "NEVJEGY",
+                          "SZERKESZTES", "HIANYZO HELY", "TAVOLSAGMERES",
+                          "GOMBOSTU ELHELYEZVE", "HIBABEJELENTES", "DIJMENTESEN",
+                          "KOZELEBEN", "GOOGLE MAPS", "MENTETT HELYEK", "SAVED PLACES"
+                  };
+          
+                  private AddressExtractor() {
+                  }
+          
+                  static List<String> findRouteAddresses(List<String> originalLines) {
+                      return analyzeRoute(originalLines).addresses;
+                  }
+          
+                  static RouteCaptureResult analyzeRoute(List<String> originalLines) {
+                      List<String> lines = cleanLines(originalLines);
+                      if (lines.isEmpty()) {
+                          return new RouteCaptureResult(
+                                  Collections.emptyList(), null, -1);
+                      }
+          
+                      int pickupIndex = findMarkerIndex(lines, PICKUP_MARKERS, 0);
+                      int deliveryIndex = findMarkerIndex(lines, DELIVERY_MARKERS, 0);
+                      List<String> result = new ArrayList<>();
+                      String unresolvedQuery = null;
+                      int unresolvedIndex = -1;
+          
+                      if (pickupIndex >= 0) {
+                          int end = deliveryIndex > pickupIndex ? deliveryIndex : lines.size();
+                          String pickup = extractRouteBlock(lines, pickupIndex + 1, end);
+                          if (pickup != null) {
+                              result.add(pickup);
+                          } else {
+                              unresolvedQuery =
+                                      extractRouteSearchQuery(lines, pickupIndex + 1, end);
+                              unresolvedIndex = result.size();
+                          }
+                      }
+          
+                      if (deliveryIndex >= 0) {
+                          int nextPickup =
+                                  findMarkerIndex(lines, PICKUP_MARKERS, deliveryIndex + 1);
+                          int end = nextPickup > deliveryIndex ? nextPickup : lines.size();
+                          String delivery =
+                                  extractRouteBlock(lines, deliveryIndex + 1, end);
+                          if (delivery != null &&
+                                  !containsNormalized(result, delivery)) {
+                              result.add(delivery);
+                          } else if (delivery == null && unresolvedQuery == null) {
+                              unresolvedQuery =
+                                      extractRouteSearchQuery(lines, deliveryIndex + 1, end);
+                              unresolvedIndex = result.size();
+                          }
+                      }
+          
+                      return new RouteCaptureResult(
+                              result, unresolvedQuery, unresolvedIndex);
+                  }
+          
+                  static String findCoordinate(List<String> originalLines) {
+                      if (originalLines == null) return null;
+                      for (String line : originalLines) {
+                          String coordinate = coordinateFromText(clean(line));
+                          if (coordinate != null) return coordinate;
+                      }
+                      return coordinateFromText(String.join(" ", originalLines));
+                  }
+          
+                  static String findMapAddress(List<String> originalLines) {
+                      String coordinate = findCoordinate(originalLines);
+                      if (coordinate != null) return coordinate;
+          
+                      List<String> lines = cleanLines(originalLines);
+                      if (lines.isEmpty()) return null;
+          
+                      Candidate best = null;
+                      for (int i = 0; i < lines.size(); i++) {
+                          for (int count = 1; count <= 3 && i + count <= lines.size(); count++) {
+                              String joined = joinMapLines(lines, i, count);
+                              Candidate candidate = scoreMapAddress(joined, i);
+                              if (candidate != null &&
+                                      (best == null || candidate.score > best.score)) {
+                                  best = candidate;
+                              }
+                          }
+                      }
+                      return best == null ? null : best.address;
+                  }
+          
+                  private static String extractRouteBlock(List<String> lines, int start, int end) {
+                      List<String> parts = new ArrayList<>();
+                      int safeStart = Math.max(0, start);
+                      int safeEnd = Math.min(lines.size(), Math.max(safeStart, end));
+          
+                      for (int i = safeStart; i < safeEnd && parts.size() < 6; i++) {
+                          String raw = clean(lines.get(i));
+                          String normalized = normalize(raw);
+                          if (raw.isEmpty()) continue;
+                          if (isMarker(normalized)) {
+                              if (!parts.isEmpty()) break;
+                              continue;
+                          }
+                          if (isHardRouteStop(raw, normalized)) {
+                              if (!parts.isEmpty()) break;
+                              continue;
+                          }
+                          if (isGeneralNoise(normalized)) continue;
+                          parts.add(raw);
+                      }
+          
+                      String joined = stripLeadingCompany(joinParts(parts));
+                      if (isUsableRouteAddress(joined)) return normalizeAddress(joined);
+          
+                      Candidate fallback = findBestRouteCandidate(lines, safeStart, safeEnd);
+                      return fallback == null ? null : fallback.address;
+                  }
+          
+                  private static String extractRouteSearchQuery(
+                          List<String> lines,
+                          int start,
+                          int end) {
+                      List<String> parts = new ArrayList<>();
+                      int safeStart = Math.max(0, start);
+                      int safeEnd = Math.min(lines.size(), Math.max(safeStart, end));
+          
+                      for (int i = safeStart; i < safeEnd && parts.size() < 6; i++) {
+                          String raw = clean(lines.get(i));
+                          String normalized = normalize(raw);
+                          if (raw.isEmpty()) continue;
+                          if (isMarker(normalized)) {
+                              if (!parts.isEmpty()) break;
+                              continue;
+                          }
+                          if (isHardRouteStop(raw, normalized)) {
+                              if (!parts.isEmpty()) break;
+                              continue;
+                          }
+                          if (isGeneralNoise(normalized)) continue;
+                          parts.add(raw);
+                      }
+          
+                      String query = joinParts(parts);
+                      return query.length() >= 4 ? query : null;
+                  }
+          
+                  private static Candidate findBestRouteCandidate(
+                          List<String> lines,
+                          int start,
+                          int end) {
+                      Candidate best = null;
+                      for (int i = start; i < end; i++) {
+                          for (int count = 1; count <= 5 && i + count <= end; count++) {
+                              String joined = joinRouteLines(lines, i, count);
+                              Candidate candidate = scoreRouteAddress(joined, i - start);
+                              if (candidate != null &&
+                                      (best == null || candidate.score > best.score)) {
+                                  best = candidate;
+                              }
+                          }
+                      }
+                      return best;
+                  }
+          
+                  private static String joinRouteLines(List<String> lines, int start, int count) {
+                      List<String> parts = new ArrayList<>();
+                      int end = Math.min(lines.size(), start + count);
+                      for (int i = start; i < end; i++) {
+                          String raw = clean(lines.get(i));
+                          String normalized = normalize(raw);
+                          if (raw.isEmpty() || isMarker(normalized) || isGeneralNoise(normalized)) continue;
+                          if (isHardRouteStop(raw, normalized)) break;
+                          parts.add(raw);
+                      }
+                      return joinParts(parts);
+                  }
+          
+                  private static String joinMapLines(List<String> lines, int start, int count) {
+                      List<String> parts = new ArrayList<>();
+                      int end = Math.min(lines.size(), start + count);
+                      for (int i = start; i < end; i++) {
+                          String raw = clean(lines.get(i));
+                          String normalized = normalize(raw);
+                          if (raw.isEmpty() || isMapUiNoise(normalized) || hasTimeOrDate(raw)) break;
+                          parts.add(raw);
+                      }
+                      return joinParts(parts);
+                  }
+          
+                  private static String joinParts(List<String> parts) {
+                      StringBuilder builder = new StringBuilder();
+                      String previousRaw = null;
+                      String previousNormalized = null;
+                      for (String part : parts) {
+                          String current = clean(part);
+                          if (current.isEmpty()) continue;
+                          String currentNormalized = normalize(current);
+                          if (currentNormalized.equals(previousNormalized)) continue;
+                          if (isRepeatedContinuation(previousRaw, current)) {
+                              while (builder.length() > 0 &&
+                                      (builder.charAt(builder.length() - 1) == '-' ||
+                                              Character.isWhitespace(builder.charAt(builder.length() - 1)))) {
+                                  builder.setLength(builder.length() - 1);
+                              }
+                              previousRaw = current;
+                              previousNormalized = currentNormalized;
+                              continue;
+                          }
+          
+                          if (builder.length() > 0) {
+                              builder.append(continuesPreviousLine(previousRaw, current)
+                                      ? " "
+                                      : ", ");
+                          }
+                          builder.append(current);
+                          previousRaw = current;
+                          previousNormalized = currentNormalized;
+                      }
+                      return normalizeAddress(builder.toString());
+                  }
+          
+                  private static boolean isRepeatedContinuation(String previous, String current) {
+                      if (previous == null || current == null) return false;
+                      String previousCore = normalize(previous).replaceAll("[^A-Z0-9]+$", "");
+                      String currentCore = normalize(current).replaceAll("[^A-Z0-9]+$", "");
+                      return currentCore.length() >= 4 && previousCore.endsWith(currentCore);
+                  }
+          
+                  private static boolean continuesPreviousLine(String previous, String current) {
+                      if (previous == null || current == null) return false;
+                      String previousNormalized = normalize(previous);
+                      String currentNormalized = normalize(current);
+                      if (previous.trim().endsWith("-")) return true;
+                      return POSTAL_CODE.matcher(previous).find() &&
+                              !containsCountryCode(previousNormalized) &&
+                              containsCountryCode(currentNormalized);
+                  }
+          
+                  private static Candidate scoreRouteAddress(String raw, int distance) {
+                      String value = stripLeadingCompany(normalizeAddress(raw));
+                      if (!isUsableRouteAddress(value) || hasTimeOrDate(value)) return null;
+          
+                      String normalized = normalize(value);
+                      int score = 20;
+                      if (POSTAL_CODE.matcher(value).find()) score += 12;
+                      if (containsCountryCode(normalized)) score += 10;
+                      if (containsStreetHint(normalized)) score += 8;
+                      if (value.contains(",")) score += 4;
+                      score -= Math.min(distance, 10);
+                      return new Candidate(value, score);
+                  }
+          
+                  private static Candidate scoreMapAddress(String raw, int distance) {
+                      String value = normalizeAddress(raw);
+                      if (value.length() < 4 || value.length() > 180 || hasTimeOrDate(value)) return null;
+          
+                      String normalized = normalize(value);
+                      if (isMapUiNoise(normalized) || isGeneralNoise(normalized)) return null;
+          
+                      boolean hasPostal = POSTAL_CODE.matcher(value).find();
+                      boolean hasCountry = containsCountryCode(normalized);
+                      boolean hasStreet = containsStreetHint(normalized);
+                      boolean hasHouse = HOUSE_NUMBER.matcher(value).find();
+                      if (!hasPostal && !(hasStreet && hasHouse)) return null;
+          
+                      int score = 0;
+                      if (hasPostal) score += 16;
+                      if (hasCountry) score += 8;
+                      if (hasStreet) score += 7;
+                      if (hasHouse) score += 3;
+                      if (value.contains(",")) score += 2;
+                      score -= Math.min(distance, 12);
+                      return new Candidate(value, score);
+                  }
+          
+                  private static String stripLeadingCompany(String value) {
+                      String cleanValue = normalizeAddress(value == null ? "" : value);
+                      if (cleanValue.isEmpty()) return cleanValue;
+          
+                      String coordinate = coordinateFromText(cleanValue);
+                      if (coordinate != null) return coordinate;
+          
+                      Pattern streetStart = Pattern.compile(
+                              "(?iu)\\b(?:route|rue|avenue|av\\.?|boulevard|chemin|impasse|"
+                                      + "quai|place|all[ée]e|voie|street|road|lane|drive|"
+                                      + "strasse|stra[ßs]e|weg|platz|gasse|ring|"
+                                      + "straat|laan|weg|via|viale|corso|piazza|"
+                                      + "utca|[úu]t|[úu]tja|t[ée]r|k[öo]r[úu]t)\\b");
+                      Matcher matcher = streetStart.matcher(cleanValue);
+                      if (!matcher.find()) return cleanValue;
+          
+                      int start = matcher.start();
+                      String prefix = cleanValue.substring(0, start).trim();
+                      Matcher houseBeforeStreet =
+                              Pattern.compile("(\\d{1,5}[A-Za-z]?)\\s*$").matcher(prefix);
+                      if (houseBeforeStreet.find()) {
+                          start = houseBeforeStreet.start();
+                      }
+          
+                      return normalizeAddress(cleanValue.substring(start));
+                  }
+          
+                  private static boolean isUsableRouteAddress(String value) {
+                      if (value == null || value.length() < 7 || value.length() > 240) return false;
+                      String coordinate = coordinateFromText(value);
+                      if (coordinate != null) return true;
+          
+                      String normalized = normalize(value);
+                      boolean hasPostal = POSTAL_CODE.matcher(value).find();
+                      boolean hasCountry = containsCountryCode(normalized);
+                      boolean hasStreet = containsStreetHint(normalized);
+                      return hasPostal && hasStreet;
+                  }
+          
+                  private static String coordinateFromText(String value) {
+                      if (value == null || value.isBlank()) return null;
+                      Matcher matcher = COORDINATE.matcher(value.replace('−', '-'));
+                      while (matcher.find()) {
+                          try {
+                              double latitude = Double.parseDouble(matcher.group(1));
+                              double longitude = Double.parseDouble(matcher.group(2));
+                              if (latitude >= -90.0 && latitude <= 90.0 &&
+                                      longitude >= -180.0 && longitude <= 180.0) {
+                                  return matcher.group(1) + " " + matcher.group(2);
+                              }
+                          } catch (NumberFormatException ignored) {
+                          }
+                      }
+                      return null;
+                  }
+          
+                  private static List<String> cleanLines(List<String> originalLines) {
+                      if (originalLines == null || originalLines.isEmpty()) {
+                          return Collections.emptyList();
+                      }
+                      List<String> lines = new ArrayList<>();
+                      for (String line : originalLines) {
+                          String clean = clean(line);
+                          if (!clean.isEmpty() &&
+                                  !"TT".equalsIgnoreCase(clean) &&
+                                  !"+".equals(clean) &&
+                                  !"…".equals(clean)) {
+                              lines.add(clean);
+                          }
+                      }
+                      return lines;
+                  }
+          
+                  private static int findMarkerIndex(
+                          List<String> lines,
+                          List<String> markers,
+                          int start) {
+                      for (int i = Math.max(0, start); i < lines.size(); i++) {
+                          String normalized = normalize(lines.get(i));
+                          for (String marker : markers) {
+                              if (normalized.equals(marker) ||
+                                      normalized.startsWith(marker + " ") ||
+                                      normalized.contains(" " + marker + " ")) {
+                                  return i;
+                              }
+                          }
+                      }
+                      return -1;
+                  }
+          
+                  private static boolean isMarker(String normalized) {
+                      for (String marker : PICKUP_MARKERS) {
+                          if (normalized.equals(marker) || normalized.startsWith(marker + " ")) return true;
+                      }
+                      for (String marker : DELIVERY_MARKERS) {
+                          if (normalized.equals(marker) || normalized.startsWith(marker + " ")) return true;
+                      }
+                      return false;
+                  }
+          
+                  private static boolean isHardRouteStop(String raw, String normalized) {
+                      if (hasTimeOrDate(raw)) return true;
+                      for (String word : ROUTE_STOP_WORDS) {
+                          if (normalized.equals(word) || normalized.startsWith(word + " ") ||
+                                  normalized.contains(" " + word + " ")) {
+                              return true;
+                          }
+                      }
+                      return false;
+                  }
+          
+                  private static boolean hasTimeOrDate(String value) {
+                      return TIME_VALUE.matcher(value).find() || YEAR_VALUE.matcher(value).find();
+                  }
+          
+                  private static boolean isGeneralNoise(String normalized) {
+                      return normalized.isEmpty() ||
+                              normalized.contains("BEFEJEZETT") ||
+                              normalized.contains("FOLYAMATBAN") ||
+                              normalized.contains("FRISSITES") ||
+                              normalized.contains("KULDETESEIM") ||
+                              normalized.contains("UJ KULDETES") ||
+                              normalized.contains("BEALLITASOK") ||
+                              normalized.contains("TAMOGATAS");
+                  }
+          
+                  private static boolean isMapUiNoise(String normalized) {
+                      if (isGeneralNoise(normalized)) return true;
+                      for (String word : MAP_UI_WORDS) {
+                          if (normalized.equals(word) || normalized.startsWith(word + " ") ||
+                                  normalized.contains(" " + word + " ")) {
+                              return true;
+                          }
+                      }
+                      return false;
+                  }
+          
+                  private static boolean containsNormalized(List<String> values, String candidate) {
+                      String normalizedCandidate = normalize(candidate);
+                      for (String value : values) {
+                          if (normalize(value).equals(normalizedCandidate)) return true;
+                      }
+                      return false;
+                  }
+          
+                  private static boolean containsCountryCode(String normalized) {
+                      String[] tokens = normalized.split("[^A-Z]+");
+                      for (int i = tokens.length - 1; i >= 0; i--) {
+                          if (tokens[i].isEmpty()) continue;
+                          return COUNTRY_CODES.contains(tokens[i]);
+                      }
+                      return false;
+                  }
+          
+                  private static boolean containsStreetHint(String normalized) {
+                      String padded = " " + normalized + " ";
+                      String[] hints = {
+                              " RUE ", " AVENUE ", " ROUTE ", " CHEMIN ", " QUAI ", " IMPASSE ",
+                              " STRASSE ", " STR. ", " WEG ", " PLATZ ", " GASSE ", " ALLEE ",
+                              " UTCA ", " UT ", " TER ", " KORUT ", " TANYA ",
+                              " STREET ", " ROAD ", " LANE ", " DRIVE ",
+                              " KAAI ", " LAAN ", " STRAAT ", " VIA ", " PIAZZA "
+                      };
+                      for (String hint : hints) {
+                          if (padded.contains(hint)) return true;
+                      }
+                      return false;
+                  }
+          
+                  private static String normalizeAddress(String value) {
+                      return clean(value)
+                              .replaceAll("\\s*,\\s*", ", ")
+                              .replaceAll("(?:,\\s*){2,}", ", ")
+                              .replaceAll("^[,;: -]+|[,;: -]+$", "")
+                              .trim();
+                  }
+          
+                  private static String clean(String value) {
+                      if (value == null) return "";
+                      return value.replace('\u00A0', ' ')
+                              .replaceAll("\\s+", " ")
+                              .trim();
+                  }
+          
+                  private static final class RouteCaptureResult {
+                      final List<String> addresses;
+                      final String unresolvedQuery;
+                      final int unresolvedIndex;
+          
+                      RouteCaptureResult(
+                              List<String> addresses,
+                              String unresolvedQuery,
+                              int unresolvedIndex) {
+                          this.addresses = new ArrayList<>(addresses);
+                          this.unresolvedQuery = unresolvedQuery;
+                          this.unresolvedIndex = unresolvedIndex;
+                      }
+                  }
+          
+                  private static final class Candidate {
+                      final String address;
+                      final int score;
+          
+                      Candidate(String address, int score) {
+                          this.address = address;
+                          this.score = score;
+                      }
+                  }
+              }
+          }
+          EOF
+
+      - name: Verify V020 TomTom project
+        run: |
+          grep -F 'rootProject.name = "TomTomKiszolgaloV020"' settings.gradle.kts
+          grep -F 'versionCode = 20' app/build.gradle.kts
+          grep -F 'versionName = "020"' app/build.gradle.kts
+          grep -F 'TomTom Kiszolgáló V020' app/src/main/AndroidManifest.xml
+          grep -F 'private static final String VERSION = "V020";' app/src/main/java/hu/pocsaji/tomtomkiszolgalo/MainActivity.java
+          grep -F 'private static final String VERSION = "V020";' app/src/main/java/hu/pocsaji/tomtomkiszolgalo/TomTomAccessibilityService.java
+          grep -F 'private static final String VERSION = "V020";' app/src/main/java/hu/pocsaji/tomtomkiszolgalo/PlanTomTomActivity.java
+          grep -F 'MAX_ROUTE_POINTS = 30' app/src/main/java/hu/pocsaji/tomtomkiszolgalo/PlanTomTomActivity.java
+          grep -F 'sorted:(' app/src/main/java/hu/pocsaji/tomtomkiszolgalo/PlanTomTomActivity.java
+          grep -F 'com.android.chrome' app/src/main/java/hu/pocsaji/tomtomkiszolgalo/PlanTomTomActivity.java
+          grep -F 'geocodeAddress' app/src/main/java/hu/pocsaji/tomtomkiszolgalo/PlanTomTomActivity.java
+          grep -F 'Export → megállók küldése a készülékre' app/src/main/java/hu/pocsaji/tomtomkiszolgalo/PlanTomTomActivity.java
+          grep -F 'return matcher.group(1) + " " + matcher.group(2);' app/src/main/java/hu/pocsaji/tomtomkiszolgalo/TomTomAccessibilityService.java
+          grep -F 'openGoogleMapsSearch' app/src/main/java/hu/pocsaji/tomtomkiszolgalo/TomTomAccessibilityService.java
+          grep -F 'stripLeadingCompany' app/src/main/java/hu/pocsaji/tomtomkiszolgalo/TomTomAccessibilityService.java
+          test "$(grep -R -F -c 'replaceFirst("^\\s*\\d{1,3}[.)-]\\s+", "")' app/src/main/java/hu/pocsaji/tomtomkiszolgalo/*.java | awk -F: '{s+=$2} END {print s+0}')" -eq 2
+          ! grep -R -F 'replaceAll("^\\s*\\d+[.)-]?\\s*", "")' app/src/main/java/hu/pocsaji/tomtomkiszolgalo
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.13
+
+      - name: Prepare release signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64" || (echo "Missing ANDROID_KEYSTORE_BASE64" && exit 1)
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || (echo "Missing ANDROID_KEYSTORE_PASSWORD" && exit 1)
+          test -n "$ANDROID_KEY_ALIAS" || (echo "Missing ANDROID_KEY_ALIAS" && exit 1)
+          test -n "$ANDROID_KEY_PASSWORD" || (echo "Missing ANDROID_KEY_PASSWORD" && exit 1)
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > release-key.jks
+          cat > keystore.properties <<EOF
+          storeFile=release-key.jks
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
+
+      - name: Build signed TomTom Kiszolgalo V020 APK and AAB
+        run: gradle assembleRelease bundleRelease --stacktrace
+
+      - name: Collect V020 release files
+        run: |
+          mkdir -p artifact
+          cp app/build/outputs/apk/release/app-release.apk artifact/TomTom_Kiszolgalo_V020.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifact/TomTom_Kiszolgalo_V020.aab
+          ls -lah artifact
+
+      - name: Upload TomTom Kiszolgalo V020
+        uses: actions/upload-artifact@v4
+        with:
+          name: TomTom_Kiszolgalo_V020
+          path: |
+            artifact/TomTom_Kiszolgalo_V020.apk
+            artifact/TomTom_Kiszolgalo_V020.aab
+          if-no-files-found: error
